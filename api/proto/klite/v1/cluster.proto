@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package klite.v1;
+
+import "klite/v1/objects.proto";
+
+option go_package = "github.com/schew2381/k-lite/internal/gen/klitev1;klitev1";
+
+// ClusterService is what the CLI (and the REST facade internally) speaks.
+service ClusterService {
+  rpc Apply(ApplyRequest) returns (ApplyResponse);
+  rpc List(ListRequest) returns (ListResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  rpc Watch(WatchRequest) returns (stream WatchEvent);
+  rpc Scale(ScaleRequest) returns (ScaleResponse);
+  rpc Drain(DrainRequest) returns (stream DrainProgress);
+  rpc Logs(LogsRequest) returns (stream LogChunk);
+  rpc PolicyCheck(PolicyCheckRequest) returns (PolicyCheckResponse);
+  rpc NodeToken(NodeTokenRequest) returns (NodeTokenResponse);
+}
+
+message ApplyRequest {
+  bytes yaml = 1; // multi-document
+}
+
+message ApplyResult {
+  string kind = 1;
+  string name = 2;
+  string action = 3; // created | updated | unchanged | deleted
+  string error = 4;
+}
+
+message ApplyResponse {
+  repeated ApplyResult results = 1;
+}
+
+message ListRequest {
+  string kind = 1; // workloads | services | nodes | networkpolicies | instances
+  string name = 2; // optional: single object
+}
+
+message ListResponse {
+  repeated Object objects = 1;
+}
+
+message DeleteRequest {
+  string kind = 1;
+  string name = 2;
+  bytes yaml = 3; // alternative to kind+name, backs `klite delete -f`
+}
+
+message DeleteResponse {
+  repeated ApplyResult results = 1;
+}
+
+message WatchRequest {
+  repeated string kinds = 1; // empty means all
+  int64 from_revision = 2;
+}
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_ADDED = 1;
+  EVENT_TYPE_MODIFIED = 2;
+  EVENT_TYPE_DELETED = 3;
+}
+
+message WatchEvent {
+  EventType type = 1;
+  Object object = 2;
+  int64 revision = 3;
+}
+
+message ScaleRequest {
+  string workload = 1;
+  int32 replicas = 2;
+}
+
+message ScaleResponse {}
+
+message DrainRequest {
+  string node = 1;
+  bool force = 2;
+}
+
+// Streamed so the CLI can show per-instance phases, nomad-style.
+message DrainProgress {
+  string message = 1;
+  bool done = 2;
+}
+
+message LogsRequest {
+  string instance = 1;
+  bool follow = 2;
+  int32 tail = 3;
+}
+
+message LogChunk {
+  bytes data = 1;
+}
+
+message PolicyCheckRequest {
+  string from = 1;
+  string to = 2;
+}
+
+message PolicyCheckResponse {
+  bool allowed = 1;
+  string matched_policy = 2;
+  string reason = 3;
+}
+
+message NodeTokenRequest {}
+
+message NodeTokenResponse {
+  string token = 1;
+}

@@ -23,7 +23,16 @@ proto:
 
 test:
 	go vet ./...
-	go test -race ./...
+	go test -race -count=1 -shuffle=on ./...
+
+lint:
+	golangci-lint run ./...
+
+fmt:
+	gofumpt -l -w cmd internal/cli internal/object internal/store internal/leader internal/server internal/scheduler internal/controller internal/runtime internal/agent internal/netd internal/policy internal/xds internal/wire 2>/dev/null || gofumpt -l -w .
+
+precommit:
+	prek run --all-files
 
 ui:
 	cd ui && npm ci && npm run build

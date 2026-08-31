@@ -1,0 +1,141 @@
+syntax = "proto3";
+
+package klite.v1;
+
+import "klite/v1/objects.proto";
+
+option go_package = "github.com/schew2381/k-lite/internal/gen/klitev1;klitev1";
+
+// AgentService is agent-initiated only. The server never dials a node (ADR 0004).
+service AgentService {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc WatchDesired(WatchDesiredRequest) returns (stream DesiredState);
+  rpc ReportStatus(ReportStatusRequest) returns (ReportStatusResponse);
+  rpc StreamCommands(StreamCommandsRequest) returns (stream Command);
+  rpc PushCommandOutput(stream CommandOutput) returns (PushCommandOutputResponse);
+}
+
+message RegisterRequest {
+  string node = 1;
+  string cluster_token = 2;
+  bytes csr_pem = 3; // empty until mTLS lands (ADR 0013, M8)
+}
+
+message NetBootstrap {
+  string subnet = 1;       // 10.44.0.0/16
+  string klite_net_ip = 2; // 10.44.0.10 + node_index
+  string vip_range = 3;    // 10.44.64.0/18
+  int32 node_index = 4;
+}
+
+message RegisterResponse {
+  string node_token = 1; // pre-mTLS credential
+  bytes cert_pem = 2;    // M8
+  bytes ca_pem = 3;      // M8
+  NetBootstrap net = 4;
+}
+
+message WatchDesiredRequest {
+  string node = 1;
+  int64 last_applied_revision = 2; // resume point after reconnect
+}
+
+message DesiredState {
+  int64 revision = 1;
+  repeated Instance instances = 2; // full snapshot for this node
+  NetDesired net = 3;
+}
+
+message ServiceVIP {
+  string service = 1;
+  string vip = 2; // this node's VIP for the service (ADR 0006)
+  int32 port = 3;
+  int32 target_port = 4;
+}
+
+enum EndpointHealth {
+  ENDPOINT_HEALTH_UNSPECIFIED = 0;
+  ENDPOINT_HEALTH_READY = 1;
+  ENDPOINT_HEALTH_DRAINING = 2;
+}
+
+message Endpoint {
+  string ip = 1;
+  int32 port = 2;
+  string node = 3; // carried for the future cross-machine dialer (ADR 0016)
+  EndpointHealth health = 4;
+}
+
+message EndpointGroup {
+  string service = 1;
+  repeated Endpoint endpoints = 2;
+}
+
+// The policy table arrives pre-resolved so klite-net and Envoy RBAC
+// never need to see raw NetworkPolicy objects.
+message CompiledPolicy {
+  PolicyAction action = 1;
+  string from = 2;
+  string to = 3;
+  repeated string except = 4;
+  string policy_name = 5;
+}
+
+message NetDesired {
+  repeated ServiceVIP services = 1;
+  repeated EndpointGroup endpoints = 2;
+  map<string, string> ip_identity = 3; // instance IP -> service name
+  repeated CompiledPolicy policies = 4;
+}
+
+message InstanceStatusUpdate {
+  string name = 1;
+  string uid = 2;
+  InstanceStatus status = 3;
+}
+
+message KliteNetStatus {
+  bool healthy = 1;
+  int32 admin_port = 2; // 127.0.0.1-published admin port on the host
+}
+
+// Unary on purpose: a client stream would hide send failures until the
+// next Recv (research/grpc-go.md). Doubles as the 5s heartbeat.
+message ReportStatusRequest {
+  string node = 1;
+  repeated InstanceStatusUpdate instances = 2;
+  KliteNetStatus klite_net = 3;
+}
+
+message ReportStatusResponse {}
+
+message StreamCommandsRequest {
+  string node = 1;
+}
+
+message LogsCommand {
+  string instance = 1;
+  bool follow = 2;
+  int32 tail = 3;
+}
+
+message StopCommand {
+  string command_id = 1;
+}
+
+message Command {
+  string id = 1;
+  oneof cmd {
+    LogsCommand logs = 2;
+    StopCommand stop = 3;
+  }
+}
+
+// One client-stream per command, correlated by command_id.
+message CommandOutput {
+  string command_id = 1;
+  bytes data = 2;
+  bool eof = 3;
+}
+
+message PushCommandOutputResponse {}

@@ -54,7 +54,7 @@ type topology struct {
 }
 
 func main() {
-	backend := flag.String("backend", "", "backend as host:port; the sole EDS endpoint of cluster b")
+	backend := flag.String("backend", "", "backend as host:port, the sole EDS endpoint of cluster b")
 	clientIP := flag.String("client-ip", "", "source IP the phase-2 RBAC filter denies")
 	listen := flag.String("listen", "0.0.0.0:18000", "listen address for the ADS gRPC server")
 	nodeID := flag.String("node", "spike-node", "Envoy node id the snapshots are keyed on")
@@ -97,8 +97,8 @@ func main() {
 		if err := snap.Consistent(); err != nil {
 			return fmt.Errorf("inconsistent snapshot: %w", err)
 		}
-		// Distinct version per phase; Envoy ignores a snapshot whose version
-		// matches the one it already ACKed.
+		// Each phase gets its own version, since Envoy ignores a snapshot
+		// whose version matches the one it already ACKed.
 		if err := snapCache.SetSnapshot(context.Background(), *nodeID, snap); err != nil {
 			return fmt.Errorf("set snapshot: %w", err)
 		}
@@ -195,7 +195,7 @@ func makeEndpoints(t topology) *endpointv3.ClusterLoadAssignment {
 
 // makeListener builds the vip-b listener: optional RBAC filter, then
 // tcp_proxy to cluster b. Freebind (IP_FREEBIND) lets the socket bind before
-// the VIP exists on any interface; run.sh adds the address to eth0 only after
+// the VIP exists on any interface. run.sh adds the address to eth0 only after
 // Envoy reports the listener active, so a working bind proves freebind took
 // effect.
 func makeListener(t topology, withRBAC bool) (*listenerv3.Listener, error) {

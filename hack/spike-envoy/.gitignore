@@ -1,0 +1,5 @@
+xds-server
+*.log
+*.pid
+.phase-pipe
+.hammer.log

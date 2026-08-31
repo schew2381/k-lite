@@ -17,3 +17,7 @@ Each node runs an upstream Envoy programmed by `klited` over xDS via go-control-
 - Debugging moves to `envoy config_dump` and admin stats. We trade readable homegrown code for industrial behavior, eyes open.
 - The infra pod (ADR 0008) exists partly so Envoy can bind VIPs before they exist on the interface. The listener `freebind` option makes bind order irrelevant.
 - If the spike fails, we fall back to option 1, mark this ADR superseded, and re-cut the milestones.
+
+## Outcome
+
+The gate passed on 2026-08-31 (`hack/spike-envoy/`). Envoy v1.31.5 on colima/arm64 took CDS/EDS/LDS over one ADS stream from a host-side go-control-plane server, bound a VIP listener through `freebind` before the address existed, and applied a targeted RBAC deny hitlessly (43 allowed, 2 denied, zero misses under load). The fallback stays recorded but unused. M4 inherits three constraints from the run: netns-scoped config belongs on the donor container, the xDS bootstrap cluster needs explicit HTTP/2 typed options with the node id matching the snapshot key exactly, and health checks must gate on `lds.update_success` rather than `connected_state`.

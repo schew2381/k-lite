@@ -1,0 +1,60 @@
+version: "2"
+run:
+  concurrency: 4
+  tests: true
+linters:
+  default: none
+  enable:
+    - cyclop
+    - errcheck
+    - errorlint
+    - gocritic
+    - gosec
+    - govet
+    - ineffassign
+    - nilerr
+    - revive
+    - staticcheck
+    - unused
+  settings:
+    cyclop:
+      max-complexity: 15
+    gocritic:
+      enabled-checks:
+        - hugeParam
+    gosec:
+      excludes:
+        - G115
+        - G602
+    revive:
+      rules:
+        - name: unused-parameter
+          disabled: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+        path: _test\.go
+      - linters:
+          - gosec
+        path: _test\.go
+        text: G306|G404
+    paths:
+      - internal/gen/
+      - hack/
+      - ui/
+formatters:
+  enable:
+    - gofumpt
+  exclusions:
+    generated: lax
+    paths:
+      - internal/gen/
+      - hack/
+      - ui/

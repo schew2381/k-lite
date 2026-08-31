@@ -18,5 +18,6 @@ A rolling update is the same dance one instance at a time. `klite drain <node>` 
 ## Consequences
 
 - Endpoints carry a state machine (Ready, then Draining, then gone) that flows through EDS, so Envoy stops picking Draining endpoints for new connections.
+- Every Envoy cluster sets `healthy_panic_threshold: 0`. The default 50% panic mode ignores health the moment one endpoint of two drains, which would send fresh connections to the instance we're retiring (research/envoy-xds.md).
 - The scheduler places surge instances with the draining node already excluded.
 - The two timeouts live in Workload YAML under `drain:`, so a demo can shrink them for pace without touching code.

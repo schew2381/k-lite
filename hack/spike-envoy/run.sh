@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Spike 2 for ADR 0007: prove that an Envoy container joined to another
-# container's network namespace can take LDS/CDS/EDS from a control plane on
-# the macOS host, bind a VIP listener via freebind, proxy TCP, and apply an
-# RBAC filter swap without dropping bystander traffic.
+# container's network namespace can
+#   - take LDS/CDS/EDS from a control plane on the macOS host
+#   - bind a VIP listener via freebind
+#   - proxy TCP
+#   - apply an RBAC filter swap without dropping bystander traffic
 #
 # Usage:
 #   ./run.sh        run all three phases, exit nonzero on any failure
@@ -64,9 +66,15 @@ if [ "${1:-}" = "down" ]; then
 fi
 
 ip_of()      { docker inspect -f "{{(index .NetworkSettings.Networks \"$NET\").IPAddress}}" "$1"; }
-admin_get()  { # GET an Envoy admin path; curl inside spike-envoy, wget in the shared netns as fallback
-  docker exec spike-envoy curl -sf "http://127.0.0.1:9901$1" 2>/dev/null \
-    || docker exec spike-netns wget -qO- -T 2 "http://127.0.0.1:9901$1" 2>/dev/null
+admin_get()  { # GET an Envoy admin path with curl inside spike-envoy, falling back to wget in the shared netns
+  # The envoyproxy/envoy:v1.31.5 image ships no curl, so the fallback does
+  # the real work. Buffering keeps docker's exec error off our stdout.
+  local out
+  if out="$(docker exec spike-envoy curl -sf "http://127.0.0.1:9901$1" 2>/dev/null)"; then
+    printf '%s' "$out"
+  else
+    docker exec spike-netns wget -qO- -T 2 "http://127.0.0.1:9901$1" 2>/dev/null
+  fi
 }
 stat_value() { admin_get /stats | grep "^$1: " | head -1 | awk '{print $2}'; }
 client_get() { docker exec "$1" wget -qO- -T 5 "http://$VIP:$VIP_PORT" 2>/dev/null; }
@@ -115,7 +123,7 @@ CLIENT_IP="$(ip_of spike-client)"
 CLIENT2_IP="$(ip_of spike-client2)"
 note "whoami=$WHOAMI_IP client=$CLIENT_IP client2=$CLIENT2_IP"
 if [ -z "$WHOAMI_IP" ] || [ -z "$CLIENT_IP" ] || [ -z "$CLIENT2_IP" ]; then
-  echo "FATAL: could not read container IPs" >&2
+  echo "FATAL: couldn't read container IPs" >&2
   exit 1
 fi
 
@@ -127,14 +135,14 @@ mkfifo "$PIPE"
 "$SPIKE_DIR/xds-server" -backend "$WHOAMI_IP:80" -client-ip "$CLIENT_IP" \
   <"$PIPE" >"$SERVER_LOG" 2>&1 &
 echo $! >"$PIDFILE"
-exec 3>"$PIPE" # keep the write end open; the server exits on stdin EOF
+exec 3>"$PIPE" # keep the write end open, since the server exits on stdin EOF
 XDS_UP=0
 for i in $(seq 1 20); do
   nc -z 127.0.0.1 "$XDS_PORT" >/dev/null 2>&1 && { XDS_UP=1; break; }
   sleep 0.5
 done
 if [ "$XDS_UP" != 1 ]; then
-  echo "FATAL: xDS server not listening on :$XDS_PORT; log tail:" >&2
+  echo "FATAL: xDS server not listening on :$XDS_PORT. Log tail:" >&2
   tail -20 "$SERVER_LOG" >&2
   exit 1
 fi
@@ -153,7 +161,7 @@ for CAND in host-gateway 192.168.5.2; do
     XDS_REACH="$CAND ($RESOLVED)"
     break
   fi
-  note "no ADS stream via $CAND; envoy log tail:"
+  note "no ADS stream via $CAND. Envoy log tail:"
   docker logs spike-envoy 2>&1 | tail -3 | sed 's/^/      /'
 done
 if [ -z "$XDS_REACH" ]; then
@@ -163,7 +171,7 @@ else
 fi
 
 # Record what docker itself says about the spec-literal form (--add-host on
-# the joining container); informational only.
+# the joining container). Nothing downstream depends on it.
 ADDHOST_PROBE="$(docker create --name spike-addhost-probe --network "container:spike-netns" \
   --add-host host.docker.internal:host-gateway "$ENVOY_IMAGE" -c /bootstrap.yaml 2>&1)"
 ADDHOST_RC=$?
@@ -171,11 +179,11 @@ docker rm -f spike-addhost-probe >/dev/null 2>&1
 if [ "$ADDHOST_RC" = 0 ]; then
   note "docker accepts --add-host with --network container: (probe container created fine)"
 else
-  note "docker rejects --add-host with --network container:: $(echo "$ADDHOST_PROBE" | tail -1)"
+  note "docker rejects --add-host with --network container: ($(echo "$ADDHOST_PROBE" | tail -1))"
 fi
 
 if [ "$FAILED" = 1 ]; then
-  say "cannot continue without xDS; server log tail:"
+  say "can't continue without xDS. Server log tail:"
   tail -20 "$SERVER_LOG"
   exit 1
 fi
@@ -200,12 +208,17 @@ else
   docker logs spike-envoy 2>&1 | tail -5 | sed 's/^/      /'
 fi
 
-if ! docker exec spike-netns ip addr add "$VIP/32" dev eth0 2>/dev/null; then
-  note "busybox ip failed; installing iproute2 in spike-netns"
+if docker exec spike-netns ip addr add "$VIP/32" dev eth0 2>/dev/null; then
+  note "added $VIP/32 to spike-netns eth0 (busybox ip)"
+else
+  note "busybox ip failed, so installing iproute2 in spike-netns"
   docker exec spike-netns apk add --quiet iproute2 >/dev/null 2>&1
-  docker exec spike-netns ip addr add "$VIP/32" dev eth0 || note "WARNING: could not add $VIP to eth0"
+  if docker exec spike-netns ip addr add "$VIP/32" dev eth0; then
+    note "added $VIP/32 to spike-netns eth0 (iproute2)"
+  else
+    note "WARNING: couldn't add $VIP to eth0, so clients can't reach the VIP"
+  fi
 fi
-note "added $VIP/32 to spike-netns eth0"
 
 P1_BODY=""
 for i in $(seq 1 10); do
@@ -231,7 +244,7 @@ else
 fi
 
 # --- phase 2: RBAC deny for spike-client, hitless for spike-client2 ---------
-say "phase 2: RBAC deny for $CLIENT_IP; spike-client2 must keep working throughout"
+say "phase 2: deny $CLIENT_IP via RBAC and prove spike-client2 keeps working throughout"
 LISTENER_GEN_BEFORE="$(stat_value listener_manager.listener_modified)"
 : >"$HAMMER_LOG"
 (
@@ -291,7 +304,7 @@ fi
 note "rbac stats: $(admin_get /stats | grep 'rbac' | grep -v shadow | tr '\n' ' ')"
 
 # --- phase 3: RBAC removed, spike-client recovers ----------------------------
-say "phase 3: drop the RBAC filter; spike-client must recover"
+say "phase 3: drop the RBAC filter and prove spike-client recovers"
 echo 3 >&3
 RECOVERED=0
 for i in $(seq 1 30); do
@@ -313,10 +326,10 @@ printf '%s\n\n' "$RESULTS"
 echo "xDS reachability from containers: host.docker.internal -> ${XDS_REACH:-UNREACHABLE}"
 if [ "$FAILED" = 0 ]; then
   down
-  echo "ALL PHASES PASSED (containers removed; network $NET and images kept)"
+  echo "ALL PHASES PASSED (containers removed, network $NET and images kept)"
   exit 0
 fi
-echo "SPIKE FAILED; containers and server left running for inspection (./run.sh down to clean up)"
+echo "SPIKE FAILED. Containers and server left running for inspection (./run.sh down to clean up)"
 echo "server log tail:"
 tail -10 "$SERVER_LOG"
 exit 1

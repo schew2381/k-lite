@@ -1,0 +1,180 @@
+syntax = "proto3";
+
+package klite.v1;
+
+import "klite/v1/meta.proto";
+
+option go_package = "github.com/schew2381/k-lite/internal/gen/klitev1;klitev1";
+
+// ---- Workload (CONTEXT.md: a named set of identical Instances) ----
+
+message Container {
+  string name = 1;
+  string image = 2;
+  repeated string command = 3;
+  repeated string args = 4;
+  repeated EnvVar env = 5;
+  repeated Port ports = 6;
+  Resources resources = 7;
+  ReadinessProbe readiness_probe = 8;
+}
+
+message EnvVar {
+  string name = 1;
+  string value = 2;
+}
+
+message Port {
+  int32 container_port = 1;
+}
+
+// Enforced as Docker cgroup limits only, never used for placement (ADR 0012).
+message Resources {
+  string cpus = 1;   // e.g. "0.5"
+  string memory = 2; // e.g. "128Mi"
+}
+
+message ReadinessProbe {
+  int32 tcp_port = 1;
+}
+
+message Template {
+  map<string, string> labels = 1;
+  // v1 validation rejects more than one entry (ADR 0014).
+  repeated Container containers = 2;
+}
+
+// Drain choreography knobs (ADR 0010).
+message DrainSpec {
+  int32 drain_timeout_seconds = 1;      // default 30
+  int32 termination_grace_seconds = 2;  // default 15
+}
+
+message WorkloadSpec {
+  int32 replicas = 1;
+  string node_name = 2; // optional pin
+  Template template = 3;
+  DrainSpec drain = 4;
+}
+
+message WorkloadStatus {
+  int32 ready_instances = 1;
+  int32 total_instances = 2;
+  string template_hash = 3;
+}
+
+message Workload {
+  Meta meta = 1;
+  WorkloadSpec spec = 2;
+  WorkloadStatus status = 3;
+}
+
+// ---- Service ----
+
+message ServiceSpec {
+  map<string, string> selector = 1;
+  int32 port = 2;        // what clients dial (the VIP port)
+  int32 target_port = 3; // the container port
+}
+
+message Service {
+  Meta meta = 1;
+  ServiceSpec spec = 2;
+}
+
+// ---- Node ----
+
+message NodeSpec {
+  int32 max_instances = 1;
+}
+
+enum NodePhase {
+  NODE_PHASE_UNSPECIFIED = 0;
+  NODE_PHASE_READY = 1;
+  NODE_PHASE_NOT_READY = 2;
+  NODE_PHASE_DRAINING = 3;
+}
+
+message NodeStatus {
+  NodePhase phase = 1;
+  bool unschedulable = 2; // cordon, kept separate from phase (nomad precedent)
+  int64 last_heartbeat_unix = 3;
+  int32 node_index = 4; // assigned at registration, drives IPAM
+  int32 instance_count = 5;
+}
+
+message Node {
+  Meta meta = 1;
+  NodeSpec spec = 2;
+  NodeStatus status = 3;
+}
+
+// ---- NetworkPolicy (istio-lite semantics, ADR 0009) ----
+
+enum PolicyAction {
+  POLICY_ACTION_UNSPECIFIED = 0;
+  POLICY_ACTION_ALLOW = 1;
+  POLICY_ACTION_DENY = 2;
+}
+
+message PolicyRule {
+  string from = 1;            // Service name or "*"
+  string to = 2;              // Service name or "*"
+  repeated string except = 3; // carve-outs when to is "*"
+}
+
+message NetworkPolicySpec {
+  PolicyAction action = 1;
+  repeated PolicyRule rules = 2;
+}
+
+message NetworkPolicy {
+  Meta meta = 1;
+  NetworkPolicySpec spec = 2;
+}
+
+// ---- Instance (server-materialized, read-only via the client API) ----
+
+enum InstancePhase {
+  INSTANCE_PHASE_UNSPECIFIED = 0;
+  INSTANCE_PHASE_PENDING = 1;
+  INSTANCE_PHASE_RUNNING = 2;
+  INSTANCE_PHASE_READY = 3;
+  INSTANCE_PHASE_DRAINING = 4;
+  INSTANCE_PHASE_FAILED = 5;
+  INSTANCE_PHASE_TERMINATING = 6;
+}
+
+message InstanceSpec {
+  string workload = 1;
+  string node = 2;
+  Container container = 3;
+  string template_hash = 4;
+  DrainSpec drain = 5;
+}
+
+message InstanceStatus {
+  InstancePhase phase = 1;
+  int32 restarts = 2;
+  string instance_ip = 3;
+  string container_id = 4;
+  string message = 5;
+}
+
+message Instance {
+  Meta meta = 1;
+  InstanceSpec spec = 2;
+  InstanceStatus status = 3;
+}
+
+// ---- Generic envelope for Apply/List/Watch ----
+
+message Object {
+  oneof kind {
+    Workload workload = 1;
+    Service service = 2;
+    Node node = 3;
+    NetworkPolicy network_policy = 4;
+    Instance instance = 5;
+  }
+}

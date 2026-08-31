@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package klite.v1;
+
+option go_package = "github.com/schew2381/k-lite/internal/gen/klitev1;klitev1";
+
+message Meta {
+  string name = 1;
+  map<string, string> labels = 2;
+  string uid = 3;
+  // Server-set from etcd's mod revision. Read-only for clients.
+  int64 resource_version = 4;
+  int64 created_unix = 5;
+}

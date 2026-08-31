@@ -1,0 +1,50 @@
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "trailing-whitespace" },
+    { id = "end-of-file-fixer" },
+    { id = "check-merge-conflict" },
+]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "gofmt"
+name = "gofmt"
+language = "system"
+entry = "gofmt"
+args = ["-l", "-w"]
+types = ["go"]
+
+[[repos.hooks]]
+id = "golangci-lint"
+name = "golangci-lint"
+language = "system"
+entry = "golangci-lint"
+args = ["run", "./..."]
+pass_filenames = false
+
+[[repos.hooks]]
+id = "go-test"
+name = "go test"
+language = "system"
+entry = "go"
+args = ["test", "-race", "-count=1", "-timeout", "5m", "-shuffle=on", "./..."]
+pass_filenames = false
+
+[[repos.hooks]]
+id = "go-test-integration"
+name = "go test (integration)"
+language = "system"
+entry = "go"
+args = ["test", "-tags", "integration", "-race", "-count=1", "-timeout", "5m", "./internal/store/..."]
+pass_filenames = false
+
+[[repos.hooks]]
+id = "go-mod-tidy"
+name = "go mod tidy"
+language = "system"
+entry = "go"
+args = ["mod", "tidy"]
+pass_filenames = false
