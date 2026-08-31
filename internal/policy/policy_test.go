@@ -1,0 +1,276 @@
+package policy_test
+
+import (
+	"testing"
+
+	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
+	"github.com/schew2381/k-lite/internal/policy"
+	"google.golang.org/protobuf/proto"
+)
+
+const (
+	allow = klitev1.PolicyAction_POLICY_ACTION_ALLOW
+	deny  = klitev1.PolicyAction_POLICY_ACTION_DENY
+)
+
+func pol(name string, action klitev1.PolicyAction, rules ...*klitev1.PolicyRule) *klitev1.NetworkPolicy {
+	return &klitev1.NetworkPolicy{
+		Meta: &klitev1.Meta{Name: name},
+		Spec: &klitev1.NetworkPolicySpec{Action: action, Rules: rules},
+	}
+}
+
+func rule(from, to string, except ...string) *klitev1.PolicyRule {
+	return &klitev1.PolicyRule{From: from, To: to, Except: except}
+}
+
+func TestEvaluate(t *testing.T) {
+	t.Parallel()
+
+	denyAtoC := pol("deny-a-to-c", deny, rule("a", "c"))
+	lockdownA := pol("lockdown-a", deny, rule("a", "*", "b"))
+	allowOnlyAtoB := pol("allow-only-a-to-b", allow, rule("a", "b"))
+	allowABroad := pol("allow-a-broad", allow, rule("a", "*", "b"))
+
+	tests := []struct {
+		name     string
+		policies []*klitev1.NetworkPolicy
+		from, to string
+		want     policy.Decision
+	}{
+		{
+			name: "empty policy set default allows",
+			from: "a", to: "b",
+			want: policy.Decision{Allowed: true, Reason: "no ALLOW targets b, default allow"},
+		},
+		{
+			name:     "self traffic default allows",
+			policies: []*klitev1.NetworkPolicy{denyAtoC},
+			from:     "a", to: "a",
+			want: policy.Decision{Allowed: true, Reason: "no ALLOW targets a, default allow"},
+		},
+
+		// Canonical: deny a->c while a->b flows.
+		{
+			name:     "deny a to c blocks a to c",
+			policies: []*klitev1.NetworkPolicy{denyAtoC},
+			from:     "a", to: "c",
+			want: policy.Decision{Allowed: false, MatchedPolicy: "deny-a-to-c", Reason: "denied by deny-a-to-c rule 1"},
+		},
+		{
+			name:     "deny a to c leaves a to b open",
+			policies: []*klitev1.NetworkPolicy{denyAtoC},
+			from:     "a", to: "b",
+			want: policy.Decision{Allowed: true, Reason: "no ALLOW targets b, default allow"},
+		},
+		{
+			name:     "deny a to c leaves b to c open",
+			policies: []*klitev1.NetworkPolicy{denyAtoC},
+			from:     "b", to: "c",
+			want: policy.Decision{Allowed: true, Reason: "no ALLOW targets c, default allow"},
+		},
+
+		// Canonical: lockdown-a via to:"*" except [b].
+		{
+			name:     "lockdown-a blocks a to c",
+			policies: []*klitev1.NetworkPolicy{lockdownA},
+			from:     "a", to: "c",
+			want: policy.Decision{Allowed: false, MatchedPolicy: "lockdown-a", Reason: "denied by lockdown-a rule 1"},
+		},
+		{
+			name:     "lockdown-a exempts a to b",
+			policies: []*klitev1.NetworkPolicy{lockdownA},
+			from:     "a", to: "b",
+			want: policy.Decision{Allowed: true, Reason: "no ALLOW targets b, default allow"},
+		},
+		{
+			name:     "lockdown-a leaves c to d alone",
+			policies: []*klitev1.NetworkPolicy{lockdownA},
+			from:     "c", to: "d",
+			want: policy.Decision{Allowed: true, Reason: "no ALLOW targets d, default allow"},
+		},
+		{
+			name:     "lockdown-a wildcard catches self traffic",
+			policies: []*klitev1.NetworkPolicy{lockdownA},
+			from:     "a", to: "a",
+			want: policy.Decision{Allowed: false, MatchedPolicy: "lockdown-a", Reason: "denied by lockdown-a rule 1"},
+		},
+
+		// Canonical: allow-only-a-to-b flips b to allowlist mode.
+		{
+			name:     "allow flip admits a to b",
+			policies: []*klitev1.NetworkPolicy{allowOnlyAtoB},
+			from:     "a", to: "b",
+			want: policy.Decision{Allowed: true, MatchedPolicy: "allow-only-a-to-b", Reason: "allowed by allow-only-a-to-b rule 1"},
+		},
+		{
+			name:     "allow flip denies c to b",
+			policies: []*klitev1.NetworkPolicy{allowOnlyAtoB},
+			from:     "c", to: "b",
+			want: policy.Decision{Allowed: false, Reason: "b is allowlist-mode and no ALLOW admits c"},
+		},
+		{
+			name:     "allow flip leaves c to a alone",
+			policies: []*klitev1.NetworkPolicy{allowOnlyAtoB},
+			from:     "c", to: "a",
+			want: policy.Decision{Allowed: true, Reason: "no ALLOW targets a, default allow"},
+		},
+		{
+			name:     "allow flip catches self traffic to b",
+			policies: []*klitev1.NetworkPolicy{allowOnlyAtoB},
+			from:     "b", to: "b",
+			want: policy.Decision{Allowed: false, Reason: "b is allowlist-mode and no ALLOW admits b"},
+		},
+
+		// Wildcard from.
+		{
+			name:     "wildcard from deny blocks anyone",
+			policies: []*klitev1.NetworkPolicy{pol("deny-all-to-c", deny, rule("*", "c"))},
+			from:     "b", to: "c",
+			want: policy.Decision{Allowed: false, MatchedPolicy: "deny-all-to-c", Reason: "denied by deny-all-to-c rule 1"},
+		},
+		{
+			name:     "wildcard from allow admits anyone",
+			policies: []*klitev1.NetworkPolicy{pol("allow-all-to-b", allow, rule("*", "b"))},
+			from:     "z", to: "b",
+			want: policy.Decision{Allowed: true, MatchedPolicy: "allow-all-to-b", Reason: "allowed by allow-all-to-b rule 1"},
+		},
+
+		// DENY beats ALLOW on the same pair.
+		{
+			name: "deny beats allow on same pair",
+			policies: []*klitev1.NetworkPolicy{
+				pol("allow-a-to-b", allow, rule("a", "b")),
+				pol("deny-a-to-b", deny, rule("a", "b")),
+			},
+			from: "a", to: "b",
+			want: policy.Decision{Allowed: false, MatchedPolicy: "deny-a-to-b", Reason: "denied by deny-a-to-b rule 1"},
+		},
+
+		// Wildcard ALLOW with except: b is not targeted, c is.
+		{
+			name:     "wildcard allow with except does not flip excepted service",
+			policies: []*klitev1.NetworkPolicy{allowABroad},
+			from:     "c", to: "b",
+			want: policy.Decision{Allowed: true, Reason: "no ALLOW targets b, default allow"},
+		},
+		{
+			name:     "wildcard allow flips non-excepted service",
+			policies: []*klitev1.NetworkPolicy{allowABroad},
+			from:     "c", to: "c",
+			want: policy.Decision{Allowed: false, Reason: "c is allowlist-mode and no ALLOW admits c"},
+		},
+		{
+			name:     "wildcard allow admits a to non-excepted service",
+			policies: []*klitev1.NetworkPolicy{allowABroad},
+			from:     "a", to: "c",
+			want: policy.Decision{Allowed: true, MatchedPolicy: "allow-a-broad", Reason: "allowed by allow-a-broad rule 1"},
+		},
+
+		// Except is ignored on a concrete to.
+		{
+			name:     "except ignored when to is concrete",
+			policies: []*klitev1.NetworkPolicy{pol("deny-weird", deny, rule("a", "b", "b"))},
+			from:     "a", to: "b",
+			want: policy.Decision{Allowed: false, MatchedPolicy: "deny-weird", Reason: "denied by deny-weird rule 1"},
+		},
+
+		// Rule index in the reason is 1-based and per-policy.
+		{
+			name:     "second rule reports rule 2",
+			policies: []*klitev1.NetworkPolicy{pol("deny-multi", deny, rule("x", "y"), rule("a", "c"))},
+			from:     "a", to: "c",
+			want: policy.Decision{Allowed: false, MatchedPolicy: "deny-multi", Reason: "denied by deny-multi rule 2"},
+		},
+
+		// Matched policy is deterministic regardless of input slice order.
+		{
+			name: "matched policy sorted by name",
+			policies: []*klitev1.NetworkPolicy{
+				pol("z-allow", allow, rule("a", "b")),
+				pol("a-allow", allow, rule("a", "b")),
+			},
+			from: "a", to: "b",
+			want: policy.Decision{Allowed: true, MatchedPolicy: "a-allow", Reason: "allowed by a-allow rule 1"},
+		},
+
+		// Unknown service names are plain strings.
+		{
+			name:     "unknown services default allow",
+			policies: []*klitev1.NetworkPolicy{denyAtoC, allowOnlyAtoB},
+			from:     "ghost", to: "phantom",
+			want: policy.Decision{Allowed: true, Reason: "no ALLOW targets phantom, default allow"},
+		},
+		{
+			name:     "wildcard deny hits unknown from",
+			policies: []*klitev1.NetworkPolicy{pol("deny-all-to-c", deny, rule("*", "c"))},
+			from:     "ghost", to: "c",
+			want: policy.Decision{Allowed: false, MatchedPolicy: "deny-all-to-c", Reason: "denied by deny-all-to-c rule 1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := policy.Evaluate(tt.policies, tt.from, tt.to)
+			if got != tt.want {
+				t.Errorf("Evaluate(%q, %q) = %+v, want %+v", tt.from, tt.to, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCompile(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		policies []*klitev1.NetworkPolicy
+		want     []*klitev1.CompiledPolicy
+	}{
+		{
+			name: "empty policy set",
+		},
+		{
+			name: "flattens sorted by policy name then rule index",
+			policies: []*klitev1.NetworkPolicy{
+				pol("z-deny", deny, rule("a", "*", "b", "c"), rule("*", "d")),
+				pol("a-allow", allow, rule("a", "b")),
+			},
+			want: []*klitev1.CompiledPolicy{
+				{Action: allow, From: "a", To: "b", PolicyName: "a-allow"},
+				{Action: deny, From: "a", To: "*", Except: []string{"b", "c"}, PolicyName: "z-deny"},
+				{Action: deny, From: "*", To: "d", PolicyName: "z-deny"},
+			},
+		},
+		{
+			name:     "policy with no rules contributes nothing",
+			policies: []*klitev1.NetworkPolicy{pol("empty-deny", deny)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := policy.Compile(tt.policies)
+			if len(got) != len(tt.want) {
+				t.Fatalf("Compile() returned %d entries, want %d: %v", len(got), len(tt.want), got)
+			}
+			for i := range tt.want {
+				if !proto.Equal(got[i], tt.want[i]) {
+					t.Errorf("Compile()[%d] = %v, want %v", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestCompileDoesNotAliasExcept(t *testing.T) {
+	t.Parallel()
+	src := pol("lockdown-a", deny, rule("a", "*", "b"))
+	got := policy.Compile([]*klitev1.NetworkPolicy{src})
+	got[0].Except[0] = "mutated"
+	if src.Spec.Rules[0].Except[0] != "b" {
+		t.Error("Compile() aliased the source except slice")
+	}
+}
