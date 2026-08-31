@@ -934,14 +934,16 @@ const PIECE_INFO = {
     kind:"state · 3 containers", title:"etcd — the only memory the cluster has",
     body:`<p>Every applied object, every instance record, every lease lives here, in a three-member etcd cluster running as containers.</p>
       <ul><li>klited replicas are interchangeable <em>because</em> this isn't: consensus keeps one true history, outsourced to the software Kubernetes itself trusts.</li>
-      <li>Watches drive everything — controllers and xDS snapshots react to changes instead of polling.</li></ul>`,
+      <li>Watches drive everything — controllers and xDS snapshots react to changes instead of polling.</li>
+      <li>Only klited talks to etcd. Agents get their state through klited, which validates, scopes each node to its own slice, and keeps the store private — the same reason kubelets talk to the apiserver, never to etcd.</li></ul>`,
     why:"why not bbolt: it was bbolt in the draft plan. Then we promoted HA from non-goal to goal, and a single file on one machine can't be highly available. ADR 0005 keeps the reversal on the record."
   },
   agent1: {
     kind:"per node · host process", title:"klite-agent — hands on each node",
     body:`<p>One per node. It joins with a token, gets a real mTLS certificate, then holds gRPC streams open: desired state flowing down, status flowing up every few seconds.</p>
       <ul><li>Always dials <em>out</em> — the server never needs a way in, so a node behind a home router works like one in the next terminal.</li>
-      <li>Drives Docker by labels (<code>io.klite.*</code>), keeps the infra pod alive, and owns restarts with visible counts.</li></ul>`,
+      <li>Drives Docker by labels (<code>io.klite.*</code>), keeps the infra pod alive, and owns restarts with visible counts.</li>
+      <li>Readiness flows up, not sideways: klite-net probes the instances, the agent relays results on its status stream, and klited turns them into endpoint updates for every Envoy.</li></ul>`,
     why:"why streams now: round 1 used HTTP long-poll. The grill upgraded it — same dial-out shape, less pretending gRPC doesn't exist."
   },
   agent2: "agent1",
@@ -949,13 +951,14 @@ const PIECE_INFO = {
     kind:"per node · container", title:"klite-net — owner of the switchboard",
     body:`<p>A small container that owns the node's network namespace for service plumbing: it runs kdns (answers <code>b.svc.klite</code>), adds and removes VIP addresses, and TCP-probes instances for readiness.</p>
       <ul><li>Instances get <code>--dns</code> pointed here — a single upstream, because a second resolver racing NXDOMAINs corrupts name resolution in ways that only show under load.</li>
-      <li>kdns answers even for destinations a policy will refuse. Existence is public, reachability is not.</li></ul>`,
+      <li>kdns answers even for destinations a policy will refuse. Existence is public, reachability is not.</li>
+      <li>The division of labor with Envoy next door: klite-net makes names and addresses exist, Envoy makes them route. kdns is the whole DNS job for cluster names, and everything else forwards upstream.</li></ul>`,
     why:"why a container: on macOS the host can't reach container IPs, so anything instances must talk to has to live on their network. Two containers sharing a netns — we needed a pod, so we built one."
   },
   "knet-node2": "knet-node1",
   "envoy-node1": {
     kind:"per node · container, shared netns", title:"Envoy — the bouncer at every VIP",
-    body:`<p>An Envoy joins klite-net's network namespace and binds a listener on every VIP the node owns. klited feeds it everything over xDS: listeners, clusters, endpoints, and RBAC rules.</p>
+    body:`<p>An Envoy joins klite-net's network namespace and binds a listener on every VIP the node owns. It holds one long-lived gRPC stream to klited (that stream <em>is</em> xDS) and everything arrives over it: listeners (LDS), clusters (CDS), live backend sets (EDS — which endpoints are READY or DRAINING right now), and RBAC rules. Envoy ACKs each config version, so klited knows every node's data path took the update.</p>
       <ul><li>Per connection: identify the caller by source IP, run DENY rules then ALLOW rules, then relay to a READY endpoint — DRAINING ones get nothing new.</li>
       <li>Enforcement sits at the <em>source</em> node's Envoy deliberately: the destination would only ever see the proxy's IP, never the real caller's.</li>
       <li>The draft plan put a hand-rolled Go proxy here. The grill said: build a miniature istiod instead — and Istio's ambient mode runs this exact shape in production, one node-local proxy (ztunnel) fed by a central control plane.</li></ul>`,
@@ -1033,9 +1036,9 @@ const PIECE_INFO = {
     { say:`The replica writes it to etcd and replies "created". Nothing runs yet — the cluster merely <em>wants</em> two b instances now, and that want is durable.`,
       persist(){ wish.textContent = "want: b × 2"; wish.setAttribute("opacity", 1); },
       fx: () => sc.packet("M 484 110 C 700 130, 730 130, 772 120", { color:C.ctrl, dur:900 }) },
-    { say:`etcd's watch wakes the workload controller on klited ① only, since ① holds the lease. Want 2, have 0: it creates Instance records <code>b-1</code> and <code>b-2</code>, which sit Pending, bound to no node.`,
+    { say:`etcd's watch wakes the workload controller on klited ① only, since ① holds the lease. Want 2, have 0: it creates Instance records <code>b-1</code> and <code>b-2</code> — rows in etcd, running nothing yet. They sit Pending, bound to no node.`,
       persist(){ setInstState(E.b1, "pending"); setInstState(E.b2, "pending"); } },
-    { say:`The scheduler (same leader) binds each Pending instance to the node running the fewest. node-1 and node-2 are tied at one apiece, so each gets one.`,
+    { say:`The scheduler (same leader) picks the node running the fewest instances for each Pending one. Binding is a single field write: <code>nodeName</code> lands in the etcd record, and no machine has been touched yet. node-1 and node-2 are tied at one apiece, so each gets one.`,
       fx: async () => { await Promise.all([
         sc.packet("M 380 166 C 360 300, 390 420, 400 486", { color:C.ctrl, dur:900 }),
         sc.packet("M 420 166 C 560 320, 700 430, 766 486", { color:C.ctrl, dur:900 }),
@@ -1053,7 +1056,7 @@ const PIECE_INFO = {
         sc.packet("poll1", { color:C.ctrl, dur:900 }),
         sc.packet("poll2", { color:C.ctrl, dur:900 }),
       ]); } },
-    { say:`Ready instances become endpoints, and every node's Envoy learns them over xDS. From this moment <code>b</code> is dialable by name.`,
+    { say:`Ready instances become endpoints, and klited pushes the new set to every node's Envoy over EDS, the endpoint half of xDS. From this moment <code>b</code> is dialable by name.`,
       fx: async () => { await Promise.all([
         sc.packet("xds1", { color:C.ctrl, dur:900 }),
         sc.packet("xds2", { color:C.ctrl, dur:900 }),
