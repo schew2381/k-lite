@@ -30,7 +30,7 @@ message Port {
 
 // Enforced as Docker cgroup limits only, never used for placement (ADR 0012).
 message Resources {
-  string cpus = 1;   // e.g. "0.5"
+  string cpus = 1; // e.g. "0.5"
   string memory = 2; // e.g. "128Mi"
 }
 
@@ -46,8 +46,8 @@ message Template {
 
 // Drain choreography knobs (ADR 0010).
 message DrainSpec {
-  int32 drain_timeout_seconds = 1;      // default 30
-  int32 termination_grace_seconds = 2;  // default 15
+  int32 drain_timeout_seconds = 1; // default 30
+  int32 termination_grace_seconds = 2; // default 15
 }
 
 message WorkloadSpec {
@@ -73,7 +73,7 @@ message Workload {
 
 message ServiceSpec {
   map<string, string> selector = 1;
-  int32 port = 2;        // what clients dial (the VIP port)
+  int32 port = 2; // what clients dial (the VIP port)
   int32 target_port = 3; // the container port
 }
 
@@ -118,8 +118,8 @@ enum PolicyAction {
 }
 
 message PolicyRule {
-  string from = 1;            // Service name or "*"
-  string to = 2;              // Service name or "*"
+  string from = 1; // Service name or "*"
+  string to = 2; // Service name or "*"
   repeated string except = 3; // carve-outs when to is "*"
 }
 

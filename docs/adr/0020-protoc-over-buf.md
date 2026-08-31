@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0021
+---
+
 # Codegen runs on protoc, despite the research recommending buf
 
 research/grpc-go.md recommended buf pinned through go.mod's tool directive. We generate with plain protoc anyway. Brew had already installed it and the two plugins during bootstrap, and `make proto` over four proto files doesn't need lint, breaking-change detection, or a second toolchain. The generated code is committed under internal/gen, so builds never regenerate.

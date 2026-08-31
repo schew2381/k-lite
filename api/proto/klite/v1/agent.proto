@@ -22,16 +22,16 @@ message RegisterRequest {
 }
 
 message NetBootstrap {
-  string subnet = 1;       // 10.44.0.0/16
+  string subnet = 1; // 10.44.0.0/16
   string klite_net_ip = 2; // 10.44.0.10 + node_index
-  string vip_range = 3;    // 10.44.64.0/18
+  string vip_range = 3; // 10.44.64.0/18
   int32 node_index = 4;
 }
 
 message RegisterResponse {
   string node_token = 1; // pre-mTLS credential
-  bytes cert_pem = 2;    // M8
-  bytes ca_pem = 3;      // M8
+  bytes cert_pem = 2; // M8
+  bytes ca_pem = 3; // M8
   NetBootstrap net = 4;
 }
 

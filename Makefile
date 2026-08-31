@@ -16,10 +16,13 @@ net-image:
 	docker build -f build/klite-net.Dockerfile -t klite-net:dev .
 
 proto:
-	protoc -I api/proto \
-		--go_out=. --go_opt=module=$(MODULE) \
-		--go-grpc_out=. --go-grpc_opt=module=$(MODULE) \
-		api/proto/klite/v1/*.proto
+	go tool buf format -w
+	go tool buf generate
+
+proto-lint:
+	go tool buf lint
+	go tool buf format --diff --exit-code
+	go tool buf breaking --against '.git#branch=main'
 
 test:
 	go vet ./...
