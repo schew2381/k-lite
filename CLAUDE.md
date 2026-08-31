@@ -8,6 +8,8 @@
 
 Design decisions are recorded as ADRs in `docs/adr/` and the glossary in `CONTEXT.md`, following the `domain-modeling` skill's formats (typically produced during `/grill-with-docs` sessions). One deviation from the minimal ADR format: **always include the Considered Options and Consequences sections** in this repo's ADRs — the decision log will later be turned into a presentation about the decisions made and their tradeoffs, so rejected alternatives and rationale must be captured even when they'd normally be skipped.
 
+**Record every design and architecture decision, not just the ones made in grill sessions.** Any decision of consequence made during implementation, review, or debugging gets its ADR in the same commit as the change, while the alternatives are still fresh. If code and an ADR disagree, the code is wrong until a superseding ADR says otherwise. When vocabulary shifts, update `CONTEXT.md` in the same commit. Each design session appends an entry to `docs/design-log.md` recording what was recommended, what was chosen, and what got reversed.
+
 ## Writing quality in code
 
 All prose written into code files — docstrings, comments, README text, decision records — must be evaluated with the personal `/writing` skill. Invoke it via an **adversarial agent**: spawn a subagent whose job is to critique the writing against the /writing skill's rules and flag violations (banned words, AI-tell structures, rhythm problems, etc.), not to rubber-stamp it. Apply this to any and all writing produced in this repo.

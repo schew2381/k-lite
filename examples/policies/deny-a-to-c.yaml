@@ -1,0 +1,9 @@
+apiVersion: klite/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-a-to-c
+spec:
+  action: DENY
+  rules:
+    - from: a
+      to: c

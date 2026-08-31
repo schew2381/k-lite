@@ -1,0 +1,46 @@
+GOBIN := $(shell go env GOPATH)/bin
+export PATH := $(GOBIN):$(PATH)
+
+BIN := bin
+MODULE := github.com/schew2381/k-lite
+
+.PHONY: build proto test lint ui net-image etcd-up etcd-down spike-net spike-envoy clean-docker
+
+build:
+	go build -o $(BIN)/klited ./cmd/klited
+	go build -o $(BIN)/klite ./cmd/klite
+	go build -o $(BIN)/klite-agent ./cmd/klite-agent
+
+net-image:
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o $(BIN)/klite-net-linux-arm64 ./cmd/klite-net
+	docker build -f build/klite-net.Dockerfile -t klite-net:dev .
+
+proto:
+	protoc -I api/proto \
+		--go_out=. --go_opt=module=$(MODULE) \
+		--go-grpc_out=. --go-grpc_opt=module=$(MODULE) \
+		api/proto/klite/v1/*.proto
+
+test:
+	go vet ./...
+	go test -race ./...
+
+ui:
+	cd ui && npm ci && npm run build
+
+etcd-up:
+	hack/etcd-up.sh
+
+etcd-down:
+	hack/etcd-up.sh down
+
+spike-net:
+	hack/spike-net.sh
+
+spike-envoy:
+	hack/spike-envoy/run.sh
+
+clean-docker:
+	docker ps -aq --filter label=io.klite.role | xargs docker rm -f 2>/dev/null || true
+	docker ps -aq --filter label=io.klite.node | xargs docker rm -f 2>/dev/null || true
+	docker network rm klite0 2>/dev/null || true

@@ -1,0 +1,52 @@
+# Envoy bootstrap for spike 2 (ADR 0007). Everything except the admin port
+# and the path to the xDS server arrives dynamically over ADS.
+#
+# host.docker.internal is NOT resolved by Docker magic here: run.sh injects it
+# into /etc/hosts of the netns donor container (spike-netns) with whichever
+# host IP it finds reachable, and Envoy's LOGICAL_DNS resolver reads it from
+# there. The Envoy container itself cannot take --add-host because it joins
+# the donor's network namespace and inherits its /etc/hosts.
+node:
+  id: spike-node
+  cluster: spike
+admin:
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9901
+dynamic_resources:
+  ads_config:
+    api_type: GRPC
+    transport_api_version: V3
+    grpc_services:
+      - envoy_grpc:
+          cluster_name: xds
+    set_node_on_first_message_only: true
+  cds_config:
+    resource_api_version: V3
+    ads: {}
+  lds_config:
+    resource_api_version: V3
+    ads: {}
+static_resources:
+  clusters:
+    - name: xds
+      type: LOGICAL_DNS
+      dns_lookup_family: V4_ONLY
+      connect_timeout: 1s
+      # envoy_grpc requires an HTTP/2 upstream; without this the gRPC stream
+      # dies with a protocol error.
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: xds
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: host.docker.internal
+                      port_value: 18000

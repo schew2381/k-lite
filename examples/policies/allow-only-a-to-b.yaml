@@ -1,0 +1,11 @@
+# The ALLOW-flip case: the moment this policy targets b, only matching
+# callers reach b. Everything else is denied by absence.
+apiVersion: klite/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-only-a-to-b
+spec:
+  action: ALLOW
+  rules:
+    - from: a
+      to: b

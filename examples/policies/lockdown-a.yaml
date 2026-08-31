@@ -1,0 +1,11 @@
+# "a can talk to everything except b" as one DENY rule with an except list.
+apiVersion: klite/v1
+kind: NetworkPolicy
+metadata:
+  name: lockdown-a
+spec:
+  action: DENY
+  rules:
+    - from: a
+      to: "*"
+      except: [b]

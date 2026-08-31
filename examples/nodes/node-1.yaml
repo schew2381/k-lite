@@ -1,0 +1,8 @@
+apiVersion: klite/v1
+kind: Node
+metadata:
+  name: node-1
+  labels:
+    zone: local
+spec:
+  maxInstances: 32

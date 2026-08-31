@@ -1,0 +1,8 @@
+/bin/
+/ui/node_modules/
+/ui/dist/
+*.test
+*.log
+.DS_Store
+.claude/worktrees/
+.claude/settings.local.json

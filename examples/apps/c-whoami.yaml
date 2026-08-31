@@ -1,0 +1,31 @@
+apiVersion: klite/v1
+kind: Workload
+metadata:
+  name: c
+  labels:
+    app: c
+spec:
+  replicas: 2
+  template:
+    labels:
+      app: c
+    containers:
+      - name: web
+        image: traefik/whoami:v1.10
+        env:
+          - name: WHOAMI_NAME
+            value: c
+        ports:
+          - containerPort: 80
+        readinessProbe:
+          tcpPort: 80
+---
+apiVersion: klite/v1
+kind: Service
+metadata:
+  name: c
+spec:
+  selector:
+    app: c
+  port: 8080
+  targetPort: 80

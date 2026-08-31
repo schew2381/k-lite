@@ -1,7 +1,12 @@
 # k-lite
 
-A lite version of Kubernetes.
+k-lite is a lite version of Kubernetes, with declarative YAML, a scheduling control plane, service discovery, and network policies on plain Docker.
 
-## Decision log
+## Design records
 
-Design decisions are recorded as ADRs in `docs/adr/` and domain terminology in `CONTEXT.md`, both maintained via the `/grill-with-docs` skill (created lazily, so they may not exist yet).
+The decision trail is a deliverable here, not a byproduct:
+
+- [`CONTEXT.md`](CONTEXT.md) holds the glossary and says why a Workload is not a Deployment and an Instance is not a Pod.
+- [`docs/adr/`](docs/adr/) keeps one record per design decision, rejected options and tradeoffs included.
+- [`docs/design-log.md`](docs/design-log.md) tells how the design sessions actually went, reversals and all.
+- [`research/`](research/) collects the tool-by-tool research behind the big choices.
