@@ -44,9 +44,12 @@ type Agent struct {
 	desired      map[string]*klitev1.Instance // by instance name
 	haveSnapshot bool
 	lastRev      int64
-	states       map[string]*instState // by instance name
-	grace        map[string]int32      // instance name -> last known stop grace, for orphans
-	net          *klitev1.NetBootstrap // saved at Register, unused until M4 builds the infra pod
+	states       map[string]*instState         // by instance name
+	grace        map[string]int32              // instance name -> last known stop grace, for orphans
+	net          *klitev1.NetBootstrap         // saved at Register, unused until M4 builds the infra pod
+	commands     map[string]context.CancelFunc // running server commands by id (commands.go)
+
+	cmdWG sync.WaitGroup // one entry per running command handler
 
 	kickReconcile chan struct{}
 	kickReport    chan struct{}
@@ -63,6 +66,7 @@ func New(cfg Config) *Agent {
 		desired:       map[string]*klitev1.Instance{},
 		states:        map[string]*instState{},
 		grace:         map[string]int32{},
+		commands:      map[string]context.CancelFunc{},
 		kickReconcile: make(chan struct{}, 1),
 		kickReport:    make(chan struct{}, 1),
 	}
@@ -79,7 +83,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		return err
 	}
 	var wg sync.WaitGroup
-	for _, loop := range []func(context.Context){a.watchLoop, a.eventLoop, a.reconcileLoop, a.reportLoop} {
+	for _, loop := range []func(context.Context){a.watchLoop, a.eventLoop, a.reconcileLoop, a.reportLoop, a.commandLoop} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -87,6 +91,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		}()
 	}
 	wg.Wait()
+	a.cmdWG.Wait()
 	return ctx.Err()
 }
 

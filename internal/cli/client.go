@@ -78,6 +78,18 @@ func dial(server string) (*grpc.ClientConn, klitev1.ClusterServiceClient, error)
 	return conn, klitev1.NewClusterServiceClient(conn), nil
 }
 
+// dialOne targets a single endpoint, unlike dial's round-robin pool. Log
+// streams need it because only the klited holding the target agent's command
+// stream can serve them, so the caller walks endpoints itself. No
+// WaitForReady here: a dead endpoint should fail fast so the walk moves on.
+func dialOne(addr string) (*grpc.ClientConn, klitev1.ClusterServiceClient, error) {
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, nil, err
+	}
+	return conn, klitev1.NewClusterServiceClient(conn), nil
+}
+
 // rpcErr unwraps a gRPC status so users see the message, not the wire framing.
 func rpcErr(err error) error {
 	if err == nil {

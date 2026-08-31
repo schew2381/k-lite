@@ -29,12 +29,12 @@ const (
 )
 
 // Agent serves AgentService, covering node registration, desired-state
-// streams, and status ingestion. StreamCommands and PushCommandOutput stay
-// Unimplemented until M3.
+// streams, status ingestion, and the command channel (commands.go).
 type Agent struct {
 	klitev1.UnimplementedAgentServiceServer
 	store        store.Store
 	clusterToken string
+	hub          *CommandHub
 
 	// indexMu serializes node-index assignment on this server, which is
 	// enough while one klited handles registration. Multiple servers need
@@ -43,9 +43,10 @@ type Agent struct {
 }
 
 // NewAgent returns the AgentService backed by the store. Agents must present
-// clusterToken at Register.
-func NewAgent(st store.Store, clusterToken string) *Agent {
-	return &Agent{store: st, clusterToken: clusterToken}
+// clusterToken at Register. hub carries their command streams and is shared
+// with the Cluster service, whose Logs RPC feeds off it.
+func NewAgent(st store.Store, clusterToken string, hub *CommandHub) *Agent {
+	return &Agent{store: st, clusterToken: clusterToken, hub: hub}
 }
 
 // Register admits a node that presents the cluster token and already exists

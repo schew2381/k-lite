@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"sync"
 	"testing"
@@ -19,6 +20,7 @@ type fakeRuntime struct {
 	containers map[string]*runtime.RunningInstance // by container ID
 	nextID     int
 	runErr     error
+	logsFn     func(ctx context.Context, id string, follow bool, tail int32) (io.ReadCloser, error)
 
 	runs     []string // instance names passed to RunInstance
 	stops    []string // container IDs
@@ -100,6 +102,17 @@ func (f *fakeRuntime) WatchEvents(context.Context, string) (<-chan runtime.Event
 	ch := make(chan runtime.Event)
 	close(ch)
 	return ch, nil
+}
+
+// Logs delegates to logsFn so command tests can hand out controlled readers.
+func (f *fakeRuntime) Logs(ctx context.Context, id string, follow bool, tail int32) (io.ReadCloser, error) {
+	f.mu.Lock()
+	fn := f.logsFn
+	f.mu.Unlock()
+	if fn == nil {
+		return nil, errors.New("no logsFn configured")
+	}
+	return fn(ctx, id, follow, tail)
 }
 
 func (f *fakeRuntime) InspectIP(_ context.Context, id string) (string, error) {

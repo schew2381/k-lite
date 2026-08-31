@@ -86,6 +86,14 @@ message NetDesired {
   repeated EndpointGroup endpoints = 2;
   map<string, string> ip_identity = 3; // instance IP -> service name
   repeated CompiledPolicy policies = 4;
+  // What this node's klite-net should TCP-probe: its own instances.
+  repeated ProbeTarget probe_targets = 5;
+}
+
+message ProbeTarget {
+  string instance = 1;
+  string ip = 2;
+  int32 port = 3;
 }
 
 message InstanceStatusUpdate {

@@ -20,14 +20,17 @@ import (
 // concurrent writer to the same object, so one retry usually settles it.
 const casRetries = 5
 
-// Cluster serves ClusterService straight off the store, keeping klited stateless (ADR 0005).
+// Cluster serves ClusterService straight off the store, keeping klited
+// stateless (ADR 0005). The one exception is hub, which holds live agent
+// streams for log relaying and evaporates with the process.
 type Cluster struct {
 	klitev1.UnimplementedClusterServiceServer
 	store store.Store
+	hub   *CommandHub
 }
 
-func NewCluster(st store.Store) *Cluster {
-	return &Cluster{store: st}
+func NewCluster(st store.Store, hub *CommandHub) *Cluster {
+	return &Cluster{store: st, hub: hub}
 }
 
 func (s *Cluster) Apply(ctx context.Context, req *klitev1.ApplyRequest) (*klitev1.ApplyResponse, error) {

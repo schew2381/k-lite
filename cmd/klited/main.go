@@ -65,8 +65,11 @@ func run(listen string, etcdEndpoints []string, clusterToken string) error {
 		grpc.KeepaliveParams(keepalive.ServerParameters{Time: 20 * time.Second, Timeout: 10 * time.Second}),
 	)
 	st := store.NewEtcd(cli)
-	klitev1.RegisterClusterServiceServer(grpcSrv, server.NewCluster(st))
-	klitev1.RegisterAgentServiceServer(grpcSrv, server.NewAgent(st, clusterToken))
+	// Both services share the hub: agents park command streams through
+	// AgentService, and ClusterService.Logs relays over them.
+	hub := server.NewCommandHub()
+	klitev1.RegisterClusterServiceServer(grpcSrv, server.NewCluster(st, hub))
+	klitev1.RegisterAgentServiceServer(grpcSrv, server.NewAgent(st, clusterToken, hub))
 
 	var wg sync.WaitGroup
 	wg.Add(1)

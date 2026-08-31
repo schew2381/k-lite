@@ -5,6 +5,7 @@ package runtime
 
 import (
 	"context"
+	"io"
 	"time"
 
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
@@ -77,4 +78,9 @@ type Runtime interface {
 	// InspectIP returns the container's klite0 address, or "" before one
 	// is assigned.
 	InspectIP(ctx context.Context, id string) (string, error)
+	// Logs opens the container's log stream, stdout and stderr interleaved.
+	// tail > 0 limits it to that many recent lines, and follow keeps the
+	// stream open until the container exits or ctx ends. The caller closes
+	// the reader.
+	Logs(ctx context.Context, containerID string, follow bool, tail int32) (io.ReadCloser, error)
 }

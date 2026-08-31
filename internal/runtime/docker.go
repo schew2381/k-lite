@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/go-units"
+	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/events"
 	"github.com/moby/moby/api/types/network"
@@ -345,6 +347,49 @@ func (d *Docker) InspectIP(ctx context.Context, id string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+// Logs opens the container's log stream. Workload containers run without a
+// TTY, so the daemon multiplexes stdout and stderr into one framed stream and
+// stdcopy strips the framing back out (research/docker-go-sdk.md). Both land
+// on the same pipe, interleaved the way docker logs prints them.
+func (d *Docker) Logs(ctx context.Context, containerID string, follow bool, tail int32) (io.ReadCloser, error) {
+	tailArg := "all"
+	if tail > 0 {
+		tailArg = strconv.Itoa(int(tail))
+	}
+	raw, err := d.cli.ContainerLogs(ctx, containerID, client.ContainerLogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     follow,
+		Tail:       tailArg,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("container logs: %w", err)
+	}
+	pr, pw := io.Pipe()
+	go func() {
+		_, cerr := stdcopy.StdCopy(pw, pw, raw)
+		// A follow stream ends with a plain EOF when the container exits,
+		// which lands here as a nil error and closes the pipe cleanly.
+		_ = pw.CloseWithError(cerr)
+	}()
+	return &logStream{pr: pr, raw: raw}, nil
+}
+
+// logStream hands the demuxed pipe to the caller. Close also closes the
+// daemon stream, which unblocks the demux goroutine on an idle follow.
+type logStream struct {
+	pr  *io.PipeReader
+	raw io.Closer
+}
+
+func (l *logStream) Read(p []byte) (int, error) { return l.pr.Read(p) }
+
+func (l *logStream) Close() error {
+	err := l.raw.Close()
+	_ = l.pr.Close()
+	return err
 }
 
 // WatchEvents streams start and die events for the node's containers, the

@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package klite.v1;
+
+import "klite/v1/agent.proto";
+
+option go_package = "github.com/schew2381/k-lite/internal/gen/klitev1;klitev1";
+
+// KliteNetService runs inside the per-node klite-net container. The node's
+// agent is its only client, over the container's 127.0.0.1-published port.
+service KliteNetService {
+  rpc ApplyConfig(ApplyConfigRequest) returns (ApplyConfigResponse);
+  rpc Probes(ProbesRequest) returns (ProbesResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+// Full-state push, replacing whatever config klite-net held (it keeps
+// nothing across restarts on purpose — the agent re-pushes).
+message ApplyConfigRequest {
+  NetDesired net = 1;
+}
+
+message ApplyConfigResponse {}
+
+message ProbesRequest {}
+
+message ProbeState {
+  string instance = 1;
+  string ip = 2;
+  int32 port = 3;
+  bool ready = 4;
+}
+
+message ProbesResponse {
+  repeated ProbeState probes = 1;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool dns_ready = 1;
+  int32 vips_bound = 2;
+}
