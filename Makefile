@@ -37,6 +37,10 @@ precommit:
 ui:
 	cd ui && npm ci && npm run build
 
+# make node-1 runs an agent for node-1. Any suffix works.
+node-%:
+	go run ./cmd/klite-agent --node node-$*
+
 etcd-up:
 	hack/etcd-up.sh
 

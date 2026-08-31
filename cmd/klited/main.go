@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
+	"github.com/schew2381/k-lite/internal/controller"
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
 	"github.com/schew2381/k-lite/internal/leader"
 	"github.com/schew2381/k-lite/internal/server"
@@ -30,16 +31,17 @@ const defaultEtcd = "127.0.0.1:2379,127.0.0.1:2381,127.0.0.1:2383"
 func main() {
 	listen := flag.String("listen", "127.0.0.1:7443", "gRPC listen address (plain TCP until M8 adds mTLS)")
 	etcdEndpoints := flag.String("etcd", defaultEtcd, "comma-separated etcd client endpoints")
+	clusterToken := flag.String("cluster-token", "dev-token", "shared secret agents must present at Register")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
-	if err := run(*listen, strings.Split(*etcdEndpoints, ",")); err != nil {
+	if err := run(*listen, strings.Split(*etcdEndpoints, ","), *clusterToken); err != nil {
 		slog.Error("klited exited", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(listen string, etcdEndpoints []string) error {
+func run(listen string, etcdEndpoints []string, clusterToken string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -62,8 +64,9 @@ func run(listen string, etcdEndpoints []string) error {
 		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{MinTime: 10 * time.Second, PermitWithoutStream: true}),
 		grpc.KeepaliveParams(keepalive.ServerParameters{Time: 20 * time.Second, Timeout: 10 * time.Second}),
 	)
-	klitev1.RegisterClusterServiceServer(grpcSrv, server.NewCluster(store.NewEtcd(cli)))
-	klitev1.RegisterAgentServiceServer(grpcSrv, server.NewAgent())
+	st := store.NewEtcd(cli)
+	klitev1.RegisterClusterServiceServer(grpcSrv, server.NewCluster(st))
+	klitev1.RegisterAgentServiceServer(grpcSrv, server.NewAgent(st, clusterToken))
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -74,9 +77,8 @@ func run(listen string, etcdEndpoints []string) error {
 		err := leader.RunWhenLeader(ctx, cli, id,
 			func() { slog.Info("controllers: standing by") },
 			func(leadCtx context.Context) {
-				// M2 hangs the real controllers here. Leading is the whole job for now.
 				slog.Info("controllers: leading")
-				<-leadCtx.Done()
+				controller.RunAll(leadCtx, st)
 				slog.Info("controllers: leadership released")
 			})
 		if err != nil && !errors.Is(err, context.Canceled) {
