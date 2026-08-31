@@ -4,4 +4,4 @@ A lite version of Kubernetes.
 
 ## Decision log
 
-Design decisions and their tradeoffs are tracked in [`decisions/`](decisions/README.md) — one record per decision, structured for later turning into a presentation.
+Design decisions are recorded as ADRs in `docs/adr/` and domain terminology in `CONTEXT.md`, both maintained via the `/grill-with-docs` skill (created lazily, so they may not exist yet).

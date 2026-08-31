@@ -4,6 +4,10 @@
 
 **Always commit directly to `main`.** Do not create feature branches or pull requests for this repo.
 
+## Decision tracking
+
+Design decisions are recorded as ADRs in `docs/adr/` and the glossary in `CONTEXT.md`, following the `domain-modeling` skill's formats (typically produced during `/grill-with-docs` sessions). One deviation from the minimal ADR format: **always include the Considered Options and Consequences sections** in this repo's ADRs — the decision log will later be turned into a presentation about the decisions made and their tradeoffs, so rejected alternatives and rationale must be captured even when they'd normally be skipped.
+
 ## Writing quality in code
 
 All prose written into code files — docstrings, comments, README text, decision records — must be evaluated with the personal `/writing` skill. Invoke it via an **adversarial agent**: spawn a subagent whose job is to critique the writing against the /writing skill's rules and flag violations (banned words, AI-tell structures, rhythm problems, etc.), not to rubber-stamp it. Apply this to any and all writing produced in this repo.
