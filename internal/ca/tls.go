@@ -23,8 +23,8 @@ func ServerTLS(serverCert *tls.Certificate, caPool *x509.CertPool) *tls.Config {
 	}
 }
 
-// AgentTLS builds a joined agent's client config: roots pinned to the
-// cluster CA, node cert presented.
+// AgentTLS builds a joined agent's client config, with roots pinned to the
+// cluster CA and the node cert presented.
 func AgentTLS(caPool *x509.CertPool, clientCert *tls.Certificate) *tls.Config {
 	return &tls.Config{
 		RootCAs:      caPool,
@@ -59,7 +59,7 @@ func (b *Bootstrap) TLSConfig() *tls.Config {
 	}
 }
 
-// verifyConnection re-runs the pin so a resumed session cannot skip it.
+// verifyConnection re-runs the pin so a resumed session can't skip it.
 //
 //nolint:gocritic // the signature is fixed by tls.Config.VerifyConnection
 func (b *Bootstrap) verifyConnection(cs tls.ConnectionState) error {
@@ -73,7 +73,7 @@ func (b *Bootstrap) verifyConnection(cs tls.ConnectionState) error {
 // VerifyPeerCertificate hashes the presented root against the pin, verifies
 // the leaf chains to it, and captures the CA PEM. The chain check matters:
 // the CA cert is public, so a pin alone would pass anyone replaying it
-// behind their own leaf, and the join token rides this connection next.
+// behind their own leaf. The join token rides this connection next.
 func (b *Bootstrap) VerifyPeerCertificate(rawCerts [][]byte, _ [][]*x509.Certificate) error {
 	if len(rawCerts) == 0 {
 		return errors.New("server presented no certificates")

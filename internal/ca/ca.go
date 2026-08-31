@@ -158,9 +158,9 @@ func newTemplate(subject *pkix.Name, now time.Time, years int) (*x509.Certificat
 	}, nil
 }
 
-// ServerCert issues a one-year serving cert for klited's listeners, hosts
-// split into IP and DNS SANs. The returned chain appends the CA cert so
-// bootstrap dials can pin and capture it.
+// ServerCert issues a one-year serving cert for klited's listeners, with
+// hosts split into IP and DNS SANs. The returned chain appends the CA cert
+// so bootstrap dials can pin and capture it.
 func (c *CA) ServerCert(hosts []string) (*tls.Certificate, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -228,7 +228,7 @@ func (c *CA) SignNodeCSR(csrPEM []byte, node string) ([]byte, error) {
 }
 
 // NewNodeCSR generates a node's ECDSA P-256 key and a CSR for Bootstrap.Join.
-// The CSR names the node only as a debugging courtesy; SignNodeCSR discards it.
+// The CSR names the node only as a debugging courtesy that SignNodeCSR discards.
 func NewNodeCSR(node string) (csrPEM, keyPEM []byte, err error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {

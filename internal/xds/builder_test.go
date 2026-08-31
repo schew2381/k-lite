@@ -83,7 +83,7 @@ func getListener(t *testing.T, snap *cachev3.Snapshot, name string) *listenerv3.
 
 type rbacView struct {
 	action     rbaccfgv3.RBAC_Action
-	principals [][]string // per policy in key order; "*" for any, else "ip/len"
+	principals [][]string // per policy in key order, "*" for any, else "ip/len"
 }
 
 // decodeFilters flattens the single filter chain into filter names in order,
@@ -233,7 +233,7 @@ func assertServiceCluster(t *testing.T, snap *cachev3.Snapshot, service string) 
 	}
 	panicThreshold := cl.GetCommonLbConfig().GetHealthyPanicThreshold()
 	if panicThreshold == nil {
-		t.Fatal("healthy_panic_threshold not set; the 50% default breaks draining")
+		t.Fatal("healthy_panic_threshold not set: the 50% default breaks draining")
 	}
 	if panicThreshold.GetValue() != 0 {
 		t.Errorf("healthy_panic_threshold = %v, want 0", panicThreshold.GetValue())

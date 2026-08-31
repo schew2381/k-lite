@@ -29,7 +29,7 @@ func MintToken(caPEM []byte, secret string) string {
 	return tokenPrefix + hex.EncodeToString(sum[:]) + "::" + tokenUser + ":" + secret
 }
 
-// ParseToken splits a join token, validating shape only; VerifyCAHash checks
+// ParseToken splits a join token, validating shape only. VerifyCAHash checks
 // the pin and the server checks the secret.
 func ParseToken(s string) (Token, error) {
 	rest, ok := strings.CutPrefix(s, tokenPrefix)

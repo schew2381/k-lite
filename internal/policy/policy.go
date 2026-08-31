@@ -1,7 +1,7 @@
 // Package policy evaluates NetworkPolicy objects with istio-lite semantics
 // (ADR 0009): DENY rules always win, and a Service flips to allowlist mode
-// once any ALLOW rule targets it. Pure functions, shared by the xDS RBAC
-// compiler, the PolicyCheck RPC, and the UI simulator.
+// once any ALLOW rule targets it. All of it is pure functions, shared by the
+// xDS RBAC compiler, the PolicyCheck RPC, and the UI simulator.
 package policy
 
 import (
@@ -107,8 +107,8 @@ func ruleFromMatches(r *klitev1.PolicyRule, from string) bool {
 	return r.GetFrom() == "*" || r.GetFrom() == from
 }
 
-// ruleTargets reports whether the rule's destination covers `to`; except is
-// only consulted on the wildcard.
+// ruleTargets reports whether the rule's destination covers `to`, consulting
+// the except list only on the wildcard.
 func ruleTargets(r *klitev1.PolicyRule, to string) bool {
 	if r.GetTo() == to {
 		return true

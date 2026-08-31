@@ -1,3 +1,7 @@
+---
+status: ownership moved — the user builds the UI and its HTTP facade in a separate session, and this session's cluster work exposes only the gRPC ClusterService
+---
+
 # The UI is four pages and a policy simulator
 
 The UI is React + Vite + Tailwind, built with the frontend-design skill. It compiles to static files, embeds into `klited` via go:embed, and stays live through the REST/SSE facade. It ships four pages, plus a "can A reach B?" simulator backed by the PolicyCheck RPC:

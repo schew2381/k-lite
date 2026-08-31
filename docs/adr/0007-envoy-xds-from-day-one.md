@@ -20,4 +20,8 @@ Each node runs an upstream Envoy programmed by `klited` over xDS via go-control-
 
 ## Outcome
 
-The gate passed on 2026-08-31 (`hack/spike-envoy/`). Envoy v1.31.5 on colima/arm64 took CDS/EDS/LDS over one ADS stream from a host-side go-control-plane server, bound a VIP listener through `freebind` before the address existed, and applied a targeted RBAC deny hitlessly (43 allowed, 2 denied, zero misses under load). The fallback stays recorded but unused. M4 inherits three constraints from the run: netns-scoped config belongs on the donor container, the xDS bootstrap cluster needs explicit HTTP/2 typed options with the node id matching the snapshot key exactly, and health checks must gate on `lds.update_success` rather than `connected_state`.
+The gate passed on 2026-08-31 (`hack/spike-envoy/`). Envoy v1.31.5 on colima/arm64 took CDS/EDS/LDS over one ADS stream from a host-side go-control-plane server, bound a VIP listener through `freebind` before the address existed, and applied a targeted RBAC deny hitlessly (43 allowed, 2 denied, zero misses under load). The fallback stays recorded but unused. M4 inherits three constraints from the run:
+
+1. Netns-scoped config belongs on the donor container.
+2. The xDS bootstrap cluster needs explicit HTTP/2 typed options, with the node id matching the snapshot key exactly.
+3. Health checks must gate on `lds.update_success` rather than `connected_state`.

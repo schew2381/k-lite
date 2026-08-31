@@ -35,7 +35,7 @@ const (
 
 // BuildSnapshot turns net into a validated xDS snapshot for node. Distinct
 // version strings per change are the caller's job (pass the desired-state
-// revision); Envoy ignores a snapshot whose version it already ACKed.
+// revision), since Envoy ignores a snapshot whose version it already ACKed.
 func BuildSnapshot(node, version string, net *klitev1.NetDesired) (*cachev3.Snapshot, error) {
 	listeners, err := buildListeners(net)
 	if err != nil {
@@ -95,10 +95,11 @@ func buildListener(svc *klitev1.ServiceVIP, net *klitev1.NetDesired) (*listenerv
 }
 
 // rbacFilters compiles the istio-lite policy table (ADR 0009) for the
-// listener of destination service: a DENY filter when any deny policy
-// yields principals, then an ALLOW filter whenever an allow policy targets
-// the service (allowlist mode), even if no principals remain — an empty
-// ALLOW filter admits nobody, which is the correct flip semantics.
+// destination service's listener: a DENY filter when any deny policy yields
+// principals, then an ALLOW filter whenever an allow policy targets the
+// service (allowlist mode). The ALLOW filter stays even when no principals
+// remain, because an empty ALLOW filter admits nobody, which is the correct
+// flip semantics.
 func rbacFilters(service string, net *klitev1.NetDesired) ([]*listenerv3.Filter, error) {
 	deny := map[string]*rbaccfgv3.Policy{}
 	allow := map[string]*rbaccfgv3.Policy{}
@@ -141,8 +142,8 @@ func policyTargets(pol *klitev1.CompiledPolicy, service string) bool {
 }
 
 // addPolicy translates one CompiledPolicy into an Envoy RBAC policy. A from
-// service with zero current instances yields zero principals; the policy is
-// dropped because Envoy rejects principal-less policies, and matching
+// service with zero current instances yields zero principals. The policy is
+// then dropped because Envoy rejects principal-less policies, and matching
 // nothing is the correct semantics anyway.
 func addPolicy(policies map[string]*rbaccfgv3.Policy, index int, pol *klitev1.CompiledPolicy, ipIdentity map[string]string) {
 	principals := principalsFor(pol.GetFrom(), ipIdentity)
@@ -215,8 +216,9 @@ func buildCluster(service string) *clusterv3.Cluster {
 				ConfigSourceSpecifier: &corev3.ConfigSource_Ads{Ads: &corev3.AggregatedConfigSource{}},
 			},
 		},
-		// Mandatory: the 50% default panic threshold ignores health the
-		// moment one endpoint of two drains (ADR 0010, research/envoy-xds.md).
+		// The default 50% panic threshold ignores health the moment one
+		// endpoint of two drains, so zero is mandatory (ADR 0010,
+		// research/envoy-xds.md).
 		CommonLbConfig: &clusterv3.Cluster_CommonLbConfig{
 			HealthyPanicThreshold: &typev3.Percent{Value: 0},
 		},

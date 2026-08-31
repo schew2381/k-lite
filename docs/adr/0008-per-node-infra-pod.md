@@ -20,7 +20,7 @@ node-1's infra pod (one shared netns)          instances on klite0
 ## Consequences
 
 - Agent startup sequencing matters. klite-net comes first because it owns the netns, then Envoy joins with `network_mode: container:<klite-net>`.
-- Everything netns-scoped rides the donor: the `host.docker.internal:host-gateway` mapping, NET_ADMIN, and the VIPs all go on klite-net's container, because Docker rejects those options on a container that joins another's network (spike 2 caught this live).
-- Workload containers get `--dns <their node's klite-net IP> --dns-search svc.klite --dns-opt ndots:1`, a single upstream, because a second resolver racing NXDOMAINs corrupts name resolution in ways that only show under load. The ndots option is load-bearing: overriding DNS makes Docker write `ndots:0`, and musl resolvers then skip the search domain entirely, so bare names like `b` die on alpine images (spike 1 caught this).
+- Everything netns-scoped rides the donor: the `host.docker.internal:host-gateway` mapping, NET_ADMIN, and the VIPs all go on klite-net's container because Docker rejects those options on a container that joins another's network (spike 2 caught this live).
+- Workload containers get `--dns <their node's klite-net IP> --dns-search svc.klite --dns-opt ndots:1`, a single upstream, because a second resolver racing NXDOMAINs corrupts name resolution in ways that only show under load. The ndots option is load-bearing: overriding DNS makes Docker write `ndots:0`, and musl resolvers then skip the search domain entirely. That kills bare names like `b` on alpine images (spike 1 caught this).
 - klite-net probes instance readiness from inside the network and reports it through the agent, since the host has no route to probe anything.
 - That our infrastructure layer had to reinvent the pod is the best available argument for why Kubernetes has them. ADR 0014 records the irony.

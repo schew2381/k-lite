@@ -109,7 +109,7 @@ func TestMTLSRoundtrip(t *testing.T) {
 		t.Errorf("server saw %+v, want node alice", got)
 	}
 
-	// A certless client (CLI, joining agent) is admitted; per-RPC auth
+	// A certless client (CLI, joining agent) is admitted, and per-RPC auth
 	// takes over from there.
 	go func() { seen <- acceptOne(ln) }()
 	if err := dial(t, ln.Addr().String(), &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}); err != nil {
@@ -182,8 +182,8 @@ func TestBootstrapRejectsWrongCA(t *testing.T) {
 	}
 }
 
-// A rogue server can replay the public CA cert behind its own leaf; the pin
-// matches, so the chain check has to be what rejects it.
+// A rogue server can replay the public CA cert behind its own leaf and pass
+// the pin, so the chain check has to be what rejects it.
 func TestBootstrapRejectsForeignLeafWithPinnedCA(t *testing.T) {
 	t.Parallel()
 	real, evil := testCA(t), testCA(t)
