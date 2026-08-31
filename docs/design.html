@@ -1,0 +1,1537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>k-lite — the design, on one board</title>
+<meta name="description" content="Interactive walkthrough of the k-lite architecture: declarative YAML, an HA control plane on etcd, Envoy-per-node service discovery, istio-lite policies — and how the design evolved to get there.">
+<style>
+:root{
+  --board:#f7f6f1;
+  --board-edge:#e7e5dc;
+  --ink:#2b2a24;          /* dry-erase black */
+  --ink-soft:#6b6a60;
+  --ctrl:#2456a6;         /* expo blue — control plane */
+  --data:#1e7a46;         /* green — real traffic */
+  --deny:#c63b2f;         /* red — policy */
+  --ghost:#b0aea2;        /* half-erased marker */
+  --hilite:rgba(255,214,64,.40);  /* highlighter swipe */
+  --postit:#ffe58a;
+  --postit-edge:#e8c95f;
+  --card:#ffffff;
+  --hand:"Chalkboard SE","Comic Sans MS","Segoe Print",cursive;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} }
+body{
+  margin:0; background:var(--board); color:var(--ink);
+  font-family:var(--sans); font-size:16px; line-height:1.55;
+  background-image:
+    radial-gradient(1200px 500px at 75% -10%, rgba(255,255,255,.75), rgba(255,255,255,0) 60%),
+    radial-gradient(700px 300px at 12% 30%, rgba(176,174,162,.10), rgba(176,174,162,0) 70%),
+    radial-gradient(900px 380px at 90% 75%, rgba(176,174,162,.08), rgba(176,174,162,0) 70%);
+  background-attachment:fixed;
+}
+a{color:var(--ctrl)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+
+/* ---------- tray nav ---------- */
+.tray{
+  position:sticky;top:0;z-index:50;
+  background:linear-gradient(#e3e2db,#cfcec6 85%,#bab9b1);
+  border-bottom:1px solid #a8a7a0;
+  box-shadow:0 1px 6px rgba(43,42,36,.18);
+}
+.tray-in{max-width:1080px;margin:0 auto;padding:8px 20px;display:flex;align-items:center;gap:18px}
+.tray .mark{font-family:var(--hand);font-size:20px;font-weight:700;letter-spacing:.5px;text-decoration:none;color:var(--ink)}
+.tray nav{display:flex;gap:4px;flex:1;overflow-x:auto;scrollbar-width:none}
+.tray nav::-webkit-scrollbar{display:none}
+.tray nav a{
+  font-size:13.5px;color:var(--ink-soft);text-decoration:none;white-space:nowrap;
+  padding:5px 10px;border-radius:999px;border:1px solid transparent;
+}
+.tray nav a:hover{color:var(--ink)}
+.tray nav a.here{color:var(--ink);border-color:#a8a7a0;background:rgba(255,255,255,.55)}
+.legend{display:flex;gap:12px;font-size:12.5px;color:var(--ink-soft);align-items:center}
+.legend b{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+.legend .c b{background:var(--ctrl)} .legend .d b{background:var(--data)} .legend .p b{background:var(--deny)}
+@media(max-width:820px){ .legend{display:none} }
+
+/* ---------- sections ---------- */
+section{padding:64px 0 30px}
+.eyebrow{
+  font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-soft);margin:0 0 6px;
+}
+h1,h2{margin:0 0 10px;line-height:1.12}
+h2{font-size:clamp(24px,3.4vw,32px);font-weight:750;letter-spacing:-.01em}
+.lede{max-width:64ch;color:#4a4940;margin:0 0 22px;font-size:16.5px}
+.lede code, p code{font-family:var(--mono);font-size:.86em;background:rgba(43,42,36,.06);padding:1px 5px;border-radius:4px}
+.note-hand{font-family:var(--hand);color:var(--ink-soft);font-size:15px}
+
+/* ---------- hero ---------- */
+#top{padding-top:56px}
+.hero-head{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 34px;margin-bottom:8px}
+.wordmark{font-family:var(--hand);font-size:clamp(44px,7vw,72px);font-weight:700;line-height:.95;margin:0}
+.thesis{max-width:47ch;font-size:clamp(16.5px,1.9vw,19px);color:#3c3b33;margin:6px 0 0}
+.hero-sub{max-width:100ch;font-size:14px;color:var(--ink-soft);margin:10px 0 18px}
+.hero-sub code{font-family:var(--mono);font-size:13px;background:rgba(43,42,36,.06);padding:1px 5px;border-radius:4px}
+
+.idea-row{display:flex;gap:14px;flex-wrap:wrap;margin:20px 0 8px}
+.idea{
+  flex:1 1 220px;background:var(--card);border:1.5px solid var(--ink);
+  border-radius:8px;padding:12px 14px 10px;position:relative;
+  box-shadow:2px 3px 0 rgba(43,42,36,.12);
+}
+.idea::before{
+  content:"";position:absolute;top:-9px;left:50%;transform:translateX(-50%);
+  width:16px;height:16px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#f26d6d,#b32424 70%);
+  box-shadow:0 2px 3px rgba(0,0,0,.25);
+}
+.idea:nth-child(2)::before{background:radial-gradient(circle at 35% 30%,#6da3f2,#2456a6 70%)}
+.idea:nth-child(3)::before{background:radial-gradient(circle at 35% 30%,#79d69a,#1e7a46 70%)}
+.idea:nth-child(4)::before{background:radial-gradient(circle at 35% 30%,#b9b0a2,#6b6a60 70%)}
+.idea h3{margin:2px 0 4px;font-size:15.5px}
+.idea p{margin:0;font-size:13.6px;color:#4a4940}
+
+/* ---------- board panels ---------- */
+.boardbox{
+  background:
+    radial-gradient(900px 300px at 70% 0%, rgba(255,255,255,.8), rgba(255,255,255,0) 65%),
+    #fbfaf6;
+  border:1px solid var(--board-edge);
+  border-radius:10px;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.6), 0 2px 14px rgba(43,42,36,.10);
+  padding:8px;
+}
+.boardbox svg{display:block;width:100%;height:auto}
+svg .lbl{font-family:var(--sans);fill:var(--ink)}
+svg .mono{font-family:var(--mono)}
+svg .hand{font-family:var(--hand)}
+svg .soft{fill:var(--ink-soft)}
+svg .clickable{cursor:pointer}
+svg .clickable:focus{outline:none}
+svg .clickable:focus-visible .hit, svg .clickable:hover .hit{stroke:var(--ctrl);stroke-width:2.5;opacity:1}
+svg .hit{fill:transparent;stroke:transparent}
+svg text{user-select:none;-webkit-user-select:none}
+.ink-stroke{transition:stroke-dashoffset .7s ease}
+@media (prefers-reduced-motion: reduce){ .ink-stroke{transition:none} }
+
+/* ---------- players ---------- */
+.player{margin-top:14px}
+.caption{
+  display:flex;gap:12px;align-items:flex-start;
+  background:var(--card);border:1.5px solid var(--ink);border-radius:8px;
+  padding:12px 16px;min-height:88px;box-shadow:2px 3px 0 rgba(43,42,36,.12);
+}
+.caption .stepno{
+  font-family:var(--hand);font-size:24px;line-height:1;min-width:38px;text-align:center;
+  color:var(--ctrl);padding-top:3px;
+}
+.caption p{margin:0;font-size:15.5px}
+.caption p code{font-family:var(--mono);font-size:13.5px;background:rgba(43,42,36,.06);padding:1px 5px;border-radius:4px}
+.controls{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+.controls .dots{display:flex;gap:6px;margin:0 6px}
+.controls .dots button{
+  width:12px;height:12px;border-radius:50%;border:1.5px solid var(--ink);
+  background:transparent;cursor:pointer;padding:0;
+}
+.controls .dots button[aria-current="true"]{background:var(--ink)}
+button.btn{
+  font-family:var(--sans);font-size:14px;font-weight:600;color:var(--ink);
+  background:var(--card);border:1.5px solid var(--ink);border-radius:8px;
+  padding:7px 14px;cursor:pointer;box-shadow:2px 2px 0 rgba(43,42,36,.16);
+}
+button.btn:hover{transform:translate(-1px,-1px);box-shadow:3px 3px 0 rgba(43,42,36,.16)}
+button.btn:active{transform:translate(1px,1px);box-shadow:0 0 0 rgba(0,0,0,0)}
+button.btn:disabled{opacity:.45;cursor:default;transform:none;box-shadow:2px 2px 0 rgba(43,42,36,.08)}
+button.btn:focus-visible,.controls .dots button:focus-visible,.toggle input:focus-visible+.track{outline:2.5px solid var(--ctrl);outline-offset:2px}
+button.btn.primary{background:#eef3fb;border-color:var(--ctrl);color:var(--ctrl)}
+button.btn.danger{background:#fdf1ef;border-color:var(--deny);color:var(--deny)}
+button.btn.go{background:#eef8f1;border-color:var(--data);color:var(--data)}
+.spacer{flex:1}
+
+/* toggle */
+.toggle{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-size:14px;font-weight:600}
+.toggle input{position:absolute;opacity:0;pointer-events:none}
+.toggle .track{
+  width:42px;height:24px;border-radius:999px;border:1.5px solid var(--ink);
+  background:var(--card);position:relative;transition:background .15s;
+}
+.toggle .track::after{
+  content:"";position:absolute;top:2.5px;left:3px;width:16px;height:16px;border-radius:50%;
+  background:var(--ink);transition:left .15s;
+}
+.toggle input:checked+.track{background:#fbe3df;border-color:var(--deny)}
+.toggle input:checked+.track::after{left:20px;background:var(--deny)}
+.toggle .lab-off,.toggle .lab-on{font-family:var(--mono);font-size:13px}
+.toggle .lab-on{display:none;color:var(--deny)}
+.toggle input:checked~.lab-on{display:inline}
+.toggle input:checked~.lab-off{display:none}
+
+/* ---------- explainer cards (pieces) ---------- */
+.pieces-grid{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:18px;align-items:start}
+@media(max-width:900px){ .pieces-grid{grid-template-columns:1fr} }
+.explainer{
+  position:sticky;top:64px;
+  background:var(--card);border:1.5px solid var(--ink);border-radius:8px;
+  padding:14px 16px;box-shadow:3px 4px 0 rgba(43,42,36,.12);min-height:250px;
+}
+@media(max-width:900px){ .explainer{position:static;min-height:0} }
+.explainer .kind{font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-soft)}
+.explainer h3{margin:2px 0 8px;font-size:19px}
+.explainer p{margin:0 0 10px;font-size:14.5px}
+.explainer ul{margin:0 0 6px;padding-left:18px;font-size:14px}
+.explainer li{margin-bottom:5px}
+.explainer .why{
+  font-family:var(--hand);font-size:14.5px;color:var(--ctrl);
+  border-top:1px dashed var(--ghost);padding-top:8px;margin-top:10px;
+}
+.explainer .hint{color:var(--ink-soft);font-size:13.5px}
+
+/* ---------- evolution ---------- */
+.stages{display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 16px}
+.stages button{
+  font-family:var(--sans);font-size:13.5px;font-weight:650;color:var(--ink-soft);
+  background:transparent;border:1.5px solid var(--ghost);border-radius:999px;
+  padding:7px 14px;cursor:pointer;
+}
+.stages button:hover{color:var(--ink);border-color:var(--ink)}
+.stages button[aria-current="true"]{color:var(--ink);border-color:var(--ink);background:var(--card);box-shadow:2px 2px 0 rgba(43,42,36,.14)}
+.stages button:focus-visible{outline:2.5px solid var(--ctrl);outline-offset:2px}
+.evo-stage{display:none}
+.evo-stage.on{display:block}
+.evo-note{
+  background:var(--card);border:1.5px solid var(--ink);border-radius:8px;
+  padding:13px 16px;margin-top:14px;box-shadow:2px 3px 0 rgba(43,42,36,.12);
+  font-size:15px;max-width:none;
+}
+.evo-note p{margin:0}
+.evo-note p+p{margin-top:9px}
+.evo-note ol,.evo-note ul{margin:8px 0 0;padding-left:22px}
+.evo-note li{margin:3px 0;font-size:14.5px}
+.evo-legend{font-size:12.5px;color:var(--ink-soft);margin:-6px 0 14px}
+.evo-legend .sw{display:inline-block;width:22px;height:11px;background:var(--hilite);border-radius:2px;vertical-align:-1px;margin-right:4px}
+.evo-legend .gh{display:inline-block;width:22px;height:0;border-top:2px dashed var(--ghost);vertical-align:3px;margin:0 4px 0 14px}
+
+/* round-1 grill table */
+.grill-table{
+  width:100%;border-collapse:collapse;margin-top:14px;
+  background:var(--card);border:1.5px solid var(--ink);border-radius:8px;
+  box-shadow:2px 3px 0 rgba(43,42,36,.12);font-size:13.5px;
+  border-style:hidden;box-shadow:0 0 0 1.5px var(--ink), 2px 3px 0 rgba(43,42,36,.12);
+}
+.grill-table caption{
+  caption-side:top;text-align:left;font-family:var(--hand);font-size:15px;
+  color:var(--ink);padding:14px 2px 8px;
+}
+.grill-table th{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-soft);text-align:left;padding:9px 14px;border-bottom:1.5px solid var(--ink);
+  background:rgba(43,42,36,.03);
+}
+.grill-table td{padding:8px 14px;border-bottom:1px dashed var(--board-edge);vertical-align:top}
+.grill-table tr:last-child td{border-bottom:none}
+.grill-table td:first-child{font-weight:650;white-space:nowrap}
+.grill-table td.ch{color:var(--ctrl);font-weight:600}
+.grill-table td.re{color:#8a6d00;font-style:italic}
+@media(max-width:700px){ .grill-table td:nth-child(2){display:none} .grill-table th:nth-child(2){display:none} }
+
+/* decision cards (post-it style) */
+.decisions{display:grid;grid-template-columns:repeat(auto-fill,minmax(235px,1fr));gap:16px;margin-top:16px}
+.dec{
+  background:linear-gradient(180deg,#ffeb9e, var(--postit) 12%);
+  border:1px solid var(--postit-edge);
+  padding:12px 13px 11px;position:relative;
+  box-shadow:2px 4px 8px rgba(43,42,36,.15);
+  transform:rotate(var(--tilt,-.6deg));
+}
+.dec:nth-child(2n){--tilt:.7deg} .dec:nth-child(3n){--tilt:-.3deg} .dec:nth-child(5n){--tilt:1deg}
+.dec::before{
+  content:"";position:absolute;top:-7px;right:14px;width:13px;height:13px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#9aa0aa,#4c5158 70%);box-shadow:0 2px 3px rgba(0,0,0,.3);
+}
+.dec h4{font-family:var(--hand);font-size:15.5px;margin:0 0 6px;line-height:1.25;padding-right:10px}
+.dec p{margin:0;font-size:12.9px;line-height:1.45}
+.dec p b{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#7a6a24;display:block;margin-top:6px}
+.dec .tag{
+  display:inline-block;font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;
+  padding:2px 8px;border-radius:999px;margin-top:9px;border:1.2px solid;
+}
+.tag.held{color:var(--data);border-color:var(--data);background:rgba(30,122,70,.07)}
+.tag.up{color:#8a6d00;border-color:#c9a416;background:rgba(201,164,22,.10)}
+.tag.rev{color:var(--deny);border-color:var(--deny);background:rgba(198,59,47,.07)}
+.tag.new{color:var(--ctrl);border-color:var(--ctrl);background:rgba(36,86,166,.07)}
+.dec .adr{position:absolute;bottom:9px;right:11px;font-family:var(--mono);font-size:10px;color:#a08a2e}
+
+/* ---------- footer ---------- */
+footer{padding:46px 0 60px;color:var(--ink-soft);font-size:13.5px}
+footer .rule{height:1px;background:var(--board-edge);margin-bottom:18px}
+footer .hand{font-family:var(--hand);font-size:15px;color:var(--ink-soft)}
+footer .paper{display:flex;gap:18px;flex-wrap:wrap;margin:12px 0}
+footer .paper span{font-family:var(--mono);font-size:12.5px;background:rgba(43,42,36,.05);border:1px solid var(--board-edge);border-radius:6px;padding:4px 9px}
+
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+</style>
+</head>
+<body>
+
+<header class="tray">
+  <div class="tray-in">
+    <a class="mark" href="#top">k-lite</a>
+    <nav aria-label="Sections">
+      <a href="#pieces">the pieces</a>
+      <a href="#loop">yaml&nbsp;→&nbsp;running</a>
+      <a href="#discovery">a finds b</a>
+      <a href="#evolution">how it got here</a>
+    </nav>
+    <div class="legend" aria-hidden="true">
+      <span class="c"><b></b>control plane</span>
+      <span class="d"><b></b>real traffic</span>
+      <span class="p"><b></b>policy</span>
+    </div>
+  </div>
+</header>
+
+<!-- ================= HERO ================= -->
+<section id="top">
+  <div class="wrap">
+    <div class="hero-head">
+      <h1 class="wordmark">k-lite</h1>
+      <p class="thesis">You write YAML saying what should run. A control plane that survives losing a member makes the nodes agree, gives every service a name, and lets you say who may talk to whom.</p>
+    </div>
+    <p class="hero-sub">Four Go binaries plus two borrowed engines, all on plain Docker: <code>klited</code> (stateless brains over an <code>etcd</code> trio) · <code>klite-agent</code> (one per node) · <code>klite-net</code>&nbsp;+&nbsp;<code>Envoy</code> (each node's switchboard) · <code>klite</code> (the CLI). This page is the whiteboard the project started on — cleaned up, animated, and kept honest about what got erased along the way.</p>
+
+    <div class="idea-row" aria-label="The whole idea in four moves">
+      <div class="idea"><h3>1 · Declare</h3><p><code>klite apply</code> hands any server replica a wish list — workloads, services, nodes, policies. It all lands in etcd, and nothing imperative ever leaves your terminal.</p></div>
+      <div class="idea"><h3>2 · Converge</h3><p>Every agent watches for its share of the wish list and nudges Docker until reality matches. Kill a container and it comes back, restart count showing.</p></div>
+      <div class="idea"><h3>3 · Discover</h3><p>Instances call each other by name. DNS answers with a stable per-node VIP, and the Envoy behind it checks policy, then relays to a healthy replica.</p></div>
+      <div class="idea"><h3>4 · Survive</h3><p>Containers crash, nodes drain, and even the lead server can die mid-rollout. The lease moves, another replica's controllers wake up, and traffic never notices.</p></div>
+    </div>
+
+    <div class="boardbox" aria-label="The whole cluster on one board">
+      <svg id="board-hero" role="img" aria-label="Diagram of the k-lite cluster: you apply YAML to stateless klited replicas backed by etcd; per-node agents watch over gRPC and run instances on a shared Docker network, each node carrying an infra pod with klite-net and Envoy."></svg>
+    </div>
+    <p class="note-hand" style="margin-top:10px">↑ the current design — scroll on, every section animates this same board</p>
+  </div>
+</section>
+
+<!-- ================= PIECES ================= -->
+<section id="pieces">
+  <div class="wrap">
+    <p class="eyebrow">01 · the pieces</p>
+    <h2>Seven parts that watch, compare, and fix</h2>
+    <p class="lede">Everything on the board is either declaring state, converging on it, or carrying traffic. Click any part (or tab to it) to see what it does and why it exists.</p>
+    <div class="pieces-grid">
+      <div class="boardbox">
+        <svg id="board-pieces" aria-label="The cluster diagram again. Each component is clickable to reveal its description."></svg>
+      </div>
+      <aside class="explainer" id="explainer" aria-live="polite">
+        <span class="kind" id="ex-kind">start here</span>
+        <h3 id="ex-title">Pick a part of the board</h3>
+        <div id="ex-body">
+          <p class="hint">Click a box on the diagram. The blue outline follows keyboard focus too, so <kbd>Tab</kbd> and <kbd>Enter</kbd> work as well.</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ================= LOOP ================= -->
+<section id="loop">
+  <div class="wrap">
+    <p class="eyebrow">02 · yaml → running</p>
+    <h2>One apply, and the cluster catches up</h2>
+    <p class="lede">The board starts with two instances already running: <code>a</code> on node-1, <code>c</code> on node-2. We apply a new workload, <code>b</code>, with two replicas — then break things on purpose, including the leader.</p>
+
+    <div class="boardbox">
+      <svg id="board-loop" aria-label="Step-through animation of applying a workload: YAML to a server replica, etcd, the leader's controllers, agents, Docker, and status flowing back."></svg>
+    </div>
+
+    <div class="player" id="player-loop">
+      <div class="caption">
+        <div class="stepno" id="loop-stepno">1</div>
+        <p id="loop-say" aria-live="polite"></p>
+      </div>
+      <div class="controls">
+        <button class="btn" id="loop-prev" aria-label="Previous step">←</button>
+        <button class="btn primary" id="loop-play">▶ play</button>
+        <button class="btn" id="loop-next" aria-label="Next step">→</button>
+        <div class="dots" id="loop-dots" role="tablist" aria-label="Steps"></div>
+        <span class="spacer"></span>
+        <button class="btn danger" id="loop-kill" disabled title="Finish the walkthrough first">✕ kill b-1</button>
+        <button class="btn go" id="loop-scale" disabled title="Finish the walkthrough first">+ scale b to 3</button>
+        <button class="btn danger" id="loop-leader" disabled title="Finish the walkthrough first">★ kill the leader</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= DISCOVERY ================= -->
+<section id="discovery">
+  <div class="wrap">
+    <p class="eyebrow">03 · a finds b</p>
+    <h2>A name, an address, a bouncer</h2>
+    <p class="lede">Instance <code>a</code> only ever knows the name <code>b</code>. Its node's DNS turns that into a stable local VIP, and the Envoy listening there checks policy, picks a healthy replica, and relays the bytes. Try both curls, then flip the policy on.</p>
+
+    <div class="boardbox">
+      <svg id="board-disc" aria-label="Step-through animation of service discovery: DNS lookup through Docker's resolver to klite-net's DNS, then a TCP connection through the VIP into Envoy and on to a replica."></svg>
+    </div>
+
+    <div class="player" id="player-disc">
+      <div class="caption">
+        <div class="stepno" id="disc-stepno">1</div>
+        <p id="disc-say" aria-live="polite"></p>
+      </div>
+      <div class="controls">
+        <button class="btn" id="disc-prev" aria-label="Previous step">←</button>
+        <button class="btn primary" id="disc-play">▶ play</button>
+        <button class="btn" id="disc-next" aria-label="Next step">→</button>
+        <div class="dots" id="disc-dots" role="tablist" aria-label="Steps"></div>
+        <span class="spacer"></span>
+        <button class="btn go" id="disc-curl-b">curl b:8080</button>
+        <button class="btn go" id="disc-curl-c">curl c:9090</button>
+        <label class="toggle" id="disc-toggle">
+          <input type="checkbox" id="disc-deny">
+          <span class="track" aria-hidden="true"></span>
+          <span class="lab-off">policy off</span>
+          <span class="lab-on">DENY a → c</span>
+        </label>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= EVOLUTION ================= -->
+<section id="evolution">
+  <div class="wrap">
+    <p class="eyebrow">04 · how it got here</p>
+    <h2>The same board, erased and redrawn three times</h2>
+    <p class="lede">The design ran as an interview in rounds: numbered questions, a recommendation for each, the plan recomputed after every answer. Facts went to agents, and every decision stayed with us. Of round 1's five recommendations, two survived contact. Every post-it below is a real decision record (ADRs 0001–0017 in <code>docs/adr/</code>, narrative in <code>docs/design-log.md</code>), reversals included. Those make the best slides.</p>
+
+    <div class="stages" role="tablist" aria-label="Design rounds">
+      <button data-stage="0" aria-current="true">0 · the whiteboard brief</button>
+      <button data-stage="1">1 · the draft plan</button>
+      <button data-stage="2">2 · the grill</button>
+      <button data-stage="3">3 · written down</button>
+    </div>
+    <p class="evo-legend" aria-hidden="true"><span class="sw"></span> highlight = new that round <span class="gh"></span> dashes = erased that round</p>
+
+    <!-- Stage 0 -->
+    <div class="evo-stage on" id="evo-0">
+      <div class="boardbox"><svg id="board-evo0" role="img" aria-label="The original whiteboard: a requirements list and hand-drawn boxes of Docker nodes with services A, B, C, a policy cloud, and a crossed-out arrow."></svg></div>
+      <div class="evo-note"><p>Round zero is a photo, not a design. The brief asked for everything declared in YAML, driven through some server with a CLI, run on nodes, and discoverable by name — on local Docker now, real cloud nodes someday. The margins already held the stretch goals: internet-joined nodes with auth, a UI, live mutation, and network policies. One drawing on that board survives verbatim into the product, an arrow between two services with a red ✕ through it.</p></div>
+    </div>
+
+    <!-- Stage 1 -->
+    <div class="evo-stage" id="evo-1">
+      <div class="boardbox"><svg id="board-evo1" role="img" aria-label="Round one architecture: a single klited with a bbolt file, HTTP long-polling agents, and a hand-rolled DNS plus TCP proxy per node."></svg></div>
+      <div class="evo-note"><p>The draft plan optimized for smallness: one server owning a bbolt file, agents asking for work over HTTP long-poll, and a per-node container running hand-rolled DNS plus a small TCP proxy. Policies were ordered firewall rules. A planning agent stress-tested the macOS data path and verified the two Docker facts the whole design rests on, namely that embedded DNS forwards unknown names to a per-container upstream and that static IPs outside the dynamic range are safe to hand-manage.</p>
+      <p>Four choices from this round never moved again:</p>
+      <ol><li>agents dial out</li><li>the switchboard lives in a container, because macOS gives no choice</li><li>every Service gets a VIP per node</li><li>the agent, not Docker, restarts whatever crashes</li></ol></div>
+      <div class="decisions">
+        <div class="dec"><h4>One server, one bbolt file</h4><p>State lives in an embedded key-value store and survives a process restart.<b>over</b>etcd, Postgres — HA was a non-goal, briefly</p><span class="tag rev">↻ reversed in the grill</span><span class="adr">ADR 0005</span></div>
+        <div class="dec"><h4>Agents ask over HTTP long-poll</h4><p>A dumb repeated question survives any network weather.<b>over</b>WebSockets, gRPC streams</p><span class="tag up">↑ upgraded in the grill</span><span class="adr">ADR 0004</span></div>
+        <div class="dec"><h4>Hand-rolled L4 proxy</h4><p>A few hundred lines of Go relay VIP connections to instances.<b>over</b>Envoy, Traefik, nginx, Consul</p><span class="tag up">↑ upgraded in the grill</span><span class="adr">ADR 0007</span></div>
+        <div class="dec"><h4>Firewall-style policies</h4><p>Ordered rules with priorities, first match wins, default allow.<b>over</b>k8s allowlist-only semantics</p><span class="tag rev">↻ replaced in the grill</span><span class="adr">ADR 0009</span></div>
+        <div class="dec"><h4>Agents always dial out</h4><p>The server never connects to a node, so NAT and cloud firewalls cost nothing.<b>over</b>server-initiated connections</p><span class="tag held">✓ held every round</span><span class="adr">ADR 0004</span></div>
+        <div class="dec"><h4>Our own DNS + a VIP per (Service, Node)</h4><p>Node-local addresses: no ARP fights on the shared bridge, stale DNS caches stay <em>correct</em>, and every call passes a spot where policy can stand.<b>over</b>Docker network aliases, env-var injection, DNS straight to instances, one cluster VIP</p><span class="tag held">✓ held every round</span><span class="adr">ADR 0006</span></div>
+        <div class="dec"><h4>The switchboard is a container</h4><p>On macOS the host can't reach container IPs at all, so DNS and proxy live on the instances' own network.<b>over</b>anything host-side in the data path</p><span class="tag held">✓ held every round</span><span class="adr">ADR 0008</span></div>
+        <div class="dec"><h4>The agent does the restarting</h4><p>Containers run with <code>--restart=no</code>, so exactly one repair loop acts on a crash and the restart counts stay honest.<b>over</b>Docker restart policies</p><span class="tag held">✓ held every round</span><span class="adr">ADR 0011</span></div>
+      </div>
+    </div>
+
+    <!-- Stage 2 -->
+    <div class="evo-stage" id="evo-2">
+      <div class="boardbox"><svg id="board-evo2" role="img" aria-label="Round two architecture: etcd trio with two stateless klited replicas and leader election, Envoy joining klite-net's network namespace, xDS arrows, and the bbolt box erased."></svg></div>
+      <div class="evo-note"><p>Round 1 put five questions on the table, each with a recommendation, and two survived. The argument that carried discovery: adopting a proxy never buys you out of the resolution layer, because something of ours must still say what the name <code>b</code> means. So nginx, caddy, and traefik only outsource byte-forwarding, and the meshes that solve both halves require Kubernetes underneath.</p>
+      <p>Round 2 followed the answers to their conclusion. If the point is demonstrating real cluster behavior, the control plane should survive losing a member and the data plane shouldn't be a homemade proxy destined for the bin:</p>
+      <ul><li>bbolt got erased for a three-member etcd with stateless klited replicas in front</li>
+      <li>Envoy took the proxy job, making klited a miniature istiod speaking real xDS (spike-gated, with the fallback written down)</li>
+      <li>policies switched to Istio's DENY-then-ALLOW model</li>
+      <li>"delete the old instance" grew into drain choreography, with a DRAINING state that stops new connections before old ones die</li></ul></div>
+      <table class="grill-table">
+        <caption>Round 1 — five questions, five recommendations, two survivors</caption>
+        <thead><tr><th>question</th><th>recommended</th><th>chosen</th></tr></thead>
+        <tbody>
+          <tr><td>discovery</td><td>our DNS + hand-rolled L4 proxy</td><td class="re">reopened — "how would an Envoy swap really work?"</td></tr>
+          <tr><td>policy semantics</td><td>ordered firewall rules</td><td class="re">reopened — "how does Istio model this?"</td></tr>
+          <tr><td>agent transport</td><td>HTTP long-poll + SSE</td><td class="ch">gRPC — durability, istio/envoy fidelity</td></tr>
+          <tr><td>storage &amp; HA</td><td>bbolt, HA a non-goal</td><td class="ch">etcd, HA a goal</td></tr>
+          <tr><td>vocabulary</td><td>keep the k8s words</td><td class="ch">Workload / Instance — Pod and Deployment dropped</td></tr>
+        </tbody>
+      </table>
+      <div class="decisions">
+        <div class="dec"><h4>etcd ×3, klited ×N</h4><p>Stateless API replicas sit over real consensus, and controllers run only where the lease lives — the kube-apiserver split at 1:100 scale.<b>over</b>embedded raft (the Nomad shape, and a correctness tarpit), Postgres-behind-a-shim. Supersedes bbolt, whose record stays.</p><span class="tag new">grill round 1→2</span><span class="adr">ADR 0005</span></div>
+        <div class="dec"><h4>gRPC everywhere</h4><p>Protos are the source of truth and agents hold streams. A thin hand-written REST/SSE facade exists only for the browser.<b>over</b>long-poll, a WebSocket framing protocol, grpc-gateway</p><span class="tag new">grill round 1</span><span class="adr">ADR 0004</span></div>
+        <div class="dec"><h4>Speak k-lite, not Kubernetes</h4><p>We renamed exactly where semantics diverge. Workload and Instance are ours, while Service, Node, and NetworkPolicy stay. And we say VIP, never ClusterIP.<b>over</b>borrowing words that import promises we don't keep</p><span class="tag new">grill round 1→2</span><span class="adr">ADR 0001</span></div>
+        <div class="dec"><h4>Envoy from day one</h4><p>Per-node Envoy binds the VIPs — LDS listeners, EDS endpoints, RBAC filters — and what's left for us to write is exactly the control plane. Istio ambient ships this same shape in production: one node-local L4 proxy under a central brain.<b>hedge</b>M0 spike gates it; the custom-proxy fallback is pre-agreed and written down</p><span class="tag new">grill round 2</span><span class="adr">ADR 0007</span></div>
+        <div class="dec"><h4>istio-lite policies</h4><p>DENY always wins. A Service no ALLOW targets accepts everyone, and the first ALLOW flips it to allowlist mode. No priority integers to shadow each other.<b>over</b>round 1's ordered rules, k8s's famously misread semantics</p><span class="tag new">grill round 2</span><span class="adr">ADR 0009</span></div>
+        <div class="dec"><h4>Drain before death</h4><p>Cordon → surge replacements → Ready → DRAINING → SIGTERM → SIGKILL. A rolling update is the same dance, one instance at a time.<b>claim</b>zero failed requests during rollouts and node drains — the verify scripts assert it</p><span class="tag new">grill round 2</span><span class="adr">ADR 0010</span></div>
+        <div class="dec"><h4>The scheduler stays modest</h4><p>Filter (pin, Ready, not cordoned, under maxInstances), then pick the emptiest node. <code>resources:</code> becomes cgroup limits, never placement.<b>so that</b>every scheduling decision has a one-line explanation a demo can say out loud</p><span class="tag new">grill round 2</span><span class="adr">ADR 0012</span></div>
+      </div>
+    </div>
+
+    <!-- Stage 3 -->
+    <div class="evo-stage" id="evo-3">
+      <div class="boardbox"><svg id="board-evo3" role="img" aria-label="Round three architecture: the industrial design plus mTLS locks on every agent connection, a CA inside klited, a UI panel with policy simulator, and the documentation set pinned to the board."></svg></div>
+      <div class="evo-note"><p>Round 3 hardened the edges and wrote the rules for writing things down. A join token now buys a real certificate: the agent sends a CSR, klited's own CA signs it, and every stream after that is mutually authenticated. A remote node needs a server address, a token, and an outbound connection, nothing more. The UI gained a policy simulator, because the evaluator is a pure function and exposing it costs one endpoint. And we made the recording discipline binding — every decision gets its ADR the moment it's made, vocabulary changes update <code>CONTEXT.md</code> in the same commit, and each design session appends to the log this very section is drawn from.</p></div>
+      <div class="decisions">
+        <div class="dec"><h4>Tokens buy certificates</h4><p>One-time join token → CSR → per-node mTLS client cert from klited's CA. Agents and each node's Envoy authenticate every connection with it. Rotation is out of scope, and says so.<b>over</b>bearer tokens forever, one shared cluster secret</p><span class="tag new">grill round 3</span><span class="adr">ADR 0013</span></div>
+        <div class="dec"><h4>A policy simulator in the UI</h4><p>"Can a reach c?" runs the same pure evaluator the RBAC filters and the PolicyCheck RPC use — one function serving three surfaces.<b>plus</b>topology with red deny edges, live tables, log tails, YAML apply. The facade's endpoint list is frozen here.</p><span class="tag new">grill round 3</span><span class="adr">ADR 0015</span></div>
+        <div class="dec"><h4>ADRs at decision time</h4><p>Every decision gets a record when it's made — options considered, consequences, reversals kept and marked, never rewritten.<b>rule</b>code that contradicts an ADR is wrong until a superseding ADR lands</p><span class="tag new">grill round 3</span><span class="adr">CLAUDE.md</span></div>
+        <div class="dec"><h4>Cross-host: deferred, with the seams named</h4><p>EDS endpoints already carry their node, so multi-host confines itself to the proxy's cross-node dialer and per-node subnets. DNS, VIPs, policy, and the agent protocol stay untouched.<b>so that</b>whoever builds it starts from a named list, not an archaeology dig</p><span class="tag new">grill round 3</span><span class="adr">ADR 0016</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="rule"></div>
+    <p class="hand">This page is drawn from the original whiteboard, down to the red ✕ on a blocked arrow.</p>
+    <p>Colors mean the same thing everywhere: <span style="color:var(--ctrl);font-weight:600">blue</span> is the control plane deciding, <span style="color:var(--data);font-weight:600">green</span> is real traffic moving, <span style="color:var(--deny);font-weight:600">red</span> is policy saying no. The paper trail behind this page:</p>
+    <div class="paper">
+      <span>docs/adr/0001…0017</span>
+      <span>CONTEXT.md — the glossary</span>
+      <span>docs/design-log.md — the grill, round by round</span>
+      <span>research/*.md — one file per tool judged</span>
+    </div>
+    <p>The whole page is one file with no dependencies. View source to see how the board draws itself.</p>
+  </div>
+</footer>
+
+<script>
+"use strict";
+/* ============================================================
+   k-lite interactive board
+   Whiteboard SVG primitives + 3 live scenes + 4 evolution boards.
+   ============================================================ */
+
+const NS = "http://www.w3.org/2000/svg";
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const C = { ink:"#2b2a24", soft:"#6b6a60", ctrl:"#2456a6", data:"#1e7a46",
+            deny:"#c63b2f", ghost:"#b0aea2", hilite:"rgba(255,214,64,.40)" };
+
+function S(tag, attrs = {}, parent = null){
+  const el = document.createElementNS(NS, tag);
+  for (const [k,v] of Object.entries(attrs)){
+    if (k === "text") el.textContent = v;
+    else el.setAttribute(k, v);
+  }
+  if (parent) parent.appendChild(el);
+  return el;
+}
+
+function addWobble(svg, id, seed){
+  const f = S("filter", { id, x:"-5%", y:"-5%", width:"110%", height:"110%" }, S("defs", {}, svg));
+  S("feTurbulence", { type:"fractalNoise", baseFrequency:"0.013", numOctaves:"2", seed, result:"n" }, f);
+  S("feDisplacementMap", { in:"SourceGraphic", in2:"n", scale:"2.6" }, f);
+}
+
+/* Scene = layered svg + element registry.
+   layers: hi (highlighter swipes) → ink (wobbly strokes) → type (crisp text) → fx (packets) */
+function makeScene(svgId, vw, vh, seed){
+  const svg = document.getElementById(svgId);
+  svg.setAttribute("viewBox", `0 0 ${vw} ${vh}`);
+  addWobble(svg, svgId + "-wob", seed);
+  const hi   = S("g", {}, svg);
+  const ink  = S("g", { filter:`url(#${svgId}-wob)` }, svg);
+  const type = S("g", {}, svg);
+  const fx   = S("g", {}, svg);
+  const els = {};
+  const strokes = [];
+
+  const reg = (id, box) => (els[id] = box);
+  const track = el => (strokes.push(el), el);
+
+  function rect(x,y,w,h,{stroke=C.ink, sw=2.4, dash=null, fill="none", rx=7}={}){
+    const r = S("rect", { x,y,width:w,height:h,rx, fill, stroke, "stroke-width":sw,
+      "stroke-linecap":"round", class:"ink-stroke" }, ink);
+    if (dash) r.setAttribute("stroke-dasharray", dash);
+    return track(r);
+  }
+  function line(d, {stroke=C.ink, sw=2.2, dash=null}={}){
+    const p = S("path", { d, fill:"none", stroke, "stroke-width":sw,
+      "stroke-linecap":"round", "stroke-linejoin":"round", class:"ink-stroke" }, ink);
+    if (dash) p.setAttribute("stroke-dasharray", dash);
+    return track(p);
+  }
+  function txt(x,y,str,{size=14,cls="lbl",fill=null,anchor="start",weight=null}={}){
+    const t = S("text", { x,y,class:cls,"font-size":size,"text-anchor":anchor,text:str }, type);
+    if (fill) t.setAttribute("fill", fill);
+    if (weight) t.setAttribute("font-weight", weight);
+    return t;
+  }
+  /* labeled chip */
+  function chip(x,y,w,h,label,{size=11,sw=1.7,fill="none",cls="mono",color=null}={}){
+    rect(x,y,w,h,{rx:6,sw,fill});
+    return txt(x+w/2, y+h/2+size*0.36, label, { size, anchor:"middle", cls, fill:color });
+  }
+  /* highlighter swipe (new-this-round) */
+  function halo(x,y,w,h){
+    return S("rect", { x:x-6,y:y-6,width:w+12,height:h+12,rx:12, fill:C.hilite }, hi);
+  }
+  /* half-erased ghost box with red strike */
+  function ghostBox(x,y,w,h,label,sub){
+    rect(x,y,w,h,{stroke:C.ghost, sw:2, dash:"5 5"});
+    txt(x+w/2, y+h/2-2, label, { size:12.5, anchor:"middle", fill:C.ghost, weight:650 });
+    if (sub) txt(x+w/2, y+h/2+15, sub, { size:9.5, anchor:"middle", cls:"hand", fill:C.ghost });
+    line(`M ${x+6} ${y+h-8} L ${x+w-8} ${y+8}`, { stroke:C.deny, sw:2.4 });
+  }
+  /* tiny padlock */
+  function lock(x,y,color=C.ctrl){
+    line(`M ${x-3.5} ${y} a 3.5 4 0 0 1 7 0`, { stroke:color, sw:1.8 });
+    const b = S("rect", { x:x-5.5, y, width:11, height:9, rx:2, fill:color }, ink);
+    return track(b);
+  }
+  function star(x,y,color="#c9a416"){
+    const p = "M0,-8 L2.3,-2.7 L8,-2.3 L3.7,1.5 L5,7 L0,3.9 L-5,7 L-3.7,1.5 L-8,-2.3 L-2.3,-2.7 Z";
+    const g = S("g", { transform:`translate(${x},${y})` }, ink);
+    const s = S("path", { d:p, fill:color, stroke:"#8a6d00", "stroke-width":1 }, g);
+    track(s);
+    return g;
+  }
+
+  const arrows = {};
+  function arrow(id, d, {stroke=C.ctrl, sw=2.2, dash="7 6", label=null, lx=0, ly=0, lsize=12, lcolor=null}={}){
+    const g = S("g", {}, ink);
+    const p = S("path", { d, fill:"none", stroke, "stroke-width":sw,
+      "stroke-linecap":"round", class:"ink-stroke" }, g);
+    if (dash) p.setAttribute("stroke-dasharray", dash);
+    track(p);
+    const L = p.getTotalLength();
+    const end = p.getPointAtLength(L);
+    const back = p.getPointAtLength(Math.max(0, L - 9));
+    const ang = Math.atan2(end.y - back.y, end.x - back.x);
+    const a1 = ang + 2.6, a2 = ang - 2.6, hl = 11;
+    track(S("path", {
+      d:`M ${end.x} ${end.y} L ${end.x + hl*Math.cos(a1)} ${end.y + hl*Math.sin(a1)}
+         M ${end.x} ${end.y} L ${end.x + hl*Math.cos(a2)} ${end.y + hl*Math.sin(a2)}`,
+      stroke, "stroke-width":sw, "stroke-linecap":"round", fill:"none", class:"ink-stroke"
+    }, g));
+    let lab = null;
+    if (label) lab = txt(lx, ly, label, { size:lsize, fill:lcolor || stroke, weight:600 });
+    arrows[id] = { path:p, group:g, label:lab };
+    return arrows[id];
+  }
+
+  let pktToken = 0;
+  function packet(dOrArrowId, {color=C.data, r=6, dur=1100, reverse=false}={}){
+    const d = arrows[dOrArrowId] ? arrows[dOrArrowId].path.getAttribute("d") : dOrArrowId;
+    const guide = S("path", { d, fill:"none", stroke:"none" }, fx);
+    const dot = S("circle", { r, fill:color, opacity:0 }, fx);
+    const L = guide.getTotalLength();
+    const mine = ++pktToken;
+    return new Promise(res => {
+      if (REDUCED){ cleanup(); return res(); }
+      const t0 = performance.now();
+      (function frame(t){
+        if (mine !== pktToken){ cleanup(); return res(); }
+        const k = Math.min(1, (t - t0) / dur);
+        const e = k < .5 ? 2*k*k : 1 - Math.pow(-2*k + 2, 2)/2;
+        const pt = guide.getPointAtLength((reverse ? 1 - e : e) * L);
+        dot.setAttribute("cx", pt.x); dot.setAttribute("cy", pt.y);
+        dot.setAttribute("opacity", k === 1 ? 0 : 1);
+        if (k < 1) requestAnimationFrame(frame);
+        else { cleanup(); res(); }
+      })(t0);
+    });
+    function cleanup(){ guide.remove(); dot.remove(); }
+  }
+  function cancelPackets(){ pktToken++; while (fx.firstChild) fx.removeChild(fx.firstChild); }
+
+  function denyMark(x,y,scale=1){
+    const g = S("g", { class:"fxmark" }, fx);
+    const s = 12*scale;
+    S("path", { d:`M ${x-s} ${y-s} L ${x+s} ${y+s} M ${x+s} ${y-s} L ${x-s} ${y+s}`,
+      stroke:C.deny, "stroke-width":4.2, "stroke-linecap":"round", fill:"none" }, g);
+    return g;
+  }
+  function clearMarks(){ fx.querySelectorAll(".fxmark").forEach(n => n.remove()); }
+
+  function armDrawOn(){
+    if (REDUCED) return;
+    strokes.forEach((el,i) => {
+      let L = 0;
+      try { L = el.getTotalLength(); } catch(e){ return; }
+      el.dataset.eventualDash = el.getAttribute("stroke-dasharray") || "";
+      el.style.strokeDasharray = `${L} ${L}`;
+      el.style.strokeDashoffset = `${L}`;
+      el.style.transitionDelay = `${Math.min(i*40, 1300)}ms`;
+    });
+    type.style.opacity = "0";
+    type.style.transition = "opacity .6s ease 1.1s";
+    hi.style.opacity = "0";
+    hi.style.transition = "opacity .6s ease 1.4s";
+    let done = false;
+    const reveal = () => {           // idempotent; also callable by the stage switcher,
+      if (done) return; done = true; // since IO can miss svgs born inside display:none panes
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        strokes.forEach(el => { el.style.strokeDashoffset = "0"; });
+        type.style.opacity = "1"; hi.style.opacity = "1";
+        setTimeout(() => strokes.forEach(el => {
+          el.style.transition = "none";
+          el.style.strokeDasharray = el.dataset.eventualDash || "none";
+          el.style.strokeDashoffset = "";
+        }), 2400);
+      }));
+    };
+    svg.__reveal = reveal;
+    const io = new IntersectionObserver((ents) => {
+      if (!ents.some(e => e.isIntersecting)) return;
+      io.disconnect();
+      reveal();
+    }, { threshold: 0.2 });
+    io.observe(svg);
+  }
+
+  return { svg, hi, ink, type, fx, els, reg, rect, line, txt, chip, halo, ghostBox, lock, star,
+           arrow, arrows, packet, cancelPackets, denyMark, clearMarks, armDrawOn };
+}
+
+/* ============================================================
+   Instances (the workload containers)
+   ============================================================ */
+const POD_W = 96, POD_H = 76;
+
+function drawInstance(sc, id, x, y, name, ip, {ghost=false}={}){
+  const r = sc.rect(x, y, POD_W, POD_H, { rx:9, sw:2.2 });
+  const label = sc.txt(x+POD_W/2, y+28, name, { size:16, anchor:"middle", weight:700 });
+  const iptxt = sc.txt(x+POD_W/2, y+47, ip, { size:9.5, anchor:"middle", cls:"mono soft" });
+  const state = sc.txt(x+POD_W/2, y+64, "", { size:10, anchor:"middle", cls:"mono", fill:C.soft });
+  const badge = S("circle", { cx:x+POD_W-10, cy:y+11, r:6, fill:C.data, opacity:0 }, sc.type);
+  const wrap = { x, y, w:POD_W, h:POD_H, rect:r, label, iptxt, state, badge, name };
+  sc.reg(id, wrap);
+  setInstState(wrap, ghost ? "hidden" : "ready");
+  return wrap;
+}
+function setInstState(p, st){
+  p.stateName = st;
+  const show = st !== "hidden";
+  [p.rect, p.label, p.iptxt, p.state, p.badge].forEach(el => el.setAttribute("opacity", show ? 1 : 0));
+  if (!show) return;
+  const paint = (stroke, dash, lblFill, stText, stFill, badgeOn, ipOn) => {
+    p.rect.setAttribute("stroke", stroke);
+    p.rect.setAttribute("stroke-dasharray", dash);
+    p.label.setAttribute("fill", lblFill);
+    p.state.textContent = stText; p.state.setAttribute("fill", stFill);
+    p.badge.setAttribute("opacity", badgeOn ? 1 : 0);
+    p.iptxt.setAttribute("opacity", ipOn ? 1 : 0);
+  };
+  if (st === "pending")      paint(C.ghost, "6 5", C.soft, "Pending", C.soft, 0, 0);
+  else if (st === "running") paint(C.ink, "", C.ink, "Running", C.ctrl, 0, 1);
+  else if (st === "ready")   paint(C.ink, "", C.ink, "Ready", C.data, 1, 1);
+  else if (st === "dead")    paint(C.deny, "3 4", C.deny, "Failed", C.deny, 0, 1);
+}
+
+/* ============================================================
+   The current-architecture cluster board (hero / pieces / loop)
+   ============================================================ */
+function drawBoard(svgId, seed, opts = {}){
+  const sc = makeScene(svgId, 1000, 720, seed);
+  const { withB = true } = opts;
+
+  /* --- you --- */
+  sc.rect(28, 56, 176, 84, { rx:9 });
+  sc.txt(46, 90, "you", { size:17, weight:700 });
+  sc.txt(46, 112, "klite CLI · browser", { size:12, cls:"lbl soft" });
+  sc.reg("you", { x:28, y:56, w:176, h:84 });
+
+  /* --- klited replicas --- */
+  function klited(id, x, leader){
+    sc.rect(x, 40, 222, 122, { rx:10, sw:2.7 });
+    sc.txt(x+18, 68, id === "klited1" ? "klited ①" : "klited ②", { size:16.5, weight:750 });
+    sc.chip(x+16, 82, 62, 26, "gRPC", { size:10.5 });
+    sc.chip(x+84, 82, 52, 26, "xDS", { size:10.5 });
+    sc.chip(x+142, 82, 66, 26, "ctrlrs", { size:10.5 });
+    const starG = sc.star(x+190, 60);
+    const lead = sc.txt(x+18, 146, "awake — this one holds the lease", { size:10.5, cls:"hand", fill:"#8a6d00" });
+    const idle = sc.txt(x+18, 146, "asleep — API + xDS still serve", { size:10.5, cls:"hand", fill:C.soft });
+    const box = { x, y:40, w:222, h:122, star:starG, lead, idle };
+    setLeader(box, leader);
+    sc.reg(id, box);
+    return box;
+  }
+  function setLeader(box, on){
+    box.star.setAttribute("opacity", on ? 1 : 0);
+    box.lead.setAttribute("opacity", on ? 1 : 0);
+    box.idle.setAttribute("opacity", on ? 0 : 1);
+  }
+  const k1 = klited("klited1", 258, true);
+  const k2 = klited("klited2", 508, false);
+  sc.setLeader = setLeader;
+
+  /* --- etcd trio --- */
+  sc.rect(776, 40, 196, 122, { rx:10, sw:2.4 });
+  sc.txt(794, 66, "etcd × 3", { size:15.5, weight:750 });
+  for (let i = 0; i < 3; i++)
+    sc.chip(794 + i*54, 80, 46, 30, "kv", { size:10 });
+  sc.txt(794, 134, "all state · watches · the lease", { size:10.5, cls:"lbl soft" });
+  sc.txt(794, 150, "containers", { size:9.5, cls:"mono", fill:C.ctrl });
+  sc.reg("etcd", { x:776, y:40, w:196, h:122 });
+
+  /* klited <-> etcd */
+  sc.arrow("k1etcd", "M 484 100 C 496 100, 496 100, 504 100", { dash:"4 4", sw:1.8 });
+  sc.arrow("k2etcd", "M 734 100 C 750 100, 756 100, 772 100", { dash:"4 4", sw:1.8 });
+
+  /* you -> klited (any replica) */
+  sc.arrow("apply", "M 208 92 C 230 90, 234 88, 252 86",
+    { label:"gRPC · apply / watch — any replica", lx:30, ly:36, lsize:11.5 });
+
+  /* --- klite0 network band --- */
+  S("rect", { x:20, y:455, width:960, height:246, rx:10,
+    fill:"rgba(36,86,166,0.05)", stroke:C.ctrl, "stroke-width":1.2,
+    "stroke-dasharray":"3 6", opacity:.9 }, sc.ink);
+  sc.txt(38, 692, "klite0 · 10.44.0.0/16 — one flat Docker network (local mode: both nodes share it)",
+    { size:11, cls:"mono", fill:C.ctrl });
+  sc.reg("net", { x:20, y:455, w:960, h:246 });
+
+  /* --- nodes --- */
+  function node(id, x, label, agentId, netIp){
+    sc.rect(x, 235, 462, 445, { rx:12, sw:2.6 });
+    sc.txt(x+20, 265, label, { size:16.5, weight:750 });
+    sc.txt(x+20, 284, "a machine with Docker", { size:11, cls:"lbl soft" });
+    /* agent chip */
+    sc.rect(x+282, 246, 162, 44, { rx:8, sw:2 });
+    sc.txt(x+363, 265, "klite-agent", { size:13, anchor:"middle", weight:650 });
+    sc.txt(x+363, 281, "host process", { size:9.5, anchor:"middle", cls:"lbl soft" });
+    sc.reg(agentId, { x:x+282, y:246, w:162, h:44 });
+    /* infra pod: klite-net + envoy sharing a netns */
+    sc.rect(x+22, 470, 180, 200, { rx:10, sw:2.2 });
+    sc.txt(x+112, 492, "infra pod", { size:12.5, anchor:"middle", weight:700 });
+    sc.txt(x+112, 506, "one shared netns · " + netIp, { size:8.8, anchor:"middle", cls:"mono soft" });
+    sc.rect(x+34, 516, 156, 62, { rx:7, sw:1.7 });
+    sc.txt(x+112, 534, "klite-net", { size:12, anchor:"middle", weight:650 });
+    sc.txt(x+112, 549, "kdns :53 · VIPs · probes", { size:8.8, anchor:"middle", cls:"mono soft" });
+    sc.txt(x+112, 564, "owns the netns", { size:9, anchor:"middle", cls:"hand", fill:C.soft });
+    sc.reg("knet-" + id, { x:x+34, y:516, w:156, h:62 });
+    sc.rect(x+34, 586, 156, 62, { rx:7, sw:1.7 });
+    sc.txt(x+112, 604, "envoy", { size:12, anchor:"middle", weight:650 });
+    sc.txt(x+112, 619, "VIP listeners · RBAC", { size:8.8, anchor:"middle", cls:"mono soft" });
+    sc.txt(x+112, 634, "joins that netns", { size:9, anchor:"middle", cls:"hand", fill:C.soft });
+    sc.reg("envoy-" + id, { x:x+34, y:586, w:156, h:62 });
+    sc.reg(id, { x, y:235, w:462, h:445 });
+  }
+  node("node1", 28, "node-1", "agent1", "10.44.0.11");
+  node("node2", 510, "node-2", "agent2", "10.44.0.12");
+
+  /* --- instances --- */
+  drawInstance(sc, "a",  238, 490, "a",   "10.44.128.9");
+  drawInstance(sc, "b1", 356, 490, "b-1", "10.44.128.14", { ghost: !withB });
+  drawInstance(sc, "b2", 722, 490, "b-2", "10.44.130.4",  { ghost: !withB });
+  drawInstance(sc, "c",  840, 490, "c-1", "10.44.130.7");
+  if (svgId === "board-loop") drawInstance(sc, "b3", 356, 588, "b-3", "10.44.128.21", { ghost:true });
+
+  /* --- control arrows --- */
+  sc.arrow("poll1", "M 336 246 C 330 216, 336 196, 356 166",
+    { label:"gRPC streams · mTLS", lx:190, ly:206, lsize:11 });
+  sc.lock(330, 222);
+  sc.arrow("poll2", "M 816 246 C 780 220, 740 190, 700 166", {});
+  sc.lock(772, 224);
+  sc.txt(600, 218, "agents dial out — never the reverse", { size:11.5, cls:"hand", fill:C.ctrl });
+  sc.arrow("xds1", "M 300 166 C 220 300, 160 400, 132 582",
+    { label:"xDS: listeners · endpoints · rules", lx:42, ly:330, lsize:10.5 });
+  sc.arrow("xds2", "M 640 166 C 640 300, 630 440, 618 582", {});
+
+  sc.armDrawOn();
+  return sc;
+}
+
+/* ============================================================
+   Generic step player
+   ============================================================ */
+function makePlayer({ steps, reset, ids, onStep }){
+  const sayEl = document.getElementById(ids.say);
+  const noEl  = document.getElementById(ids.no);
+  const dots  = document.getElementById(ids.dots);
+  const prev  = document.getElementById(ids.prev);
+  const next  = document.getElementById(ids.next);
+  const play  = document.getElementById(ids.play);
+  let i = -1, timer = null, playing = false, gen = 0;
+
+  steps.forEach((_, k) => {
+    const d = document.createElement("button");
+    d.setAttribute("aria-label", `Step ${k+1}`);
+    d.addEventListener("click", () => { stop(); go(k, true); });
+    dots.appendChild(d);
+  });
+
+  function paintDots(){
+    [...dots.children].forEach((d,k) => d.setAttribute("aria-current", k === i ? "true" : "false"));
+    prev.disabled = i <= 0;
+    next.disabled = i >= steps.length - 1;
+  }
+  async function go(k, scrub = false){
+    k = Math.max(0, Math.min(steps.length - 1, k));
+    const g = ++gen;           // supersedes any step still animating
+    i = k;
+    reset();
+    for (let j = 0; j < i; j++) steps[j].persist && steps[j].persist();
+    const st = steps[i];
+    st.persist && st.persist();
+    sayEl.innerHTML = st.say;
+    noEl.textContent = i + 1;
+    paintDots();
+    if (st.fx && !scrub) await st.fx();
+    if (g !== gen) return;
+    if (onStep) onStep(i);
+  }
+  function stop(){ playing = false; clearTimeout(timer); play.textContent = "▶ play"; }
+  async function advance(){
+    if (!playing) return;
+    if (i >= steps.length - 1){ stop(); return; }
+    await go(i + 1);
+    const readMs = Math.max(2400, steps[i].say.replace(/<[^>]+>/g,"").length * 34);
+    timer = setTimeout(advance, REDUCED ? Math.min(readMs, 3200) : readMs);
+  }
+  play.addEventListener("click", async () => {
+    if (playing){ stop(); return; }
+    playing = true; play.textContent = "❚❚ pause";
+    if (i >= steps.length - 1 || i < 0) await go(0); else await go(i);
+    timer = setTimeout(advance, 2200);
+  });
+  prev.addEventListener("click", () => { stop(); go(i - 1, true); });
+  next.addEventListener("click", () => { stop(); go(i + 1); });
+  document.getElementById(ids.player).addEventListener("keydown", (e) => {
+    if (e.key === "ArrowLeft"){ stop(); go(i - 1, true); e.preventDefault(); }
+    if (e.key === "ArrowRight"){ stop(); go(i + 1); e.preventDefault(); }
+  });
+  go(0, true);
+  return { go, stop, get index(){ return i; }, get done(){ return i >= steps.length - 1; } };
+}
+
+/* ============================================================
+   HERO
+   ============================================================ */
+drawBoard("board-hero", 7);
+
+/* ============================================================
+   PIECES (clickable)
+   ============================================================ */
+const PIECE_INFO = {
+  you: {
+    kind:"where it starts", title:"you — the CLI and the UI",
+    body:`<p>You describe what should exist in YAML ("run two replicas of <code>b</code>, give it a name, here's a policy") and hand it to <em>any</em> klited replica with <code>klite apply</code>.</p>
+      <ul><li><code>klite get instances --watch</code> streams changes live, and the browser UI reads a thin REST/SSE facade over the same gRPC API.</li>
+      <li>You send descriptions, not commands, and the cluster keeps trying to satisfy them.</li></ul>`,
+    why:"why declarative: you state the destination, not the driving directions."
+  },
+  klited1: {
+    kind:"control plane · stateless, replicated", title:"klited — brains you can shoot one of",
+    body:`<p>klited runs as two (or three) identical replicas. Each serves the gRPC API and the xDS feed for the Envoys, and none holds state: every read and write goes to etcd.</p>
+      <ul><li>The controllers (scheduler, workload/rollout, endpoints, nodes) run only in the replica holding the etcd lease. The ★ marks it.</li>
+      <li>Kill the leader and the lease lapses in ~5s; another replica's controllers wake up and re-derive everything from etcd.</li>
+      <li>The scheduler filters (pin, Ready, not cordoned, under maxInstances) and picks the emptiest node — every placement decision explainable in one sentence.</li></ul>`,
+    why:"why stateless: it's the kube-apiserver trick — replicas are cattle once the truth lives in the store."
+  },
+  klited2: "klited1",
+  etcd: {
+    kind:"state · 3 containers", title:"etcd — the only memory the cluster has",
+    body:`<p>Every applied object, every instance record, every lease lives here, in a three-member etcd cluster running as containers.</p>
+      <ul><li>klited replicas are interchangeable <em>because</em> this isn't: consensus keeps one true history, outsourced to the software Kubernetes itself trusts.</li>
+      <li>Watches drive everything — controllers and xDS snapshots react to changes instead of polling.</li></ul>`,
+    why:"why not bbolt: it was bbolt in the draft plan. Then we promoted HA from non-goal to goal, and a single file on one machine can't be highly available. ADR 0005 keeps the reversal on the record."
+  },
+  agent1: {
+    kind:"per node · host process", title:"klite-agent — hands on each node",
+    body:`<p>One per node. It joins with a token, gets a real mTLS certificate, then holds gRPC streams open: desired state flowing down, status flowing up every few seconds.</p>
+      <ul><li>Always dials <em>out</em> — the server never needs a way in, so a node behind a home router works like one in the next terminal.</li>
+      <li>Drives Docker by labels (<code>io.klite.*</code>), keeps the infra pod alive, and owns restarts with visible counts.</li></ul>`,
+    why:"why streams now: round 1 used HTTP long-poll. The grill upgraded it — same dial-out shape, less pretending gRPC doesn't exist."
+  },
+  agent2: "agent1",
+  "knet-node1": {
+    kind:"per node · container", title:"klite-net — owner of the switchboard",
+    body:`<p>A small container that owns the node's network namespace for service plumbing: it runs kdns (answers <code>b.svc.klite</code>), adds and removes VIP addresses, and TCP-probes instances for readiness.</p>
+      <ul><li>Instances get <code>--dns</code> pointed here — a single upstream, because a second resolver racing NXDOMAINs corrupts name resolution in ways that only show under load.</li>
+      <li>kdns answers even for destinations a policy will refuse. Existence is public, reachability is not.</li></ul>`,
+    why:"why a container: on macOS the host can't reach container IPs, so anything instances must talk to has to live on their network. Two containers sharing a netns — we needed a pod, so we built one."
+  },
+  "knet-node2": "knet-node1",
+  "envoy-node1": {
+    kind:"per node · container, shared netns", title:"Envoy — the bouncer at every VIP",
+    body:`<p>An Envoy joins klite-net's network namespace and binds a listener on every VIP the node owns. klited feeds it everything over xDS: listeners, clusters, endpoints, and RBAC rules.</p>
+      <ul><li>Per connection: identify the caller by source IP, run DENY rules then ALLOW rules, then relay to a READY endpoint — DRAINING ones get nothing new.</li>
+      <li>Enforcement sits at the <em>source</em> node's Envoy deliberately: the destination would only ever see the proxy's IP, never the real caller's.</li>
+      <li>The draft plan put a hand-rolled Go proxy here. The grill said: build a miniature istiod instead — and Istio's ambient mode runs this exact shape in production, one node-local proxy (ztunnel) fed by a central control plane.</li></ul>`,
+    why:"why Envoy: draining, load balancing, and hitless config updates arrive battle-tested instead of hand-debugged. An M0 spike gates it, and the fallback is written down."
+  },
+  "envoy-node2": "envoy-node1",
+  a: {
+    kind:"workload · docker container", title:"instances — plain containers, labeled",
+    body:`<p>An Instance (one replica of a Workload) is a single Docker container carrying <code>io.klite.*</code> labels so its agent recognizes and manages it.</p>
+      <ul><li>Started with <code>--restart=no</code>: recovery belongs to the agent, so the RESTARTS column is real data, not a guess reconstructed from Docker events.</li>
+      <li>Lifecycle: Pending → Running → Ready → (Draining) → gone. Draining instances finish old connections but get no new ones.</li></ul>`,
+    why:"why not 'Pod': an Instance is always one container, so the borrowed word would promise things we don't do. And yes, the infra pod next door is two containers sharing a netns — Kubernetes' Pod abstraction stops looking arbitrary the moment you build without it."
+  },
+  b1:"a", b2:"a", c:"a",
+  net: {
+    kind:"network", title:"klite0 — one flat bridge (for now)",
+    body:`<p>All instances and both infra pods share <code>10.44.0.0/16</code>, carved by role: infra at <code>.0.x</code>, VIPs in <code>.64.0/18</code>, instances from <code>.128.0/17</code>.</p>
+      <ul><li>Locally both "nodes" sit on one bridge, so cross-node traffic is ordinary routing.</li>
+      <li>Real multi-host later changes only how Envoy dials remote endpoints — names, VIPs, policies stay put (ADR 0016).</li></ul>`,
+    why:"why weird ranges: the address tells you what a thing is — .64 means service, .128 means instance."
+  }
+};
+
+(function pieces(){
+  const sc = drawBoard("board-pieces", 11);
+  const exKind = document.getElementById("ex-kind");
+  const exTitle = document.getElementById("ex-title");
+  const exBody = document.getElementById("ex-body");
+
+  function show(id){
+    let info = PIECE_INFO[id];
+    if (typeof info === "string") info = PIECE_INFO[info];
+    if (!info) return;
+    exKind.textContent = info.kind;
+    exTitle.textContent = info.title;
+    exBody.innerHTML = info.body + `<p class="why">${info.why}</p>`;
+  }
+
+  /* big areas first so small ones sit on top and win the click */
+  const order = ["net","node1","node2","you","klited1","klited2","etcd","agent1","agent2",
+                 "knet-node1","knet-node2","envoy-node1","envoy-node2","a","b1","b2","c"];
+  order.forEach(id => {
+    const b = sc.els[id];
+    if (!b || !PIECE_INFO[id]) return;
+    const g = S("g", { class:"clickable", tabindex:"0", role:"button",
+      "aria-label":`Explain: ${id}` }, sc.svg);
+    S("rect", { x:b.x-4, y:b.y-4, width:b.w+8, height:b.h+8, rx:10, class:"hit" }, g);
+    g.addEventListener("click", () => show(id));
+    g.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " "){ show(id); e.preventDefault(); }
+    });
+    g.addEventListener("focus", () => show(id));
+  });
+})();
+
+/* ============================================================
+   LOOP player
+   ============================================================ */
+(function loop(){
+  const sc = drawBoard("board-loop", 23, { withB:false });
+  const E = sc.els;
+  const wish = sc.txt(794, 184, "", { size:10.5, cls:"mono", fill:C.ctrl });
+  wish.setAttribute("opacity", 0);
+
+  function reset(){
+    sc.cancelPackets(); sc.clearMarks();
+    setInstState(E.b1, "hidden"); setInstState(E.b2, "hidden"); setInstState(E.b3, "hidden");
+    setInstState(E.a, "ready"); setInstState(E.c, "ready");
+    wish.setAttribute("opacity", 0);
+  }
+
+  const steps = [
+    { say:`<code>klite apply -f b.yaml</code> — Workload <code>b</code>, replicas: 2, plus a Service so others can reach it by name. The CLI talks to whichever klited answers first, and they're interchangeable because neither keeps state.`,
+      fx: () => sc.packet("apply", { color:C.ctrl }) },
+    { say:`The replica writes it to etcd and replies "created". Nothing runs yet — the cluster merely <em>wants</em> two b instances now, and that want is durable.`,
+      persist(){ wish.textContent = "want: b × 2"; wish.setAttribute("opacity", 1); },
+      fx: () => sc.packet("M 484 110 C 700 130, 730 130, 772 120", { color:C.ctrl, dur:900 }) },
+    { say:`etcd's watch wakes the workload controller on klited ① only, since ① holds the lease. Want 2, have 0: it creates Instance records <code>b-1</code> and <code>b-2</code>, which sit Pending, bound to no node.`,
+      persist(){ setInstState(E.b1, "pending"); setInstState(E.b2, "pending"); } },
+    { say:`The scheduler (same leader) binds each Pending instance to the node running the fewest. node-1 and node-2 are tied at one apiece, so each gets one.`,
+      fx: async () => { await Promise.all([
+        sc.packet("M 380 166 C 360 300, 390 420, 400 486", { color:C.ctrl, dur:900 }),
+        sc.packet("M 420 166 C 560 320, 700 430, 766 486", { color:C.ctrl, dur:900 }),
+      ]); } },
+    { say:`Both agents hear it instantly on the WatchDesired stream they've held open since joining: "you own b-1 now." The push travels a connection the <em>agent</em> made — the server still has no way in, and never needs one.`,
+      fx: async () => { await Promise.all([
+        sc.packet("poll1", { color:C.ctrl, reverse:true, dur:900 }),
+        sc.packet("poll2", { color:C.ctrl, reverse:true, dur:900 }),
+      ]); } },
+    { say:`Each agent tells Docker: pull the image, start the container on <code>klite0</code> with DNS pointed at this node's klite-net, cgroup limits from <code>resources:</code>. The instances go Running.`,
+      persist(){ setInstState(E.b1, "running"); setInstState(E.b2, "running"); } },
+    { say:`Status streams back. klite-net's TCP probe answers, so Running becomes Ready. <code>klite get instances</code> and the UI watch it happen within seconds.`,
+      persist(){ setInstState(E.b1, "ready"); setInstState(E.b2, "ready"); },
+      fx: async () => { await Promise.all([
+        sc.packet("poll1", { color:C.ctrl, dur:900 }),
+        sc.packet("poll2", { color:C.ctrl, dur:900 }),
+      ]); } },
+    { say:`Ready instances become endpoints, and every node's Envoy learns them over xDS. From this moment <code>b</code> is dialable by name.`,
+      fx: async () => { await Promise.all([
+        sc.packet("xds1", { color:C.ctrl, dur:900 }),
+        sc.packet("xds2", { color:C.ctrl, dur:900 }),
+      ]); } },
+  ];
+
+  const killBtn = document.getElementById("loop-kill");
+  const scaleBtn = document.getElementById("loop-scale");
+  const leaderBtn = document.getElementById("loop-leader");
+
+  const player = makePlayer({
+    steps, reset,
+    ids:{ say:"loop-say", no:"loop-stepno", dots:"loop-dots",
+          prev:"loop-prev", next:"loop-next", play:"loop-play", player:"player-loop" },
+    onStep(i){
+      const done = i >= steps.length - 1;
+      [killBtn, scaleBtn, leaderBtn].forEach(b => {
+        if (!b.dataset.spent){ b.disabled = !done; b.title = done ? "" : b.title; }
+      });
+    }
+  });
+
+  const say = document.getElementById("loop-say");
+  const no = document.getElementById("loop-stepno");
+  let chaosBusy = false;
+  const pause = ms => new Promise(r => setTimeout(r, REDUCED ? Math.min(ms, 250) : ms));
+
+  killBtn.addEventListener("click", async () => {
+    if (chaosBusy) return; chaosBusy = true; player.stop();
+    no.textContent = "✕";
+    say.innerHTML = `<code>docker kill</code> takes out b-1's container. On the agent's next look its status flips to Failed.`;
+    setInstState(E.b1, "dead");
+    await pause(1700);
+    say.innerHTML = `The agent's reconcile compares "should run b-1" with "b-1 is gone", and starts it again. The restart count reads 1, and the repair never left the node.`;
+    await pause(400);
+    setInstState(E.b1, "running");
+    await pause(900);
+    setInstState(E.b1, "ready");
+    E.b1.state.textContent = "Ready · ↻1";
+    chaosBusy = false;
+  });
+
+  scaleBtn.addEventListener("click", async () => {
+    if (chaosBusy) return; chaosBusy = true; player.stop();
+    no.textContent = "+";
+    say.innerHTML = `You edit the YAML to <code>replicas: 3</code> and apply again. Same loop, no new machinery: the workload controller wants one more instance.`;
+    await sc.packet("apply", { color:C.ctrl });
+    say.innerHTML = `Both nodes run two instances each, so the tie breaks by name and <code>b-3</code> lands on node-1. Pending → Running → Ready, like every instance before it.`;
+    setInstState(E.b3, "pending");
+    await pause(1100);
+    setInstState(E.b3, "running");
+    await pause(900);
+    setInstState(E.b3, "ready");
+    scaleBtn.disabled = true; scaleBtn.dataset.spent = "1";
+    chaosBusy = false;
+  });
+
+  leaderBtn.addEventListener("click", async () => {
+    if (chaosBusy) return; chaosBusy = true; player.stop();
+    no.textContent = "★";
+    say.innerHTML = `klited ① dies mid-flight. The CLI and every agent fail over to ② on their next call — both endpoints were in their config all along.`;
+    const k1 = E.klited1, k2 = E.klited2;
+    sc.denyMark(k1.x + 200, k1.y + 22, 1.1);
+    sc.setLeader(k1, false);
+    await pause(2300);
+    say.innerHTML = `Within ~5 seconds ①'s lease in etcd expires, and ②'s controllers wake up holding it. The ★ moves and nothing else does. Level-based loops re-derive the whole picture from etcd, so a rollout in progress just continues.`;
+    sc.setLeader(k2, true);
+    leaderBtn.disabled = true; leaderBtn.dataset.spent = "1";
+    chaosBusy = false;
+  });
+})();
+
+/* ============================================================
+   DISCOVERY board + player
+   ============================================================ */
+(function discovery(){
+  const sc = makeScene("board-disc", 1000, 560, 41);
+
+  /* node-1 (left): a + b-1 */
+  sc.rect(30, 55, 245, 480, { rx:12, sw:2.4 });
+  sc.txt(50, 84, "node-1", { size:15, weight:750 });
+
+  sc.rect(55, 104, 195, 152, { rx:9 });
+  sc.txt(73, 132, "a", { size:17, weight:700 });
+  sc.txt(95, 132, "wants  http://b:8080", { size:11, cls:"mono soft" });
+  sc.rect(70, 150, 165, 88, { rx:7, sw:1.6, dash:"4 4" });
+  sc.txt(152, 170, "resolver (in-instance)", { size:10, anchor:"middle", cls:"mono soft" });
+  sc.txt(152, 188, "nameserver 127.0.0.11", { size:9.8, anchor:"middle", cls:"mono" });
+  sc.txt(152, 204, "search svc.klite", { size:9.8, anchor:"middle", cls:"mono" });
+  sc.txt(152, 224, "Docker's built-in DNS", { size:9.3, anchor:"middle", cls:"lbl soft" });
+
+  sc.rect(55, 390, 195, 110, { rx:9 });
+  sc.txt(152, 430, "b-1", { size:15.5, anchor:"middle", weight:700 });
+  sc.txt(152, 452, "10.44.128.14 · READY", { size:10, anchor:"middle", cls:"mono soft" });
+
+  /* infra pod (center) */
+  sc.rect(330, 55, 265, 480, { rx:12, sw:2.8 });
+  sc.txt(350, 84, "infra pod — node-1", { size:14.5, weight:750 });
+  sc.txt(350, 101, "one shared netns · 10.44.0.11", { size:9.5, cls:"mono soft" });
+
+  /* klite-net: kdns */
+  sc.rect(348, 116, 230, 96, { rx:8, sw:1.8 });
+  sc.txt(364, 138, "klite-net · kdns", { size:12.5, weight:700, fill:C.ctrl });
+  sc.txt(364, 160, "b.svc.klite → 10.44.64.7", { size:10.8, cls:"mono" });
+  sc.txt(364, 178, "c.svc.klite → 10.44.64.9", { size:10.8, cls:"mono" });
+  sc.txt(364, 198, "TTL 5s · owns the VIPs · probes instances", { size:8.8, cls:"lbl soft" });
+
+  /* envoy: listeners + rbac + eds */
+  sc.rect(348, 228, 230, 292, { rx:8, sw:1.8 });
+  sc.txt(364, 250, "envoy", { size:13, weight:700, fill:C.data });
+  sc.txt(418, 250, "(joined the netns)", { size:9, cls:"lbl soft" });
+
+  sc.rect(360, 262, 206, 62, { rx:6, sw:1.4 });
+  sc.txt(372, 279, "listeners (LDS)", { size:9.5, cls:"mono soft" });
+  sc.txt(372, 296, "10.44.64.7:8080 → cluster b", { size:10, cls:"mono" });
+  sc.txt(372, 312, "10.44.64.9:9090 → cluster c", { size:10, cls:"mono" });
+
+  sc.rect(360, 334, 206, 78, { rx:6, sw:1.4 });
+  sc.txt(372, 351, "RBAC filter", { size:9.5, cls:"mono", fill:C.deny });
+  const ruleDeny = sc.txt(372, 369, "DENY:  a → c", { size:10.5, cls:"mono", fill:C.deny });
+  sc.txt(372, 387, "ALLOW: (none defined)", { size:10.5, cls:"mono soft" });
+  const ruleDef = sc.txt(372, 404, "→ default: allow", { size:10.5, cls:"mono soft" });
+
+  sc.rect(360, 424, 206, 84, { rx:6, sw:1.4 });
+  sc.txt(372, 441, "endpoints (EDS)", { size:9.5, cls:"mono soft" });
+  sc.txt(372, 459, "b: b-1 READY · b-2 READY", { size:10, cls:"mono" });
+  sc.txt(372, 476, "c: c-1 READY", { size:10, cls:"mono" });
+  sc.txt(372, 494, "DRAINING = no new connections", { size:8.8, cls:"lbl soft" });
+
+  /* node-2 (right): b-2 + c-1 */
+  sc.rect(660, 55, 310, 480, { rx:12, sw:2.4 });
+  sc.txt(680, 84, "node-2", { size:15, weight:750 });
+  sc.rect(690, 120, 250, 108, { rx:9 });
+  sc.txt(815, 162, "b-2", { size:15.5, anchor:"middle", weight:700 });
+  sc.txt(815, 184, "10.44.130.4 · READY", { size:10, anchor:"middle", cls:"mono soft" });
+  sc.rect(690, 290, 250, 108, { rx:9 });
+  sc.txt(815, 332, "c-1", { size:15.5, anchor:"middle", weight:700 });
+  sc.txt(815, 354, "10.44.130.7 · READY", { size:10, anchor:"middle", cls:"mono soft" });
+
+  sc.txt(672, 470, "locally it's one bridge; multi-host later", { size:11, cls:"hand", fill:C.soft });
+  sc.txt(672, 489, "changes only how envoy dials out", { size:11, cls:"hand", fill:C.soft });
+
+  const P = {
+    q1:   "M 235 185 C 290 180, 300 160, 344 152",
+    a1:   "M 344 162 C 300 172, 290 192, 240 196",
+    dial: "M 250 230 C 300 260, 320 270, 356 288",
+    dialc:"M 250 235 C 300 275, 316 285, 356 306",
+    tob2: "M 578 292 C 640 260, 650 220, 686 175",
+    toc1: "M 578 306 C 630 320, 650 330, 686 340",
+    back: "M 686 185 C 620 230, 380 260, 255 215",
+  };
+
+  const denyToggle = document.getElementById("disc-deny");
+  const denyOn = () => denyToggle.checked;
+  function paintPolicy(){ ruleDeny.setAttribute("opacity", denyOn() ? 1 : 0); }
+  paintPolicy();
+  denyToggle.addEventListener("change", () => {
+    paintPolicy(); sc.clearMarks();
+    const on = denyOn();
+    document.getElementById("disc-say").innerHTML = on
+      ? `Applied: <code>NetworkPolicy</code> with <code>action: DENY, from: a, to: c</code>. klited recompiles the RBAC filters and pushes them over xDS — every node's Envoy has the rule within a second or two. Now try <b>curl c:9090</b>.`
+      : `Policy deleted. The next xDS push clears the rule, and the very next connection sails through — no restarts, no instances touched.`;
+    document.getElementById("disc-stepno").textContent = on ? "P" : "✓";
+  });
+
+  function reset(){ sc.cancelPackets(); sc.clearMarks(); }
+
+  const steps = [
+    { say:`Instance <code>a</code> asks for <code>b</code>. No dots in the name, so its resolver appends the search domain — the real question is <code>b.svc.klite</code>, sent to Docker's built-in DNS at <code>127.0.0.11</code>.` },
+    { say:`Docker knows no container by that name, so it forwards to this instance's <em>one</em> upstream: node-1's klite-net. One upstream on purpose — a second resolver could race in with "no such host".`,
+      fx: () => sc.packet(P.q1, { color:C.data }) },
+    { say:`kdns answers from the table klited pushed: <code>b.svc.klite → 10.44.64.7</code>, TTL 5s. That's a <b>VIP</b> this node owns. Names resolve even for services policy would refuse — knowing <code>b</code> exists is always allowed.`,
+      fx: () => sc.packet(P.a1, { color:C.data }) },
+    { say:`<code>a</code> dials <code>10.44.64.7:8080</code>. The address lives in the infra pod's netns, and Envoy has a listener bound to exactly that VIP and port (LDS programmed it there), so the connection lands in the one spot every service call passes.`,
+      fx: () => sc.packet(P.dial, { color:C.data }) },
+    { say:`The RBAC filter identifies the caller: source IP <code>10.44.128.9</code> → instance of service <code>a</code> (the identity map rides in over xDS). DENY rules run first, and none match a → b. No ALLOW rules exist either, and with no ALLOW targeting b, the default is allow.` },
+    { say:`Envoy picks a READY endpoint from cluster b (this time <code>b-2</code> on node-2, since DRAINING endpoints get nothing new) and relays bytes both ways. <code>a</code> never learns where b lives, how many replicas exist, or that one is mid-drain.`,
+      fx: async () => { await sc.packet(P.tob2, { color:C.data }); await sc.packet(P.back, { color:C.data, dur:900 }); } },
+  ];
+
+  const player = makePlayer({
+    steps, reset,
+    ids:{ say:"disc-say", no:"disc-stepno", dots:"disc-dots",
+          prev:"disc-prev", next:"disc-next", play:"disc-play", player:"player-disc" },
+  });
+
+  const say = document.getElementById("disc-say");
+  const no = document.getElementById("disc-stepno");
+  let busy = false;
+  async function curl(target){
+    if (busy) return; busy = true; player.stop();
+    reset();
+    no.textContent = "»";
+    say.innerHTML = `<code>curl ${target}:${target === "b" ? "8080" : "9090"}</code> — name → kdns → VIP…`;
+    await sc.packet(P.q1, { color:C.data, dur:650 });
+    await sc.packet(P.a1, { color:C.data, dur:650 });
+    await sc.packet(target === "b" ? P.dial : P.dialc, { color:C.data, dur:750 });
+    if (target === "c" && denyOn()){
+      sc.denyMark(628, 326, 1.15);
+      no.textContent = "✕";
+      say.innerHTML = `DENY phase, first rule: <code>a → c</code> matches. Envoy resets the connection — <code>curl: connection reset by peer</code>. DNS answered, so this fails fast and looks nothing like a typo'd name. And <code>b</code> still works, because the rule names only c. Try it.`;
+    } else if (target === "c"){
+      await sc.packet(P.toc1, { color:C.data, dur:750 });
+      no.textContent = "✓";
+      say.innerHTML = `No DENY matches a → c and no ALLOW list exists, so the default says yes. Envoy relays to <code>c-1</code> and the response comes back the same way.`;
+    } else {
+      await sc.packet(P.tob2, { color:C.data, dur:750 });
+      await sc.packet(P.back, { color:C.data, dur:650 });
+      no.textContent = "✓";
+      say.innerHTML = `<code>200 OK</code> from <code>b-2</code> on node-2${denyOn() ? " — the DENY rule names a → c, so a → b is untouched" : ""}. Run it again and round-robin hands you <code>b-1</code>.`;
+    }
+    busy = false;
+  }
+  document.getElementById("disc-curl-b").addEventListener("click", () => curl("b"));
+  document.getElementById("disc-curl-c").addEventListener("click", () => curl("c"));
+
+  sc.armDrawOn();
+})();
+
+/* ============================================================
+   EVOLUTION boards
+   ============================================================ */
+
+/* Stage 0: the whiteboard brief */
+(function evo0(){
+  const sc = makeScene("board-evo0", 1000, 430, 55);
+  sc.txt(60, 70, "K-LITE", { size:30, cls:"hand", weight:700 });
+  sc.line("M 58 82 C 120 90, 160 84, 205 86", { sw:3 });
+  const wants = ["declarative (YAML)", "server – client", "workloads on nodes", "service discovery"];
+  wants.forEach((w,i) => sc.txt(70, 120 + i*30, "–  " + w, { size:15, cls:"hand" }));
+  sc.rect(48, 96, 250, 152, { rx:4, sw:1.6, dash:"2 5" });
+  const stretch = ["network independence (+ auth)", "a UI", "mutation · add/remove nodes", "network policies"];
+  stretch.forEach((w,i) => sc.txt(70, 292 + i*28, "–  " + w, { size:14, cls:"hand", fill:C.soft }));
+  sc.txt(70, 264, "stretch:", { size:12, cls:"hand", fill:C.soft });
+
+  /* the sketch: two docker boxes, pods, policy cloud, crossed arrow */
+  sc.txt(420, 90, "docker", { size:14, cls:"hand", fill:C.soft });
+  sc.rect(420, 110, 180, 150, { rx:14, sw:2.2 });
+  ["A","B"].forEach((n,i) => {
+    const cx = 465 + i*85, cy = 165;
+    const circle = S("ellipse", { cx, cy, rx:27, ry:24, fill:"none", stroke:C.ink,
+      "stroke-width":2.2, class:"ink-stroke" }, sc.ink);
+    sc.txt(cx, cy+5, n, { size:15, cls:"hand", anchor:"middle" });
+  });
+  sc.rect(660, 110, 150, 150, { rx:14, sw:2.2 });
+  S("ellipse", { cx:735, cy:170, rx:27, ry:24, fill:"none", stroke:C.ink, "stroke-width":2.2, class:"ink-stroke" }, sc.ink);
+  sc.txt(735, 175, "C", { size:15, cls:"hand", anchor:"middle" });
+
+  S("ellipse", { cx:620, cy:66, rx:78, ry:30, fill:"none", stroke:C.ink, "stroke-width":2, class:"ink-stroke",
+    "stroke-dasharray":"1 0" }, sc.ink);
+  sc.txt(620, 72, "policy?", { size:14, cls:"hand", anchor:"middle" });
+  sc.line("M 570 90 C 540 110, 520 120, 505 140", { sw:1.8, dash:"4 4" });
+  sc.line("M 665 92 C 700 110, 720 120, 730 143", { sw:1.8, dash:"4 4" });
+
+  /* the famous crossed arrow */
+  sc.arrow("ax", "M 492 190 C 560 230, 640 220, 708 185", { stroke:C.ink, dash:null, sw:2.2 });
+  sc.line("M 585 195 L 615 235 M 615 195 L 585 235", { stroke:C.deny, sw:3.6 });
+  sc.txt(560, 262, "A must not reach C", { size:12.5, cls:"hand", fill:C.deny });
+
+  sc.txt(420, 330, "auth key?   nodes anywhere?", { size:14, cls:"hand", fill:C.soft });
+  sc.txt(420, 360, "presentation: tradeoffs · choices · process", { size:13, cls:"hand", fill:C.soft });
+  sc.txt(700, 400, "— the brief, verbatim", { size:12.5, cls:"hand", fill:C.soft });
+  sc.armDrawOn();
+})();
+
+/* Stage 1: the minimal toy */
+(function evo1(){
+  const sc = makeScene("board-evo1", 1000, 470, 61);
+  sc.rect(40, 60, 150, 70, { rx:9 });
+  sc.txt(56, 90, "you", { size:15, weight:700 });
+  sc.txt(56, 110, "klite CLI", { size:11, cls:"lbl soft" });
+
+  sc.halo(330, 46, 260, 110);
+  sc.rect(330, 46, 260, 110, { rx:10, sw:2.7 });
+  sc.txt(348, 76, "klited — one process", { size:15.5, weight:750 });
+  sc.chip(348, 90, 92, 28, "bbolt file", { size:10.5 });
+  sc.chip(448, 90, 62, 28, "sched", { size:10.5 });
+  sc.chip(518, 90, 58, 28, "ctrl", { size:10.5 });
+  sc.txt(348, 142, "restart it and pray it comes back fast", { size:11, cls:"hand", fill:C.soft });
+
+  sc.arrow("apply", "M 192 92 C 250 88, 270 84, 324 78", { label:"REST + SSE", lx:210, ly:64, lsize:11 });
+
+  function miniNode(x, name){
+    sc.rect(x, 210, 400, 230, { rx:11, sw:2.4 });
+    sc.txt(x+16, 238, name, { size:14.5, weight:750 });
+    sc.rect(x+250, 220, 136, 40, { rx:8, sw:1.9 });
+    sc.txt(x+318, 244, "klite-agent", { size:11.5, anchor:"middle", weight:650 });
+    /* switchboard */
+    sc.halo(x+16, 300, 170, 120);
+    sc.rect(x+16, 300, 170, 120, { rx:9, sw:2 });
+    sc.txt(x+101, 322, "klite-net", { size:12.5, anchor:"middle", weight:700 });
+    sc.txt(x+101, 342, "kdns (hand-rolled)", { size:10, anchor:"middle", cls:"mono" });
+    sc.txt(x+101, 362, "L4 proxy (~300 loc)", { size:10, anchor:"middle", cls:"mono" });
+    sc.txt(x+101, 382, "VIPs · probes", { size:10, anchor:"middle", cls:"mono soft" });
+    sc.txt(x+101, 404, "all ours, all custom", { size:10, cls:"hand", anchor:"middle", fill:C.soft });
+    /* instances */
+    sc.rect(x+210, 310, 78, 62, { rx:8, sw:2 });
+    sc.txt(x+249, 346, name === "node-1" ? "a" : "b-2", { size:13, anchor:"middle", weight:700 });
+    sc.rect(x+300, 310, 78, 62, { rx:8, sw:2 });
+    sc.txt(x+339, 346, name === "node-1" ? "b-1" : "c-1", { size:13, anchor:"middle", weight:700 });
+  }
+  miniNode(60, "node-1");
+  miniNode(540, "node-2");
+
+  sc.arrow("lp1", "M 300 218 C 320 190, 330 180, 360 160",
+    { label:"HTTP long-poll: “what should I run?”", lx:96, ly:180, lsize:10.5 });
+  sc.arrow("lp2", "M 800 218 C 700 190, 640 170, 596 152", {});
+
+  sc.halo(620, 60, 330, 74);
+  sc.rect(620, 60, 330, 74, { rx:8, sw:1.9 });
+  sc.txt(636, 84, "policies: ordered firewall rules", { size:12.5, weight:650 });
+  sc.txt(636, 104, "priority · first match wins · default allow", { size:10.5, cls:"mono soft" });
+  sc.txt(636, 122, "enforced in our own little proxy", { size:10.5, cls:"hand", fill:C.soft });
+
+  sc.txt(60, 462, "auth: bearer join tokens · everything speaks REST", { size:11.5, cls:"hand", fill:C.soft });
+  sc.armDrawOn();
+})();
+
+/* Stage 2: the industrial pivot */
+(function evo2(){
+  const sc = makeScene("board-evo2", 1000, 500, 67);
+
+  /* HA control plane */
+  sc.halo(180, 40, 560, 118);
+  sc.rect(180, 40, 170, 118, { rx:10, sw:2.5 });
+  sc.txt(196, 66, "klited ①", { size:14.5, weight:750 });
+  sc.star(330, 58);
+  sc.txt(196, 88, "gRPC · xDS", { size:10.5, cls:"mono" });
+  sc.txt(196, 108, "controllers ★", { size:10.5, cls:"mono" });
+  sc.txt(196, 140, "stateless", { size:10.5, cls:"hand", fill:C.soft });
+  sc.rect(380, 40, 170, 118, { rx:10, sw:2.5 });
+  sc.txt(396, 66, "klited ②", { size:14.5, weight:750 });
+  sc.txt(396, 88, "gRPC · xDS", { size:10.5, cls:"mono" });
+  sc.txt(396, 108, "controllers idle", { size:10.5, cls:"mono soft" });
+  sc.txt(396, 140, "stateless", { size:10.5, cls:"hand", fill:C.soft });
+  sc.rect(580, 40, 160, 118, { rx:10, sw:2.5 });
+  sc.txt(596, 66, "etcd × 3", { size:14.5, weight:750 });
+  sc.txt(596, 88, "state · watches", { size:10.5, cls:"mono" });
+  sc.txt(596, 108, "the lease", { size:10.5, cls:"mono" });
+  sc.arrow("e1", "M 354 100 L 376 100", { dash:"4 4", sw:1.7 });
+  sc.arrow("e2", "M 554 100 L 576 100", { dash:"4 4", sw:1.7 });
+  sc.txt(180, 180, "kill either klited — the lease decides whose controllers run", { size:11.5, cls:"hand", fill:C.ctrl });
+
+  /* erased bbolt */
+  sc.ghostBox(790, 52, 150, 60, "bbolt file", "erased in round 2");
+  sc.txt(790, 132, "single point of truth,", { size:10.5, cls:"hand", fill:C.ghost });
+  sc.txt(790, 148, "single point of failure", { size:10.5, cls:"hand", fill:C.ghost });
+
+  /* node with envoy joining netns */
+  sc.rect(60, 240, 420, 230, { rx:11, sw:2.4 });
+  sc.txt(76, 268, "node-1  (node-2 identical)", { size:14, weight:750 });
+  sc.rect(320, 250, 136, 40, { rx:8, sw:1.9 });
+  sc.txt(388, 274, "klite-agent", { size:11.5, anchor:"middle", weight:650 });
+
+  sc.rect(80, 306, 200, 148, { rx:9, sw:2 });
+  sc.txt(180, 328, "infra pod (netns)", { size:11.5, anchor:"middle", weight:700 });
+  sc.rect(92, 340, 176, 46, { rx:7, sw:1.6 });
+  sc.txt(180, 360, "klite-net", { size:11, anchor:"middle", weight:650 });
+  sc.txt(180, 376, "kdns · VIPs · probes", { size:9, anchor:"middle", cls:"mono soft" });
+  sc.halo(92, 394, 176, 52);
+  sc.rect(92, 394, 176, 52, { rx:7, sw:1.6 });
+  sc.txt(180, 414, "envoy (new)", { size:11, anchor:"middle", weight:650, fill:C.data });
+  sc.txt(180, 430, "listeners · RBAC · EDS", { size:9, anchor:"middle", cls:"mono soft" });
+
+  /* ghost of the custom proxy */
+  sc.ghostBox(300, 340, 158, 52, "our L4 proxy", "superseded");
+
+  sc.arrow("grpc", "M 400 248 C 420 220, 430 200, 440 162",
+    { label:"gRPC streams (was: long-poll)", lx:448, ly:214, lsize:10.5 });
+  sc.arrow("xds", "M 260 162 C 220 220, 200 260, 186 302",
+    { label:"xDS", lx:212, ly:238, lsize:11 });
+
+  /* policy + drain cards */
+  sc.halo(540, 240, 400, 100);
+  sc.rect(540, 240, 400, 100, { rx:8, sw:1.9 });
+  sc.txt(556, 264, "policies: istio-lite", { size:12.5, weight:650 });
+  sc.txt(556, 286, "DENY rules → ALLOW rules → default allow", { size:10.5, cls:"mono" });
+  sc.txt(556, 304, "(default flips once any ALLOW targets the service)", { size:10, cls:"mono soft" });
+  sc.txt(556, 326, "no priorities to reason about — evaluated in envoy RBAC", { size:10.5, cls:"hand", fill:C.soft });
+
+  sc.halo(540, 360, 400, 110);
+  sc.rect(540, 360, 400, 110, { rx:8, sw:1.9 });
+  sc.txt(556, 384, "drain choreography", { size:12.5, weight:650 });
+  sc.txt(556, 406, "cordon → surge → Ready → DRAINING → TERM → KILL", { size:10, cls:"mono" });
+  sc.txt(556, 424, "DRAINING = finishes old connections, gets no new ones", { size:10.5, cls:"mono soft" });
+  sc.txt(556, 446, "rollouts & node removals: zero failed requests, asserted", { size:10.5, cls:"hand", fill:C.soft });
+
+  sc.armDrawOn();
+})();
+
+/* Stage 3: hardened & written down */
+(function evo3(){
+  const sc = makeScene("board-evo3", 1000, 500, 73);
+
+  sc.rect(60, 40, 300, 118, { rx:10, sw:2.5 });
+  sc.txt(76, 66, "klited ①②", { size:14.5, weight:750 });
+  sc.txt(76, 88, "gRPC · xDS · controllers-by-lease", { size:10.5, cls:"mono" });
+  sc.halo(76, 102, 130, 30);
+  sc.chip(76, 102, 130, 30, "built-in CA", { size:10.5, color:C.ctrl });
+  sc.txt(76, 150, "etcd ×3 behind it, unchanged", { size:10.5, cls:"hand", fill:C.soft });
+
+  sc.rect(60, 220, 300, 150, { rx:11, sw:2.4 });
+  sc.txt(76, 246, "node-N", { size:14, weight:750 });
+  sc.txt(76, 268, "agent · infra pod · envoy · instances", { size:10.5, cls:"mono soft" });
+  sc.txt(76, 290, "unchanged from round 2 —", { size:11, cls:"hand", fill:C.soft });
+  sc.txt(76, 308, "except every connection now shows:", { size:11, cls:"hand", fill:C.soft });
+  sc.halo(76, 322, 250, 34);
+  sc.rect(76, 322, 250, 34, { rx:7, sw:1.7 });
+  sc.lock(96, 332);
+  sc.txt(112, 344, "mTLS — cert from klited's CA", { size:10.5, cls:"mono" });
+
+  sc.arrow("join", "M 240 218 C 260 200, 280 180, 300 162",
+    { label:"join: token → CSR → node cert", lx:250, ly:196, lsize:10.5 });
+
+  /* UI panel */
+  sc.halo(430, 40, 250, 180);
+  sc.rect(430, 40, 250, 180, { rx:10, sw:2.2 });
+  sc.txt(446, 66, "the UI (new)", { size:13.5, weight:750 });
+  sc.txt(446, 88, "topology + red deny edges", { size:10.5, cls:"mono" });
+  sc.txt(446, 106, "tables · live logs · YAML apply", { size:10.5, cls:"mono" });
+  sc.rect(444, 122, 222, 58, { rx:7, sw:1.6 });
+  sc.txt(456, 142, "policy simulator", { size:11, weight:650, fill:C.deny });
+  sc.txt(456, 160, "“can a reach c?” → NO (rule 1)", { size:10, cls:"mono" });
+  sc.txt(446, 204, "same evaluator the proxies use", { size:10.5, cls:"hand", fill:C.soft });
+
+  /* the paper trail */
+  sc.halo(430, 250, 510, 200);
+  sc.rect(430, 250, 510, 200, { rx:10, sw:2.2 });
+  sc.txt(446, 276, "the record (new, and binding)", { size:13.5, weight:750 });
+  sc.rect(444, 292, 150, 64, { rx:6, sw:1.6 });
+  sc.txt(456, 312, "docs/adr/", { size:10.5, cls:"mono" });
+  sc.txt(456, 330, "0001 … 0017", { size:10.5, cls:"mono" });
+  sc.txt(456, 346, "reversals kept", { size:9.5, cls:"hand", fill:C.soft });
+  sc.rect(608, 292, 150, 64, { rx:6, sw:1.6 });
+  sc.txt(620, 312, "CONTEXT.md", { size:10.5, cls:"mono" });
+  sc.txt(620, 330, "Workload · Instance", { size:9.5, cls:"mono" });
+  sc.txt(620, 346, "avoid: Pod, Deployment", { size:9, cls:"mono", fill:C.deny });
+  sc.rect(772, 292, 150, 64, { rx:6, sw:1.6 });
+  sc.txt(784, 312, "design-log.md", { size:10.5, cls:"mono" });
+  sc.txt(784, 330, "the grill,", { size:9.5, cls:"hand", fill:C.soft });
+  sc.txt(784, 346, "round by round", { size:9.5, cls:"hand", fill:C.soft });
+  sc.txt(446, 388, "rule: a decision gets its ADR when it's made — and code that", { size:11, cls:"hand", fill:C.ctrl });
+  sc.txt(446, 406, "contradicts an ADR is wrong until a superseding ADR lands", { size:11, cls:"hand", fill:C.ctrl });
+  sc.txt(446, 434, "why: the decision log becomes the presentation", { size:10.5, cls:"hand", fill:C.soft });
+
+  sc.armDrawOn();
+})();
+
+/* stage switcher */
+(function stages(){
+  const btns = [...document.querySelectorAll(".stages button")];
+  const panes = [0,1,2,3].map(i => document.getElementById("evo-" + i));
+  btns.forEach(b => b.addEventListener("click", () => {
+    const n = +b.dataset.stage;
+    btns.forEach(x => x.setAttribute("aria-current", x === b ? "true" : "false"));
+    panes.forEach((p,i) => p.classList.toggle("on", i === n));
+    const svg = panes[n].querySelector("svg");
+    if (svg && svg.__reveal) svg.__reveal();
+  }));
+})();
+
+/* ============================================================
+   Nav highlighting
+   ============================================================ */
+(function nav(){
+  const links = [...document.querySelectorAll(".tray nav a")];
+  const secs = links.map(a => document.querySelector(a.getAttribute("href")));
+  const io = new IntersectionObserver(ents => {
+    ents.forEach(e => {
+      const idx = secs.indexOf(e.target);
+      if (idx >= 0 && e.isIntersecting){
+        links.forEach(l => l.classList.remove("here"));
+        links[idx].classList.add("here");
+      }
+    });
+  }, { rootMargin:"-30% 0px -55% 0px" });
+  secs.forEach(s => s && io.observe(s));
+})();
+</script>
+</body>
+</html>
