@@ -29,23 +29,34 @@ type Config struct {
 	Token   string
 	Runtime runtime.Runtime
 	Client  klitev1.AgentServiceClient
-	// ServerAddr is the klited address this agent dialed; its port tells
-	// the in-container Envoy where the xDS server lives (infrapod.go).
-	ServerAddr string
+	// ServerAddrs are the klited endpoints this agent dials; they tell the
+	// in-container Envoy where the xDS servers live (infrapod.go).
+	ServerAddrs []string
 	// StateDir overrides ~/.klite/agent as the root for per-node files.
 	StateDir string
+	// TLSDir holds the node's persisted identity (join.go); the infra pod
+	// bind-mounts it into Envoy. Empty renders a plaintext xDS bootstrap,
+	// which only unit tests should ever see.
+	TLSDir string
 }
 
 // Agent is the per-node loop. All mutable state sits behind mu. The reconcile
 // loop is the only writer of states, and the report loop reads them.
 type Agent struct {
-	node       string
-	token      string
-	rt         runtime.Runtime
-	client     klitev1.AgentServiceClient
-	serverAddr string
-	stateDir   string
-	now        func() time.Time
+	node        string
+	token       string
+	rt          runtime.Runtime
+	client      klitev1.AgentServiceClient
+	serverAddrs []string
+	stateDir    string
+	tlsDir      string
+	now         func() time.Time
+
+	// lockedDonor and lockAttempt belong to the netLoop goroutine alone:
+	// which donor container already got the admin-port lockdown, and when
+	// the last failed attempt happened (lockdown.go).
+	lockedDonor string
+	lockAttempt time.Time
 
 	mu           sync.Mutex
 	desired      map[string]*klitev1.Instance // by instance name
@@ -74,8 +85,9 @@ func New(cfg *Config) *Agent {
 		token:         cfg.Token,
 		rt:            cfg.Runtime,
 		client:        cfg.Client,
-		serverAddr:    cfg.ServerAddr,
+		serverAddrs:   cfg.ServerAddrs,
 		stateDir:      cfg.StateDir,
+		tlsDir:        cfg.TLSDir,
 		now:           time.Now,
 		desired:       map[string]*klitev1.Instance{},
 		states:        map[string]*instState{},

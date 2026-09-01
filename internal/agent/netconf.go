@@ -160,12 +160,17 @@ func (a *Agent) updateProbes(probes []*klitev1.ProbeState) {
 // kliteNetStatus is the heartbeat's infra-health rider.
 func (a *Agent) kliteNetStatus() *klitev1.KliteNetStatus {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.net == nil {
+	nb, healthy := a.net, a.netHealthy
+	a.mu.Unlock()
+	if nb == nil {
 		return nil
 	}
+	base := int(nb.GetNetAdminPortBase())
+	if base == 0 {
+		base = defaultNetAdminPortBase
+	}
 	return &klitev1.KliteNetStatus{
-		Healthy:   a.netHealthy,
-		AdminPort: int32(netAdminPortBase + int(a.net.GetNodeIndex())),
+		Healthy:   healthy,
+		AdminPort: int32(base + int(nb.GetNodeIndex())),
 	}
 }

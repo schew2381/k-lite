@@ -21,10 +21,16 @@ const (
 	LabelInstanceUID  = "io.klite.instance-uid"
 	LabelTemplateHash = "io.klite.template-hash"
 	LabelConfigHash   = "io.klite.config-hash"
+	// LabelCluster stamps infra containers with the cluster id that created
+	// them, so one cluster on a shared daemon never evicts another's (M8).
+	LabelCluster = "io.klite.cluster"
 
 	RoleWorkload = "workload"
 	RoleNet      = "net"
 	RoleEnvoy    = "envoy"
+	// RoleHelper marks short-lived utility containers (the admin-port
+	// lockdown pass); anything carrying it is safe to remove on sight.
+	RoleHelper = "helper"
 )
 
 // StateRunning is Docker's state string for a live container. Anything else
@@ -65,6 +71,7 @@ type InfraContainer struct {
 	Name       string
 	Image      string
 	Cmd        []string
+	Env        []string          // NAME=value pairs
 	Labels     map[string]string // must include LabelConfigHash for drift checks
 	StaticIP   string            // klite0 address; mutually exclusive with JoinNetns
 	JoinNetns  string            // container name whose netns to join
@@ -86,10 +93,11 @@ type InfraStatus struct {
 // InfraInfo identifies one infra container and its klite0 address, for
 // spotting stale donors squatting an address a node was assigned.
 type InfraInfo struct {
-	ID   string
-	Name string
-	Node string
-	IP   string
+	ID      string
+	Name    string
+	Node    string
+	Cluster string // LabelCluster value; empty on pre-M8 leftovers
+	IP      string
 }
 
 // Runtime is everything the agent needs from a container engine.
@@ -106,6 +114,9 @@ type Runtime interface {
 	// RunInfra creates and starts an infra-pod container, replacing any
 	// container already holding the name.
 	RunInfra(ctx context.Context, spec *InfraContainer) (string, error)
+	// RunOneShot runs an infra-shaped container to completion and removes
+	// it, returning an error carrying its output when it exits nonzero.
+	RunOneShot(ctx context.Context, spec *InfraContainer) error
 	// InspectInfra reports a named container's state, or nil when no such
 	// container exists.
 	InspectInfra(ctx context.Context, name string) (*InfraStatus, error)

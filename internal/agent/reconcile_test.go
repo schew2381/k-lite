@@ -26,6 +26,8 @@ type fakeRuntime struct {
 	stops    []string // container IDs
 	removes  []string // container IDs
 	stopWait []time.Duration
+
+	infra []runtime.InfraInfo // ListInfra's canned answer
 }
 
 func newFakeRuntime() *fakeRuntime {
@@ -36,6 +38,8 @@ func (f *fakeRuntime) EnsureNetwork(context.Context) error { return nil }
 
 func (f *fakeRuntime) EnsureImage(context.Context, string) error { return nil }
 
+func (f *fakeRuntime) RunOneShot(context.Context, *runtime.InfraContainer) error { return nil }
+
 func (f *fakeRuntime) RunInfra(context.Context, *runtime.InfraContainer) (string, error) {
 	return "", nil
 }
@@ -45,7 +49,9 @@ func (f *fakeRuntime) InspectInfra(context.Context, string) (*runtime.InfraStatu
 }
 
 func (f *fakeRuntime) ListInfra(context.Context, string) ([]runtime.InfraInfo, error) {
-	return nil, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.infra), nil
 }
 
 func (f *fakeRuntime) RunInstance(_ context.Context, inst *klitev1.Instance, _, _ string) (string, error) {

@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/netip"
 	"strings"
 	"time"
@@ -56,12 +57,52 @@ func infraCreateOptions(spec *InfraContainer) (client.ContainerCreateOptions, er
 		Config: &container.Config{
 			Image:        spec.Image,
 			Cmd:          spec.Cmd,
+			Env:          spec.Env,
 			Labels:       spec.Labels,
 			ExposedPorts: exposed,
 		},
 		HostConfig:       host,
 		NetworkingConfig: networking,
 	}, nil
+}
+
+// RunOneShot runs spec to completion and removes the container, returning an
+// error that carries the container's output when it exits nonzero. The infra
+// pod's lockdown pass rides this: a helper joins the donor netns, applies its
+// rules, and vanishes.
+func (d *Docker) RunOneShot(ctx context.Context, spec *InfraContainer) error {
+	id, err := d.RunInfra(ctx, spec)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = d.RemoveInstance(context.WithoutCancel(ctx), id) }()
+	wait := d.cli.ContainerWait(ctx, id, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
+	select {
+	case werr := <-wait.Error:
+		return fmt.Errorf("wait for %s: %w", spec.Name, werr)
+	case res := <-wait.Result:
+		if res.StatusCode == 0 {
+			return nil
+		}
+		return fmt.Errorf("%s exited %d: %s", spec.Name, res.StatusCode, d.tailLogs(ctx, id))
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// tailLogs grabs a one-shot container's last lines for error messages,
+// best-effort.
+func (d *Docker) tailLogs(ctx context.Context, id string) string {
+	rc, err := d.Logs(ctx, id, false, 10)
+	if err != nil {
+		return "(logs unavailable: " + err.Error() + ")"
+	}
+	defer rc.Close()
+	b, err := io.ReadAll(io.LimitReader(rc, 4096))
+	if err != nil || len(b) == 0 {
+		return "(no output)"
+	}
+	return strings.TrimSpace(string(b))
 }
 
 func portBindings(ports map[string]string) (network.PortSet, network.PortMap, error) {
@@ -109,10 +150,11 @@ func (d *Docker) ListInfra(ctx context.Context, role string) ([]InfraInfo, error
 			name = strings.TrimPrefix(c.Names[0], "/")
 		}
 		out = append(out, InfraInfo{
-			ID:   c.ID,
-			Name: name,
-			Node: c.Labels[LabelNode],
-			IP:   summaryIP(&c),
+			ID:      c.ID,
+			Name:    name,
+			Node:    c.Labels[LabelNode],
+			Cluster: c.Labels[LabelCluster],
+			IP:      summaryIP(&c),
 		})
 	}
 	return out, nil

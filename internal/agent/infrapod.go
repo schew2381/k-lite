@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
 	"github.com/schew2381/k-lite/internal/runtime"
@@ -26,20 +27,25 @@ const (
 	envoyImage    = "envoyproxy/envoy:v1.31.5"
 
 	// Host ports are derived from the node index so several agents share
-	// one machine without colliding: klite-net admin at 19000+i, Envoy
-	// admin at 19500+i, both loopback-only.
-	netAdminPortBase   = 19000
-	envoyAdminPortBase = 19500
+	// one machine without colliding: klite-net admin at base+i, Envoy
+	// admin at base+i, both loopback-only. A second deliberate cluster
+	// moves the bases through klited's flags (NetBootstrap).
+	defaultNetAdminPortBase   = 19000
+	defaultEnvoyAdminPortBase = 19500
 
 	defaultXDSPort = 7443
 
 	bootstrapMount = "/etc/klite/envoy-bootstrap.yaml"
+	// tlsMount is where Envoy sees the node identity (join.go). M9's
+	// ingress listeners will read the same files, so the whole directory
+	// mounts, not individual certs.
+	tlsMount = "/etc/klite/tls"
 )
 
-// envoyBootstrapTemplate is the proven shape from hack/spike-envoy: ADS over
+// envoyBootstrapHeader is the proven shape from hack/spike-envoy: ADS over
 // one gRPC stream, explicit HTTP/2 on the xDS cluster, node.id equal to the
 // snapshot-cache key. host.docker.internal comes from the donor's /etc/hosts.
-const envoyBootstrapTemplate = `node:
+const envoyBootstrapHeader = `node:
   id: %s
   cluster: klite
 admin:
@@ -64,7 +70,7 @@ dynamic_resources:
 static_resources:
   clusters:
     - name: xds
-      type: LOGICAL_DNS
+      type: STRICT_DNS
       dns_lookup_family: V4_ONLY
       connect_timeout: 1s
       typed_extension_protocol_options:
@@ -76,18 +82,55 @@ static_resources:
         cluster_name: xds
         endpoints:
           - lb_endpoints:
-              - endpoint:
+`
+
+const envoyBootstrapEndpoint = `              - endpoint:
                   address:
                     socket_address:
-                      address: host.docker.internal
+                      address: %s
                       port_value: %d
+`
+
+// envoyBootstrapTLS rides the node identity to the xDS stream (ADR 0013).
+// Both protocol-version pins matter: klited requires 1.3 for Go peers, and
+// Envoy's upstream default MAX is 1.2, which would kill the handshake.
+const envoyBootstrapTLS = `      transport_socket:
+        name: envoy.transport_sockets.tls
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.UpstreamTlsContext
+          common_tls_context:
+            tls_params:
+              tls_minimum_protocol_version: TLSv1_3
+              tls_maximum_protocol_version: TLSv1_3
+            tls_certificates:
+              - certificate_chain:
+                  filename: ` + tlsMount + `/node.crt
+                private_key:
+                  filename: ` + tlsMount + `/node.key
+            validation_context:
+              trusted_ca:
+                filename: ` + tlsMount + `/ca.crt
 `
 
 func (a *Agent) netContainerName() string   { return "klite." + a.node + ".net" }
 func (a *Agent) envoyContainerName() string { return "klite." + a.node + ".envoy" }
 
 func (a *Agent) netAdminPort() int {
-	return netAdminPortBase + int(a.netBootstrap().GetNodeIndex())
+	nb := a.netBootstrap()
+	base := int(nb.GetNetAdminPortBase())
+	if base == 0 {
+		base = defaultNetAdminPortBase
+	}
+	return base + int(nb.GetNodeIndex())
+}
+
+func (a *Agent) envoyAdminPort() int {
+	nb := a.netBootstrap()
+	base := int(nb.GetEnvoyAdminPortBase())
+	if base == 0 {
+		base = defaultEnvoyAdminPortBase
+	}
+	return base + int(nb.GetNodeIndex())
 }
 
 func (a *Agent) netBootstrap() *klitev1.NetBootstrap {
@@ -109,14 +152,27 @@ func (a *Agent) ensureInfraPod(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("klite-net: %w", err)
 	}
-	if err := a.ensureEnvoyContainer(ctx, donor); err != nil {
+	if err := a.ensureEnvoyContainer(ctx, nb, donor); err != nil {
 		return fmt.Errorf("envoy: %w", err)
 	}
+	a.ensureLockdown(ctx, nb, donor)
 	return nil
 }
 
+// infraLabels is every infra container's label set: role, node, and the
+// owning cluster so a shared daemon's clusters stay out of each other's way.
+func (a *Agent) infraLabels(nb *klitev1.NetBootstrap, role string) map[string]string {
+	labels := map[string]string{
+		runtime.LabelRole: role,
+		runtime.LabelNode: a.node,
+	}
+	if id := nb.GetClusterId(); id != "" {
+		labels[runtime.LabelCluster] = id
+	}
+	return labels
+}
+
 func (a *Agent) netContainerSpec(nb *klitev1.NetBootstrap) *runtime.InfraContainer {
-	idx := int(nb.GetNodeIndex())
 	spec := &runtime.InfraContainer{
 		Name:       a.netContainerName(),
 		Image:      kliteNetImage,
@@ -124,15 +180,12 @@ func (a *Agent) netContainerSpec(nb *klitev1.NetBootstrap) *runtime.InfraContain
 		CapAdd:     []string{"NET_ADMIN"},
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
 		Ports: map[string]string{
-			"9090/tcp": fmt.Sprintf("127.0.0.1:%d", netAdminPortBase+idx),
+			"9090/tcp": fmt.Sprintf("127.0.0.1:%d", a.netAdminPort()),
 			// Envoy's admin listens in the shared netns, so its
 			// published port rides the donor too.
-			"9901/tcp": fmt.Sprintf("127.0.0.1:%d", envoyAdminPortBase+idx),
+			"9901/tcp": fmt.Sprintf("127.0.0.1:%d", a.envoyAdminPort()),
 		},
-		Labels: map[string]string{
-			runtime.LabelRole: runtime.RoleNet,
-			runtime.LabelNode: a.node,
-		},
+		Labels: a.infraLabels(nb, runtime.RoleNet),
 	}
 	spec.Labels[runtime.LabelConfigHash] = configHash(spec)
 	return spec
@@ -147,7 +200,7 @@ func (a *Agent) ensureNetContainer(ctx context.Context, nb *klitev1.NetBootstrap
 	if st != nil && st.Running && st.ConfigHash == spec.Labels[runtime.LabelConfigHash] {
 		return st, nil
 	}
-	if err := a.evictNetSquatters(ctx, spec.StaticIP); err != nil {
+	if err := a.evictNetSquatters(ctx, spec.StaticIP, nb.GetClusterId()); err != nil {
 		return nil, err
 	}
 	if err := a.recreateInfra(ctx, spec, st); err != nil {
@@ -159,8 +212,11 @@ func (a *Agent) ensureNetContainer(ctx context.Context, nb *klitev1.NetBootstrap
 // evictNetSquatters removes donors from previous cluster lives that still
 // hold this node's assigned address (index reshuffles across fresh etcd runs
 // leave these behind), along with their orphaned Envoys. A live sibling
-// donor never conflicts: indexes are unique within one cluster.
-func (a *Agent) evictNetSquatters(ctx context.Context, ip string) error {
+// donor never conflicts, indexes being unique within one cluster — so a
+// squatter from a DIFFERENT cluster means two clusters share an IP base, and
+// deleting a healthy stranger would be sabotage. That case stops the agent
+// loudly instead.
+func (a *Agent) evictNetSquatters(ctx context.Context, ip, clusterID string) error {
 	donors, err := a.rt.ListInfra(ctx, runtime.RoleNet)
 	if err != nil {
 		return err
@@ -170,7 +226,11 @@ func (a *Agent) evictNetSquatters(ctx context.Context, ip string) error {
 		if d.Name == a.netContainerName() || d.IP != ip {
 			continue
 		}
-		slog.Warn("removing stale donor holding our address", "name", d.Name, "ip", ip)
+		if d.Cluster != "" && d.Cluster != clusterID {
+			return fmt.Errorf("container %s from cluster %s holds our address %s; refusing to remove another cluster's donor — "+
+				"give one cluster its own --infra-ip-base and port bases, or remove %s by hand", d.Name, d.Cluster, ip, d.Name)
+		}
+		slog.Warn("removing stale donor holding our address", "name", d.Name, "ip", ip, "cluster", d.Cluster)
 		errs = append(errs, a.rt.RemoveInstance(ctx, d.ID))
 		if d.Node != "" && d.Node != a.node {
 			errs = append(errs, a.rt.RemoveInstance(ctx, "klite."+d.Node+".envoy"))
@@ -179,7 +239,7 @@ func (a *Agent) evictNetSquatters(ctx context.Context, ip string) error {
 	return errors.Join(errs...)
 }
 
-func (a *Agent) ensureEnvoyContainer(ctx context.Context, donor *runtime.InfraStatus) error {
+func (a *Agent) ensureEnvoyContainer(ctx context.Context, nb *klitev1.NetBootstrap, donor *runtime.InfraStatus) error {
 	if donor == nil || !donor.Running {
 		return fmt.Errorf("donor %s is not running", a.netContainerName())
 	}
@@ -193,10 +253,13 @@ func (a *Agent) ensureEnvoyContainer(ctx context.Context, donor *runtime.InfraSt
 		Cmd:       []string{"-c", bootstrapMount},
 		JoinNetns: a.netContainerName(),
 		Binds:     []string{path + ":" + bootstrapMount + ":ro"},
-		Labels: map[string]string{
-			runtime.LabelRole: runtime.RoleEnvoy,
-			runtime.LabelNode: a.node,
-		},
+		Labels:    a.infraLabels(nb, runtime.RoleEnvoy),
+	}
+	if a.tlsDir != "" {
+		spec.Binds = append(spec.Binds, a.tlsDir+":"+tlsMount+":ro")
+		// The identity files are 0600 for the host user; the image's
+		// default envoy user could not read them through the mount.
+		spec.Env = []string{"ENVOY_UID=0"}
 	}
 	// The donor ID folds into the hash so a recreated donor forces a fresh
 	// Envoy into the new netns.
@@ -234,7 +297,7 @@ func (a *Agent) recreateInfra(ctx context.Context, spec *runtime.InfraContainer,
 // agent's state dir, rewriting only on content change so the file's mtime
 // stays meaningful.
 func (a *Agent) writeEnvoyBootstrap() (content, path string, err error) {
-	content = fmt.Sprintf(envoyBootstrapTemplate, a.node, a.xdsPort())
+	content = a.renderEnvoyBootstrap()
 	dir := a.stateDir
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -258,15 +321,61 @@ func (a *Agent) writeEnvoyBootstrap() (content, path string, err error) {
 	return content, path, nil
 }
 
-// xdsPort is the port half of the klited address this agent dialed; the
-// in-container Envoy reaches the same server via host.docker.internal.
-func (a *Agent) xdsPort() int {
-	if _, port, err := net.SplitHostPort(a.serverAddr); err == nil {
-		if p, err := strconv.Atoi(port); err == nil && p > 0 {
-			return p
+// renderEnvoyBootstrap builds the per-node bootstrap: one lb_endpoint per
+// klited so the ADS stream fails over with the agent (M8), plus the mTLS
+// transport socket when the node holds an identity.
+func (a *Agent) renderEnvoyBootstrap() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, envoyBootstrapHeader, a.node)
+	for _, hp := range a.xdsEndpoints() {
+		fmt.Fprintf(&b, envoyBootstrapEndpoint, hp.host, hp.port)
+	}
+	if a.tlsDir != "" {
+		b.WriteString(envoyBootstrapTLS)
+	}
+	return b.String()
+}
+
+type hostPort struct {
+	host string
+	port int
+}
+
+// xdsEndpoints maps the agent's --server list into container-reachable
+// addresses: loopback means "this machine", which a container spells
+// host.docker.internal (the donor pins it via host-gateway).
+func (a *Agent) xdsEndpoints() []hostPort {
+	var out []hostPort
+	seen := map[hostPort]bool{}
+	for _, addr := range a.serverAddrs {
+		hp := hostPort{host: "host.docker.internal", port: defaultXDSPort}
+		if h, p, err := net.SplitHostPort(addr); err == nil {
+			if port, perr := strconv.Atoi(p); perr == nil && port > 0 {
+				hp.port = port
+			}
+			if h != "" && !isLoopbackHost(h) {
+				hp.host = h
+			}
+		}
+		if !seen[hp] {
+			seen[hp] = true
+			out = append(out, hp)
 		}
 	}
-	return defaultXDSPort
+	if len(out) == 0 {
+		out = append(out, hostPort{host: "host.docker.internal", port: defaultXDSPort})
+	}
+	return out
+}
+
+func isLoopbackHost(h string) bool {
+	if h == "localhost" || h == "0.0.0.0" || h == "::" {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 // configHash fingerprints a container spec plus any extra inputs. JSON
