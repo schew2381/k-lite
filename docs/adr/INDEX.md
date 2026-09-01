@@ -45,3 +45,4 @@ Each record gets one line. The track column says where a decision came from: the
 | [0039](0039-chatty-apps-deterministic-probers.md)   | Demo apps chatter, verify gates run their own probers | build | accepted                                                        |
 | [0040](0040-one-click-local-joins.md)              | The facade starts local agents for one-click joins | build | accepted                                                        |
 | [0041](0041-traffic-feed-from-envoy-counters.md)   | The traffic feed streams Envoy counter deltas | build | accepted                                                        |
+| [0042](0042-apply-preserves-server-status.md)      | Apply can't write status, heartbeats restore a lost node index | build | accepted                                                        |

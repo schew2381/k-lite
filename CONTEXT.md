@@ -31,6 +31,10 @@ _Avoid_: external IP, public IP
 A machine that runs Instances. Today each Node is simulated by one local agent process, and later it's real hardware running the same agent.
 _Avoid_: host, worker
 
+**Node index**:
+The small integer a Node holds for life once it registers, from which every derived network address follows. Two live Nodes must never share one.
+_Avoid_: node ID, node number
+
 **NetworkPolicy**:
 A named set of ALLOW or DENY rules between Services. DENY always wins, and a Service no ALLOW rule targets accepts everyone.
 _Avoid_: ACL, firewall rule
