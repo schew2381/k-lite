@@ -9,7 +9,30 @@ make bootstrap   # brew tools, colima, base images (safe to re-run)
 make demo        # fresh cluster, every headline feature, ends on the live board
 ```
 
-The demo wipes any previous playground, boots etcd and two klited replicas, joins three nodes over mTLS, and then walks through discovery, a live scale, a hitless rollout, a policy denial, a node drain, and a leader kill, gating each beat PASS/FAIL. It ends by opening the web board against the running cluster and leaves everything up to poke at. `hack/dev-up.sh` is the quieter alternative (same cluster, no narration), and `hack/dev-down.sh --all` tears either down.
+The demo wipes any previous playground, boots etcd and two klited replicas, and joins three nodes over mTLS. It then walks the headline features, gating each beat PASS/FAIL: discovery, a live scale, a hitless rollout, a policy denial, a node drain, and a leader kill. It ends by opening the web board against the running cluster and leaves everything up to poke at. `hack/dev-up.sh` is the quieter alternative (same cluster, no narration), and one command ends either, frontend included:
+
+```
+make down
+```
+
+## Running it day to day
+
+The cluster the demo (or `dev-up.sh`) leaves behind is a normal k-lite cluster, and [`docs/cli.md`](docs/cli.md) is the full command reference. A session is mostly watching, applying, and scaling, in roughly this order:
+
+```
+klite get workloads                       # what's running
+klite get instances --watch               # live event stream, Ctrl-C to stop
+klite apply -f examples/apps/b-whoami.yaml
+klite scale workload b --replicas 5       # scale-down drains before deleting
+klite logs -f <instance>                  # follow a container's output
+klite apply -f examples/policies/deny-a-to-c.yaml
+klite policy check a c                    # verdict names the policy; nonzero exit on denied
+klite drain node-2                        # streamed, surge-first, zero dropped requests
+klite uncordon node-2
+make down                                 # everything off: cluster, facade, frontend
+```
+
+Joining another machine is two commands: `klite apply` the node's YAML, then run the agent with a token from `klite node token`. What that takes on a real machine on the open internet is written up in [`docs/real-nodes.md`](docs/real-nodes.md), packaging gaps included.
 
 ## Architecture
 
