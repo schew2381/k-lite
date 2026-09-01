@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
 import { Navigate, NavLink, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { useClientHandle } from '@/lib/client-context'
 import { cn } from '@/lib/utils'
@@ -9,7 +9,6 @@ import EtcdPage from '@/pages/EtcdPage'
 import LogsPage from '@/pages/LogsPage'
 import ResourcesPage from '@/pages/ResourcesPage'
 import TopologyPage from '@/pages/TopologyPage'
-import { useSnapshot } from '@/store/store'
 
 const TABS = [
   { to: '/', label: 'topology' },
@@ -37,54 +36,29 @@ function Legend() {
 
 // A segmented control picks the data source: mock runs the in-browser
 // simulator, live connects to the real cluster through the facade, and the
-// loser is torn down entirely (no simulation behind live). The dot reports
-// the active source's health.
+// loser is torn down entirely (no simulation behind live).
 function ModeToggle() {
   const { client, setMode } = useClientHandle()
-  const snap = useSnapshot()
-  const [ok, setOk] = useState(true)
-  useEffect(() => {
-    let alive = true
-    const poll = () =>
-      client
-        .health()
-        .then((h) => alive && setOk(h.ok))
-        .catch(() => alive && setOk(false))
-    poll()
-    const t = setInterval(poll, 5000)
-    return () => {
-      alive = false
-      clearInterval(t)
-    }
-  }, [client])
   const live = client.mode === 'http'
-  const segment = (label: 'mock' | 'live', active: boolean) => (
-    <button
-      key={label}
-      type="button"
-      role="radio"
-      aria-checked={active}
-      onClick={() => setMode(label === 'live' ? 'http' : 'mock')}
-      data-testid={`mode-${label}`}
-      className={cn(
-        'cursor-pointer rounded-full px-2.5 py-0.5 uppercase tracking-wide transition-colors',
-        active ? 'bg-ink text-card' : 'text-muted-foreground hover:text-foreground',
-      )}
-    >
-      {label}
-    </button>
-  )
   return (
-    <div
-      role="radiogroup"
-      aria-label="Data source"
-      data-testid="mode-toggle"
-      className="flex items-center gap-1 rounded-full border border-border bg-card p-0.5 pl-2.5 font-mono text-[11px]"
-    >
-      <span className={cn('size-2 rounded-full', ok && snap.synced ? 'bg-traffic' : 'bg-deny')} />
-      {segment('mock', !live)}
-      {segment('live', live)}
-    </div>
+    <Tabs value={live ? 'live' : 'mock'} onValueChange={(v) => setMode(v === 'live' ? 'http' : 'mock')}>
+      <TabsList aria-label="Data source" data-testid="mode-toggle" className="rounded-full font-mono">
+        <TabsTrigger
+          value="mock"
+          data-testid="mode-mock"
+          className="cursor-pointer rounded-full px-3 text-[11px] uppercase tracking-wide transition-all duration-200"
+        >
+          mock
+        </TabsTrigger>
+        <TabsTrigger
+          value="live"
+          data-testid="mode-live"
+          className="cursor-pointer rounded-full px-3 text-[11px] uppercase tracking-wide transition-all duration-200"
+        >
+          live
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
   )
 }
 
