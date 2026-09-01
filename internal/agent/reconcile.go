@@ -49,10 +49,10 @@ func nextBackoff(d time.Duration) time.Duration {
 
 // reconcile converges Docker on the current snapshot. It creates what's
 // missing, restarts what crashed, and removes what nobody wants. Orphan
-// cleanup runs first — a container whose UID or hash no longer matches its
-// instance has lost its claim to the name — and on every pass, so it covers
+// cleanup (a container whose UID or hash no longer matches its instance has
+// lost its claim to the name) runs first and on every pass, so it covers
 // agent startup for free. The controller owns replacement ordering (ADR
-// 0010); the agent only converges on the instance list it's told.
+// 0010), and the agent only converges on the instance list it's told.
 func (a *Agent) reconcile(ctx context.Context) error {
 	desired := a.snapshotDesired()
 	actual, err := a.rt.ListInstances(ctx, a.node)
@@ -78,7 +78,7 @@ func (a *Agent) reconcile(ctx context.Context) error {
 
 // matchContainers pairs containers with the instances they belong to. A
 // container only counts as an instance's when name, UID, and template hash
-// all agree; anything else is an orphan.
+// all agree, and anything else is an orphan.
 func matchContainers(desired map[string]*klitev1.Instance, actual []runtime.RunningInstance) (map[string]*runtime.RunningInstance, []*runtime.RunningInstance) {
 	byName := make(map[string]*runtime.RunningInstance, len(actual))
 	var orphans []*runtime.RunningInstance

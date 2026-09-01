@@ -934,7 +934,7 @@ type NodeStatus struct {
 	NodeIndex         int32                  `protobuf:"varint,4,opt,name=node_index,json=nodeIndex,proto3" json:"node_index,omitempty"` // assigned at registration, drives IPAM
 	InstanceCount     int32                  `protobuf:"varint,5,opt,name=instance_count,json=instanceCount,proto3" json:"instance_count,omitempty"`
 	// The machine address other nodes' proxies dial to reach this node's
-	// ingress listeners (ADR 0024). Always a literal IP: the agent resolves
+	// ingress listeners (ADR 0034). Always a literal IP: the agent resolves
 	// its --advertise-address before reporting, because EDS rejects hostnames.
 	AdvertiseAddress string `protobuf:"bytes,6,opt,name=advertise_address,json=advertiseAddress,proto3" json:"advertise_address,omitempty"`
 	unknownFields    protoimpl.UnknownFields

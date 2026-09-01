@@ -58,7 +58,7 @@ type AgentConfig struct {
 	InfraIPBase int32
 	// IngressPortBase is the raw --ingress-port-base flag (0 means the
 	// default): the bottom of the per-node host ranges donors publish for
-	// cross-node mTLS ingress (ADR 0024).
+	// cross-node mTLS ingress (ADR 0034).
 	IngressPortBase int32
 }
 
@@ -376,7 +376,7 @@ func servingPhase(p klitev1.InstancePhase) bool {
 // stampNode records the heartbeat and marks the node READY. The node
 // controller reverses that once heartbeats stop. A DRAINING phase survives
 // heartbeats: the node controller flips it back once the drain completes.
-// A non-empty advertise address rides along (ADR 0024): agents resolve it
+// A non-empty advertise address rides along (ADR 0034): agents resolve it
 // only after their donor exists, so it usually lands here, not at Register.
 func (a *Agent) stampNode(ctx context.Context, name, advertise string) error {
 	for range casRetries {

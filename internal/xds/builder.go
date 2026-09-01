@@ -38,7 +38,7 @@ const (
 
 	// tlsMountDir is where the infra pod bind-mounts the node identity
 	// (the agent's tlsMount). Ingress and upstream TLS read the same trio
-	// Envoy already dials xDS with (ADR 0013, ADR 0024).
+	// Envoy already dials xDS with (ADR 0013, ADR 0034).
 	tlsMountDir  = "/etc/klite/tls"
 	nodeCertFile = tlsMountDir + "/node.crt"
 	nodeKeyFile  = tlsMountDir + "/node.key"
@@ -61,7 +61,7 @@ const (
 // BuildSnapshot turns net into a validated xDS snapshot for node. Distinct
 // version strings per change are the caller's job (pass the desired-state
 // revision), since Envoy ignores a snapshot whose version it already ACKed.
-// node decides sidedness (ADR 0024): endpoints on it get ingress listeners
+// node decides sidedness (ADR 0034): endpoints on it get ingress listeners
 // here, endpoints elsewhere render as mTLS dials to their ingress ports.
 func BuildSnapshot(node, version string, net *klitev1.NetDesired) (*cachev3.Snapshot, error) {
 	if err := validateNet(net); err != nil {
@@ -373,7 +373,7 @@ func buildCluster(service string, matches []*clusterv3.Cluster_TransportSocketMa
 }
 
 // transportSocketMatches lets one EDS cluster mix plain local endpoints with
-// mTLS remote ones (ADR 0024). Endpoints tagged ingress-mtls dial with the
+// mTLS remote ones (ADR 0034). Endpoints tagged ingress-mtls dial with the
 // node identity. The trailing empty match pins everything else to a raw
 // socket explicitly rather than leaning on fallback-to-default semantics.
 func transportSocketMatches() ([]*clusterv3.Cluster_TransportSocketMatch, error) {
@@ -425,7 +425,7 @@ func commonNodeTLS() *tlsv3.CommonTlsContext {
 
 // upstreamMTLSSocket dials a remote node's ingress listener. No SNI and no
 // SAN pinning: node certs carry only the klite:node:<name> CN, and identity
-// is deliberately node-level in v1 (ADR 0024 records the gap).
+// is deliberately node-level in v1 (ADR 0034 records the gap).
 func upstreamMTLSSocket() (*corev3.TransportSocket, error) {
 	cfg, err := anypb.New(&tlsv3.UpstreamTlsContext{CommonTlsContext: commonNodeTLS()})
 	if err != nil {
@@ -464,7 +464,7 @@ func buildEndpoints(node string, net *klitev1.NetDesired) []types.Resource {
 // buildLoadAssignment renders one group for the consuming node. Endpoints on
 // the node itself stay raw pod addresses, while endpoints elsewhere become
 // mTLS dials to machineAddress:ingressPort, the only cross-node path
-// (ADR 0024).
+// (ADR 0034).
 // A remote endpoint whose allocation or machine address hasn't landed yet is
 // left out: no ingress rider means no reachable path, and the flat-bridge
 // shortcut is gone. Health carries over unchanged either way, so DRAINING
@@ -527,7 +527,7 @@ func socketAddress(host string, port uint32) *corev3.Address {
 	}
 }
 
-// buildIngress emits the destination half of ADR 0024 from the node's
+// buildIngress emits the destination half of ADR 0034 from the node's
 // allocation-driven listener list: one listener on 0.0.0.0:<ingressPort>
 // inside the donor's published slice. Each terminates TLS with the node
 // identity, requires a client cert that chains to the cluster CA, and

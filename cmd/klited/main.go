@@ -113,8 +113,8 @@ func loadIdentity(cfg *config) (*identity, error) {
 		return nil, fmt.Errorf("serving cert: %w", err)
 	}
 	tlsCfg := ca.ServerTLS(serverCert, authority.Pool())
-	// Every Go peer speaks 1.3; only Envoy needs its explicit version pin
-	// (see the agent's bootstrap template).
+	// Every Go peer speaks 1.3, and only Envoy needs its explicit version
+	// pin (see the agent's bootstrap template).
 	tlsCfg.MinVersion = tls.VersionTLS13
 	token, err := loadOrCreateAdminToken(filepath.Join(cfg.stateDir, "token"))
 	if err != nil {

@@ -113,7 +113,8 @@ func (c *connCfg) transportCreds() (credentials.TransportCredentials, error) {
 }
 
 // bearerCreds attaches the admin token to every call. Transport security is
-// not required here so --insecure keeps working; the wire is TLS either way.
+// not required here so --insecure keeps working, and the wire is TLS either
+// way.
 type bearerCreds string
 
 func (b bearerCreds) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
@@ -144,8 +145,8 @@ func dial(cfg *connCfg) (*grpc.ClientConn, klitev1.ClusterServiceClient, error) 
 	eps := endpoints(cfg.server)
 	addrs := make([]resolver.Address, 0, len(eps))
 	for _, e := range eps {
-		// ServerName pins TLS verification to the endpoint's own host;
-		// without it the handshake would check the placeholder authority.
+		// ServerName pins TLS verification to the endpoint's own host.
+		// Without it the handshake would check the placeholder authority.
 		addrs = append(addrs, resolver.Address{Addr: e, ServerName: hostOf(e)})
 	}
 	rb := manual.NewBuilderWithScheme("klite")

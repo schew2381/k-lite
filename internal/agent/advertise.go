@@ -10,7 +10,7 @@ import (
 )
 
 // advertise.go resolves --advertise-address into the literal IP other nodes'
-// proxies dial for this node's ingress ports (ADR 0024). EDS carries only
+// proxies dial for this node's ingress ports (ADR 0034). EDS carries only
 // IPs, so a hostname flag has to become one before it leaves the node. The
 // default, host.docker.internal, is a name only containers can resolve: it
 // exists in the donor's /etc/hosts, where dockerd wrote the host-gateway

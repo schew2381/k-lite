@@ -36,7 +36,7 @@ func main() {
 	stateDir := flag.String("state-dir", "", "root for per-node files, identity included (default ~/.klite/agent)")
 	dockerHost := flag.String("docker-host", "", "Docker daemon address, overriding DOCKER_HOST and socket autodetection")
 	advertise := flag.String("advertise-address", "host.docker.internal",
-		"address other machines dial for this node's ingress ports (ADR 0024); hostnames resolve via the donor, and the default reaches this machine's Docker host")
+		"address other machines dial for this node's ingress ports (ADR 0034); hostnames resolve via the donor, and the default reaches this machine's Docker host")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -114,8 +114,8 @@ func run(node, server, token, stateDir, dockerHost, advertise string) error {
 func dialControlPlane(endpoints []string, ident *agent.Identity) (*grpc.ClientConn, error) {
 	addrs := make([]resolver.Address, 0, len(endpoints))
 	for _, e := range endpoints {
-		// ServerName pins TLS verification to the endpoint's own host;
-		// without it the handshake would check the placeholder authority.
+		// ServerName pins TLS verification to the endpoint's own host.
+		// Without it the handshake would check the placeholder authority.
 		addrs = append(addrs, resolver.Address{Addr: e, ServerName: hostOf(e)})
 	}
 	rb := manual.NewBuilderWithScheme("klite-agent")

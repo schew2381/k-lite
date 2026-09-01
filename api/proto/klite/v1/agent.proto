@@ -36,7 +36,7 @@ message NetBootstrap {
   string cluster_id = 5;
   int32 net_admin_port_base = 6; // 0 means the 19000 default
   int32 envoy_admin_port_base = 7; // 0 means the 19500 default
-  // Cross-node ingress range (ADR 0024): the donor publishes host ports
+  // Cross-node ingress range (ADR 0034): the donor publishes host ports
   // [base + per_node*(index-1), base + per_node*index) at creation. Both
   // arrive resolved; zero means the server predates M9 and no range exists.
   int32 ingress_port_base = 8;
@@ -77,7 +77,7 @@ enum EndpointHealth {
 message Endpoint {
   string ip = 1;
   int32 port = 2;
-  string node = 3; // consumers compare it to their own name: remote endpoints dial ingress (ADR 0024)
+  string node = 3; // consumers compare it to their own name: remote endpoints dial ingress (ADR 0034)
   EndpointHealth health = 4;
   // How OTHER nodes reach this endpoint: the owning node's advertised IP
   // and its mTLS ingress port. The owning node keeps dialing ip:port raw.
@@ -107,7 +107,7 @@ message NetDesired {
   repeated CompiledPolicy policies = 4;
   // What this node's klite-net should TCP-probe: its own instances.
   repeated ProbeTarget probe_targets = 5;
-  // This node's mTLS ingress listeners (ADR 0024), one per local
+  // This node's mTLS ingress listeners (ADR 0034), one per local
   // allocated endpoint. Driven by allocations rather than endpoint
   // health, so the listener is up well before any consumer routes to it
   // and stays up while the endpoint drains.
@@ -115,7 +115,7 @@ message NetDesired {
 }
 
 // IngressListener is one 0.0.0.0:<port> mTLS listener on the node's Envoy,
-// forwarding to a local instance (ADR 0024).
+// forwarding to a local instance (ADR 0034).
 message IngressListener {
   string service = 1; // names the listener, ingress/<service>/<port>
   int32 port = 2; // host-published ingress port from the node's slice
@@ -146,7 +146,7 @@ message ReportStatusRequest {
   string node = 1;
   repeated InstanceStatusUpdate instances = 2;
   KliteNetStatus klite_net = 3;
-  // Resolved advertise IP (ADR 0024), once the agent knows it. Hostname
+  // Resolved advertise IP (ADR 0034), once the agent knows it. Hostname
   // flags resolve against the donor's /etc/hosts, which exists only after
   // the infra pod converges — later than Register. Empty leaves the stored
   // value alone.

@@ -30,17 +30,17 @@ type Config struct {
 	Token   string
 	Runtime runtime.Runtime
 	Client  klitev1.AgentServiceClient
-	// ServerAddrs are the klited endpoints this agent dials; they tell the
-	// in-container Envoy where the xDS servers live (infrapod.go).
+	// ServerAddrs are the klited endpoints this agent dials, and they tell
+	// the in-container Envoy where the xDS servers live (infrapod.go).
 	ServerAddrs []string
 	// StateDir overrides ~/.klite/agent as the root for per-node files.
 	StateDir string
-	// TLSDir holds the node's persisted identity (join.go); the infra pod
-	// bind-mounts it into Envoy. Empty renders a plaintext xDS bootstrap,
-	// which only unit tests should ever see.
+	// TLSDir holds the node's persisted identity (join.go), and the infra
+	// pod bind-mounts it into Envoy. Empty renders a plaintext xDS
+	// bootstrap, which only unit tests should ever see.
 	TLSDir string
 	// AdvertiseAddress is what other machines dial for this node's ingress
-	// ports (ADR 0024): an IP, or a hostname the agent resolves before
+	// ports (ADR 0034): an IP, or a hostname the agent resolves before
 	// reporting (advertise.go). Empty advertises nothing.
 	AdvertiseAddress string
 	// CommandDial opens a connection pinned to one endpoint. The command

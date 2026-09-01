@@ -102,7 +102,7 @@ message NodeStatus {
   int32 node_index = 4; // assigned at registration, drives IPAM
   int32 instance_count = 5;
   // The machine address other nodes' proxies dial to reach this node's
-  // ingress listeners (ADR 0024). Always a literal IP: the agent resolves
+  // ingress listeners (ADR 0034). Always a literal IP: the agent resolves
   // its --advertise-address before reporting, because EDS rejects hostnames.
   string advertise_address = 6;
 }
@@ -185,7 +185,7 @@ message VIPAllocation {
 }
 
 // ---- IngressAllocation (server-materialized, one per (Service, Instance)
-// endpoint, ADR 0024) ----
+// endpoint, ADR 0034) ----
 
 message IngressAllocationSpec {
   string service = 1;

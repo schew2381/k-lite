@@ -25,8 +25,8 @@ var drainPollInterval = 400 * time.Millisecond
 // as the leader's controllers perform it: replacements surge elsewhere, old
 // instances drain, then disappear. With force, draining instances are deleted
 // immediately instead of waiting out their timeout. The RPC only writes
-// intent (cordon, drain phase, force deletes); breaking the stream never
-// strands a drain, the controllers finish it at normal pace.
+// intent (cordon, drain phase, force deletes). Breaking the stream never
+// strands a drain, since the controllers finish it at normal pace.
 func (s *Cluster) Drain(req *klitev1.DrainRequest, stream grpc.ServerStreamingServer[klitev1.DrainProgress]) error {
 	node := req.GetNode()
 	if node == "" {
@@ -63,7 +63,7 @@ func (s *Cluster) Drain(req *klitev1.DrainRequest, stream grpc.ServerStreamingSe
 			return stream.Send(&klitev1.DrainProgress{Message: "done: " + node + " drained", Done: true})
 		}
 		// Heartbeats from a node that bounced through NOT_READY can undo
-		// the drain phase; re-assert while instances remain.
+		// the drain phase, so re-assert while instances remain.
 		if err := s.markNodeDraining(ctx, node); err != nil {
 			return err
 		}

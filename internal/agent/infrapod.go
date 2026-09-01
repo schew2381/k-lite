@@ -36,8 +36,8 @@ const (
 	defaultXDSPort = 7443
 
 	bootstrapMount = "/etc/klite/envoy-bootstrap.yaml"
-	// tlsMount is where Envoy sees the node identity (join.go). M9's
-	// ingress listeners will read the same files, so the whole directory
+	// tlsMount is where Envoy sees the node identity (join.go). The
+	// ingress listeners read the same files, so the whole directory
 	// mounts, not individual certs.
 	tlsMount = "/etc/klite/tls"
 )
@@ -159,8 +159,9 @@ func (a *Agent) ensureInfraPod(ctx context.Context) error {
 	return nil
 }
 
-// infraLabels is every infra container's label set: role, node, and the
-// owning cluster so a shared daemon's clusters stay out of each other's way.
+// infraLabels builds the label set every infra container carries, with role,
+// node, and the owning cluster so a shared daemon's clusters stay out of
+// each other's way.
 func (a *Agent) infraLabels(nb *klitev1.NetBootstrap, role string) map[string]string {
 	labels := map[string]string{
 		runtime.LabelRole: role,
@@ -189,7 +190,7 @@ func (a *Agent) netContainerSpec(nb *klitev1.NetBootstrap) *runtime.InfraContain
 	}
 	// The whole ingress slice publishes at creation (Docker can't add
 	// ports to a running container), on every interface, because remote
-	// machines dial these (ADR 0024). Envoy binds them one listener per
+	// machines dial these (ADR 0034). Envoy binds them one listener per
 	// local endpoint as allocations arrive. The map feeds the config hash,
 	// so donors from before this range recreate exactly once.
 	lo, hi := ingressPortRange(nb)
@@ -287,9 +288,10 @@ func (a *Agent) ensureEnvoyContainer(ctx context.Context, nb *klitev1.NetBootstr
 		spec.Env = []string{"ENVOY_UID=0"}
 	}
 	// The donor ID folds into the hash so a recreated donor forces a fresh
-	// Envoy into the new netns; the identity fingerprint so a re-join (new
-	// certs at the same paths, e.g. the pre-M9 self-heal) forces one that
-	// re-reads them — Envoy never hot-reloads file-based TLS material.
+	// Envoy into the new netns. The identity fingerprint folds in so a
+	// re-join (new certs at the same paths, e.g. the pre-M9 self-heal)
+	// forces one that re-reads them, because Envoy never hot-reloads
+	// file-based TLS material.
 	spec.Labels[runtime.LabelConfigHash] = configHash(spec, donor.ID, bootstrap, a.identityFingerprint())
 	st, err := a.rt.InspectInfra(ctx, spec.Name)
 	if err != nil {

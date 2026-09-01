@@ -13,7 +13,7 @@ import (
 	"github.com/schew2381/k-lite/internal/store"
 )
 
-// The cross-node ingress range (ADR 0024): every node owns
+// The cross-node ingress range (ADR 0034): every node owns
 // IngressPortsPerNode host ports starting at base + 32*(index-1), and its
 // donor publishes the whole slice at creation because Docker can't add
 // published ports to a running container.
@@ -57,8 +57,11 @@ type ingressController struct {
 // space. The lower bound matters as much as the upper: a negative base
 // (int32 truncation of a fat-fingered flag) would otherwise mint negative
 // ports. xds.validateNet rejects those, wedging every node on its last good
-// snapshot. The agent's ingressPortRange makes the same refusal, so
-// allocator and donor stay agreed on "no slice".
+// snapshot. The agent's ingressPortRange refuses any base at or below zero,
+// which is broader than this check: a negative base whose slice climbs back
+// past 1 at a high node index mints ports here that the donor never
+// publishes. Aligning the checks is the fix if that misconfiguration ever
+// stops being hypothetical.
 func (c *ingressController) nodeRange(index int32) (lo, hi int32, ok bool) {
 	if index < 1 {
 		return 0, 0, false

@@ -201,7 +201,7 @@ type inputs struct {
 	policies  []*klitev1.NetworkPolicy
 	vips      map[string]string                         // AllocationName -> VIP
 	ingress   map[string]*klitev1.IngressAllocationSpec // by IngressAllocationName
-	advertise map[string]string                         // node -> advertised machine IP (ADR 0024)
+	advertise map[string]string                         // node -> advertised machine IP (ADR 0034)
 }
 
 func listInputs(ctx context.Context, st store.Store) (*inputs, error) {
@@ -291,7 +291,7 @@ func listAllocations(ctx context.Context, st store.Store, in *inputs) error {
 // buildAll assembles every node's snapshot from one input read. Endpoint
 // groups span the whole cluster, since a consuming node's Envoy balances
 // across every endpoint and reaches the remote ones through the mTLS ingress
-// hop (ADR 0024). Services, probe targets, instances, and ingress listeners
+// hop (ADR 0034). Services, probe targets, instances, and ingress listeners
 // are per-node.
 func buildAll(in *inputs) map[string]*NodeSnapshot {
 	compiled := policy.Compile(in.policies)
@@ -331,7 +331,7 @@ func buildAll(in *inputs) map[string]*NodeSnapshot {
 // allocation whose instance lives here and has an address. Allocation-driven
 // rather than endpoint-driven on purpose — the listener stands from instance
 // birth, well before any consumer's EDS routes to it, and outlives Ready so
-// draining endpoints stay reachable through the hop (ADR 0024, ADR 0010).
+// draining endpoints stay reachable through the hop (ADR 0034, ADR 0010).
 func buildIngressListeners(in *inputs, node string) []*klitev1.IngressListener {
 	instances := make(map[string]*klitev1.Instance, len(in.instances))
 	for _, inst := range in.instances {
@@ -368,7 +368,7 @@ func buildIngressListeners(in *inputs, node string) []*klitev1.IngressListener {
 // ADR 0010) with an address. Each endpoint also carries how OTHER nodes reach
 // it — the owning node's advertised IP plus its allocated ingress port — so a
 // consuming node's Envoy can render remote endpoints against the mTLS ingress
-// listener instead of the dead flat-bridge path (ADR 0024).
+// listener instead of the dead flat-bridge path (ADR 0034).
 func buildGroups(in *inputs) map[string]*klitev1.EndpointGroup {
 	out := make(map[string]*klitev1.EndpointGroup, len(in.services))
 	for _, svc := range in.services {

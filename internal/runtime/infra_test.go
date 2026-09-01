@@ -94,7 +94,7 @@ func (zeros) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// The M9 ingress slice publishes as one binding per port (ADR 0024): each
+// The M9 ingress slice publishes as one binding per port (ADR 0034): each
 // map entry must land as an exposed port plus its literal host binding,
 // 0.0.0.0 for the slice and loopback for the admin entry.
 func TestPortBindingsIngressSlice(t *testing.T) {

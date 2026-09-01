@@ -39,7 +39,7 @@ func TestNetContainerSpecHonorsBasesAndClusterLabel(t *testing.T) {
 }
 
 // The donor publishes its whole ingress slice on every interface at
-// creation (ADR 0024), and adding the slice moves the config hash so
+// creation (ADR 0034), and adding the slice moves the config hash so
 // pre-M9 donors recreate exactly once.
 func TestNetContainerSpecPublishesIngressRange(t *testing.T) {
 	t.Parallel()

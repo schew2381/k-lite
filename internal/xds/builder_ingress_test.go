@@ -67,7 +67,7 @@ func getCluster(t *testing.T, snap *cachev3.Snapshot, name string) *clusterv3.Cl
 	return res.(*clusterv3.Cluster)
 }
 
-// The consuming side of ADR 0024: local endpoints stay raw pod addresses,
+// The consuming side of ADR 0034: local endpoints stay raw pod addresses,
 // remote ones become machineAddress:ingressPort tagged for the mTLS
 // transport match, remote ones without a rider vanish (the flat-bridge path
 // is dead, not a fallback), and DRAINING survives the rewrite so draining
@@ -143,7 +143,7 @@ func TestBuildSnapshotClusterTransportMatches(t *testing.T) {
 	}
 }
 
-// The destination side of ADR 0024: each entry in the node's
+// The destination side of ADR 0034: each entry in the node's
 // allocation-driven listener list becomes a 0.0.0.0:<port> listener that
 // terminates mTLS with the node identity, demands a CA-chained client cert,
 // and proxies straight to the pod through a same-named one-endpoint static

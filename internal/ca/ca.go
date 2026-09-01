@@ -248,7 +248,7 @@ func (c *CA) ServerCert(hosts []string) (*tls.Certificate, error) {
 // proof of key possession — CheckSignature is required (the line k3s skips),
 // and every name the CSR carries is ignored in favor of a CN the server
 // stamps itself. The cert carries both TLS purposes: the node dials klited
-// as a client and serves its Envoy's mTLS ingress listeners (ADR 0024) —
+// as a client and serves its Envoy's mTLS ingress listeners (ADR 0034) —
 // BoringSSL enforces the purpose per role, so ClientAuth alone cannot serve.
 func (c *CA) SignNodeCSR(csrPEM []byte, node string) ([]byte, error) {
 	if node == "" {

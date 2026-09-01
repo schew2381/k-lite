@@ -40,7 +40,7 @@ func (s *Cluster) Logs(req *klitev1.LogsRequest, stream grpc.ServerStreamingServ
 	if !ok {
 		// With several klited replicas the agent's stream may be parked on a
 		// sibling, so the CLI treats this code as "try the next endpoint".
-		// M7 moves that routing server-side.
+		// No server-side relay exists, and the CLI's walk is the routing.
 		return status.Errorf(codes.FailedPrecondition, "agent for node %s not connected to this server", node)
 	}
 	defer s.hub.send(node, &klitev1.Command{Id: id, Cmd: &klitev1.Command_Stop{Stop: &klitev1.StopCommand{CommandId: id}}})

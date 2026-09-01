@@ -56,7 +56,7 @@ func (s *Cluster) NodeToken(context.Context, *klitev1.NodeTokenRequest) (*klitev
 
 // Uncordon clears a node's unschedulable flag, set earlier by a drain. A node
 // whose deletion is pending stays cordoned: the delete choreography owns it
-// (ADR 0010, 0023).
+// (ADR 0010, 0033).
 func (s *Cluster) Uncordon(ctx context.Context, req *klitev1.UncordonRequest) (*klitev1.UncordonResponse, error) {
 	name := req.GetNode()
 	if name == "" {

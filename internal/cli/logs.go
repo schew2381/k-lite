@@ -35,8 +35,8 @@ func newLogsCmd(cfg *connCfg) *cobra.Command {
 
 // runLogs walks the endpoints one at a time. A klited only serves logs for
 // agents streaming into it, so FailedPrecondition (wrong replica) and
-// Unavailable (dead replica) both mean "ask the next one". M7 moves this
-// routing server-side so any replica can answer.
+// Unavailable (dead replica) both mean "ask the next one". Routing stays
+// client-side: no server-side relay between replicas exists.
 func runLogs(ctx context.Context, w io.Writer, cfg *connCfg, req *klitev1.LogsRequest) error {
 	var lastErr error
 	for _, ep := range endpoints(cfg.server) {

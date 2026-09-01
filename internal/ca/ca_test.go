@@ -232,7 +232,7 @@ func TestSignNodeCSRRoundtrip(t *testing.T) {
 		t.Errorf("Organization = %v", cert.Subject.Organization)
 	}
 	// Both purposes, one identity: the node dials klited as a client and
-	// serves its ingress listeners (ADR 0024).
+	// serves its ingress listeners (ADR 0034).
 	for _, usage := range []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth} {
 		if _, err := cert.Verify(x509.VerifyOptions{
 			Roots:     c.Pool(),

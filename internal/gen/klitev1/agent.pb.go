@@ -153,7 +153,7 @@ type NetBootstrap struct {
 	ClusterId          string `protobuf:"bytes,5,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
 	NetAdminPortBase   int32  `protobuf:"varint,6,opt,name=net_admin_port_base,json=netAdminPortBase,proto3" json:"net_admin_port_base,omitempty"`       // 0 means the 19000 default
 	EnvoyAdminPortBase int32  `protobuf:"varint,7,opt,name=envoy_admin_port_base,json=envoyAdminPortBase,proto3" json:"envoy_admin_port_base,omitempty"` // 0 means the 19500 default
-	// Cross-node ingress range (ADR 0024): the donor publishes host ports
+	// Cross-node ingress range (ADR 0034): the donor publishes host ports
 	// [base + per_node*(index-1), base + per_node*index) at creation. Both
 	// arrive resolved; zero means the server predates M9 and no range exists.
 	IngressPortBase     int32 `protobuf:"varint,8,opt,name=ingress_port_base,json=ingressPortBase,proto3" json:"ingress_port_base,omitempty"`
@@ -507,7 +507,7 @@ type Endpoint struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Ip     string                 `protobuf:"bytes,1,opt,name=ip,proto3" json:"ip,omitempty"`
 	Port   int32                  `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	Node   string                 `protobuf:"bytes,3,opt,name=node,proto3" json:"node,omitempty"` // consumers compare it to their own name: remote endpoints dial ingress (ADR 0024)
+	Node   string                 `protobuf:"bytes,3,opt,name=node,proto3" json:"node,omitempty"` // consumers compare it to their own name: remote endpoints dial ingress (ADR 0034)
 	Health EndpointHealth         `protobuf:"varint,4,opt,name=health,proto3,enum=klite.v1.EndpointHealth" json:"health,omitempty"`
 	// How OTHER nodes reach this endpoint: the owning node's advertised IP
 	// and its mTLS ingress port. The owning node keeps dialing ip:port raw.
@@ -727,7 +727,7 @@ type NetDesired struct {
 	Policies   []*CompiledPolicy      `protobuf:"bytes,4,rep,name=policies,proto3" json:"policies,omitempty"`
 	// What this node's klite-net should TCP-probe: its own instances.
 	ProbeTargets []*ProbeTarget `protobuf:"bytes,5,rep,name=probe_targets,json=probeTargets,proto3" json:"probe_targets,omitempty"`
-	// This node's mTLS ingress listeners (ADR 0024), one per local
+	// This node's mTLS ingress listeners (ADR 0034), one per local
 	// allocated endpoint. Driven by allocations rather than endpoint
 	// health, so the listener is up well before any consumer routes to it
 	// and stays up while the endpoint drains.
@@ -809,7 +809,7 @@ func (x *NetDesired) GetIngressListeners() []*IngressListener {
 }
 
 // IngressListener is one 0.0.0.0:<port> mTLS listener on the node's Envoy,
-// forwarding to a local instance (ADR 0024).
+// forwarding to a local instance (ADR 0034).
 type IngressListener struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Service       string                 `protobuf:"bytes,1,opt,name=service,proto3" json:"service,omitempty"` // names the listener, ingress/<service>/<port>
@@ -1057,7 +1057,7 @@ type ReportStatusRequest struct {
 	Node      string                  `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
 	Instances []*InstanceStatusUpdate `protobuf:"bytes,2,rep,name=instances,proto3" json:"instances,omitempty"`
 	KliteNet  *KliteNetStatus         `protobuf:"bytes,3,opt,name=klite_net,json=kliteNet,proto3" json:"klite_net,omitempty"`
-	// Resolved advertise IP (ADR 0024), once the agent knows it. Hostname
+	// Resolved advertise IP (ADR 0034), once the agent knows it. Hostname
 	// flags resolve against the donor's /etc/hosts, which exists only after
 	// the infra pod converges — later than Register. Empty leaves the stored
 	// value alone.

@@ -80,7 +80,7 @@ func TestBuildAllIngressListeners(t *testing.T) {
 	}
 }
 
-// Endpoints carry the cross-node dialing rider (ADR 0024): the owning
+// Endpoints carry the cross-node dialing rider (ADR 0034): the owning
 // node's advertised IP plus its allocated ingress port. Consumers decide
 // local-vs-remote; here both are simply present.
 func TestBuildAllEndpointIngressRider(t *testing.T) {

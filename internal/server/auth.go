@@ -119,8 +119,8 @@ func (s *xdsBoundStream) RecvMsg(m any) error {
 	}
 	req, ok := m.(nodeNamer)
 	if !ok {
-		// Every message on the mounted xDS services names a node; anything
-		// else is unexpected enough to fail closed.
+		// Every message on the mounted xDS services names a node, so
+		// anything else is unexpected enough to fail closed.
 		return status.Errorf(codes.PermissionDenied, "unexpected xds request type %T", m)
 	}
 	id := req.GetNode().GetId()

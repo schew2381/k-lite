@@ -97,7 +97,7 @@ func TestApplyRejectsServerMaterializedKinds(t *testing.T) {
 }
 
 // The heartbeat carries the advertise address once the agent resolved it
-// (ADR 0024): non-IP values are dropped, empty leaves the stored one alone.
+// (ADR 0034): non-IP values are dropped, empty leaves the stored one alone.
 func TestStampNodeAdvertiseAddress(t *testing.T) {
 	t.Parallel()
 	st := storetest.New()

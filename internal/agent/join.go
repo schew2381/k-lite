@@ -39,8 +39,8 @@ const (
 type Identity struct {
 	// TLS pins the cluster CA and presents the node cert (ca.AgentTLS).
 	TLS *tls.Config
-	// Dir holds node.key, node.crt, and ca.crt; the infra pod bind-mounts
-	// it read-only so Envoy dials xDS with the same identity.
+	// Dir holds node.key, node.crt, and ca.crt, and the infra pod
+	// bind-mounts it read-only so Envoy dials xDS with the same identity.
 	Dir string
 }
 
@@ -153,7 +153,7 @@ func loadIdentity(dir, node string) (*Identity, error) {
 	}
 	if !slices.Contains(leaf.ExtKeyUsage, x509.ExtKeyUsageServerAuth) {
 		// Pre-M9 identities dial fine but can't serve the ingress
-		// listeners (ADR 0024), and Envoy mounts these exact files. A
+		// listeners (ADR 0034), and Envoy mounts these exact files. A
 		// token in hand turns this into a silent one-time re-join.
 		return nil, errServerAuthMissing
 	}
@@ -176,7 +176,7 @@ const (
 )
 
 // probeIdentity asks each endpoint whether the persisted identity still
-// opens doors, via a certless-token-less Register that only a valid client
+// opens doors, via a token-less, CSR-less Register that only a valid client
 // cert can carry. Unreachable endpoints count as usable: a dead control
 // plane is no reason to burn a good identity, and Run retries registration
 // anyway.
@@ -215,8 +215,8 @@ func isTLSReject(err error) bool {
 
 // join redeems the token for a signed identity and persists it. The K10 form
 // pins the CA hash across a deliberately unverified first dial (the k3s
-// /cacerts move); the bare-secret form verifies against a locally readable
-// CA file instead.
+// /cacerts move), while the bare-secret form verifies against a locally
+// readable CA file instead.
 func join(ctx context.Context, cfg *JoinConfig, dir string) error {
 	csrPEM, keyPEM, err := ca.NewNodeCSR(cfg.Node)
 	if err != nil {

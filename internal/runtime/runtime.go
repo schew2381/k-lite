@@ -29,7 +29,7 @@ const (
 	RoleNet      = "net"
 	RoleEnvoy    = "envoy"
 	// RoleHelper marks short-lived utility containers (the admin-port
-	// lockdown pass); anything carrying it is safe to remove on sight.
+	// lockdown pass), so anything carrying it is safe to remove on sight.
 	RoleHelper = "helper"
 )
 
@@ -65,8 +65,8 @@ type Event struct {
 
 // InfraContainer describes one infra-pod container (ADR 0008). Every
 // netns-scoped option (static IP, capabilities, extra hosts, published
-// ports) belongs on the netns donor; a container joining another's namespace
-// carries none of them.
+// ports) belongs on the netns donor, because a container joining another's
+// namespace carries none of them.
 type InfraContainer struct {
 	Name       string
 	Image      string
@@ -146,6 +146,6 @@ type Runtime interface {
 	// filesystem, running or not. The agent reads the donor's /etc/hosts
 	// with it: dockerd writes the resolved host-gateway address there at
 	// create time, and on a Mac that file is the only place the
-	// container-reachable host address exists (ADR 0024).
+	// container-reachable host address exists (ADR 0034).
 	ReadContainerFile(ctx context.Context, name, path string) ([]byte, error)
 }
