@@ -7,14 +7,18 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import type { Rect } from '@/layout/layout'
 import { act } from '@/lib/act'
 import { useClient } from '@/lib/client-context'
+import { useDwelledPhase } from '@/lib/useDwelledPhase'
 import { cn } from '@/lib/utils'
 import { useSnapshot } from '@/store/store'
 
 export function InstanceChip({ instance, rect }: { instance: Instance; rect: Rect }) {
   const client = useClient()
   const snapshot = useSnapshot()
-  const { phase, restarts, instanceIp } = instance.status
-  const killable = phase === 'Running' || phase === 'Ready'
+  const { restarts, instanceIp } = instance.status
+  // the displayed phase dwells so a 180ms live birth still reads as
+  // Pending, then Running, then Ready. Actions key off the actual phase.
+  const phase = useDwelledPhase(instance.status.phase)
+  const killable = instance.status.phase === 'Running' || instance.status.phase === 'Ready'
   // a rollout in flight: this instance still runs the workload's old template
   const wantHash = snapshot.workloads[instance.spec.workload]?.status?.templateHash
   const stale = Boolean(
@@ -27,7 +31,7 @@ export function InstanceChip({ instance, rect }: { instance: Instance; rect: Rec
       initial={{ opacity: 0, scale: 0.9 }}
       animate={{ opacity: 1, scale: 1, x: rect.x, y: rect.y }}
       exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+      transition={{ type: 'spring', stiffness: 350, damping: 30, opacity: { duration: 0.12 } }}
       style={{ width: rect.w, height: rect.h, position: 'absolute', top: 0, left: 0 }}
       className={cn(
         'group rounded-lg border-[1.5px] border-ink bg-card px-2 py-1.5 shadow-[2px_2px_0_rgba(43,42,36,0.12)]',
