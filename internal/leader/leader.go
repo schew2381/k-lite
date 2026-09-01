@@ -3,6 +3,7 @@ package leader
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -29,17 +30,25 @@ func RunWhenLeader(ctx context.Context, cli *clientv3.Client, id string, standby
 		}
 		sess, err := concurrency.NewSession(cli, concurrency.WithTTL(sessionTTL), concurrency.WithContext(ctx))
 		if err != nil {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(campaignBackoff):
-				continue
+			if ctx.Err() == nil {
+				slog.Warn("leader session failed, backing off", "err", err)
 			}
+			if !sleep(ctx, campaignBackoff) {
+				return ctx.Err()
+			}
+			continue
 		}
 		election := concurrency.NewElection(sess, electionPrefix)
 		if err := election.Campaign(ctx, id); err != nil {
 			sess.Close()
 			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			// Back off here too: a session can keep succeeding while the
+			// campaign txn keeps failing, and without a pause that loop
+			// hammers etcd flat out.
+			slog.Warn("leader campaign failed, backing off", "err", err)
+			if !sleep(ctx, campaignBackoff) {
 				return ctx.Err()
 			}
 			continue
@@ -59,10 +68,21 @@ func RunWhenLeader(ctx context.Context, cli *clientv3.Client, id string, standby
 		cancel()
 		<-done
 
-		// Resign so a standby takes over immediately instead of waiting out the TTL.
+		// Resign so a standby takes over immediately instead of waiting out
+		// the TTL. Use a fresh context: on shutdown ctx is already canceled,
+		// and the resign still has to go out.
 		resignCtx, resignCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = election.Resign(resignCtx)
 		resignCancel()
 		sess.Close()
+	}
+}
+
+func sleep(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
 	}
 }
