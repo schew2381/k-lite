@@ -33,7 +33,10 @@ jobs:
   # buildx sets TARGETARCH per platform for the Dockerfile's COPY.
   image:
     runs-on: ubuntu-latest
+    # A job-level permissions block zeroes every scope it omits, and
+    # actions/checkout still needs contents: read.
     permissions:
+      contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
