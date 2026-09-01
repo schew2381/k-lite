@@ -75,12 +75,14 @@ infra_up() {
     docker ps --format '{{.Names}}' | grep -qx "klite.$n.envoy" || return 1
   done
 }
-counts_ready() { # a=1, b=<$1>, c=2 all Ready
+counts_ready() { # counts_ready <b> <c>: a=1 plus these counts, all Ready
   local snap; snap="$("$KLITE" get instances 2>/dev/null)"
   [[ "$(echo "$snap" | awk '$2=="a" && $4=="Ready"' | wc -l | tr -d ' ')" == 1 ]] || return 1
   [[ "$(echo "$snap" | awk '$2=="b" && $4=="Ready"' | wc -l | tr -d ' ')" == "$1" ]] || return 1
-  [[ "$(echo "$snap" | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == 2 ]]
+  [[ "$(echo "$snap" | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == "$2" ]]
 }
+# The resting shape every beat returns to, and what the board shows at the end.
+steady() { counts_ready 2 3; }
 a_ctr() { echo "klite.$A_NODE.$A_INST"; }
 failed_since() { docker logs "$(a_ctr)" --since "$1" 2>/dev/null | grep -c 'FAILED'; }
 alloc_row() { "$KLITE" get ingressallocations 2>/dev/null | awk -v s="$1" -v i="$2" '$2==s && $3==i {print $4, $5}'; }
@@ -237,7 +239,7 @@ for app in a-client b-whoami c-whoami; do
   patch_drain "examples/apps/$app.yaml" "$DEV_DIR/apps/$app.yaml"
   "$KLITE" apply -f "$DEV_DIR/apps/$app.yaml" >/dev/null || die "apply $app.yaml"
 done
-wait_for 120 counts_ready 2 && pass "a, b, c all Ready (readiness probes gate b and c)" || die "workloads Ready"
+wait_for 120 counts_ready 2 2 && pass "a, b, c all Ready (readiness probes gate b and c)" || die "workloads Ready"
 show "$KLITE" get instances
 A_INST="$("$KLITE" get instances | awk '$2=="a" {print $1}' | head -1)"
 A_NODE="$("$KLITE" get instances | awk '$2=="a" {print $3}' | head -1)"
@@ -274,18 +276,19 @@ show "$KLITE" get vipallocations
 pause
 
 # ============================================================
-banner "6. SCALE b LIVE: 2 -> 4"
+banner "6. SCALE c LIVE: 2 -> 3"
 STEP=scale
 
+# This lands the cluster on its resting shape (a=1, b=2, c=3), which every
+# later beat returns to and the board shows at the end.
 MARKER_ROLL="$(date +%s)"
 sleep 1
-show "$KLITE" scale workload b --replicas 4
-b4() { counts_ready 4; }
-wait_for 90 b4 && pass "b converged to 4/4 Ready" || die "scale b to 4"
+show "$KLITE" scale workload c --replicas 3
+wait_for 90 steady && pass "c converged to 3/3 Ready" || die "scale c to 3"
 show "$KLITE" get instances
-[[ "$("$KLITE" get instances | awk '$2=="b" {print $3}' | sort -u | wc -l | tr -d ' ')" -ge 2 ]] \
-  && pass "b spans multiple nodes (spread-by-count scheduler, ADR 0012)" \
-  || die "b landed on a single node"
+[[ "$("$KLITE" get instances | awk '$2=="c" {print $3}' | sort -u | wc -l | tr -d ' ')" -ge 2 ]] \
+  && pass "c spans multiple nodes (spread-by-count scheduler, ADR 0012)" \
+  || die "c landed on a single node"
 pause
 
 # ============================================================
@@ -293,20 +296,19 @@ banner "7. ROLLING UPDATE: replace all of b, drop zero requests"
 STEP=rollout
 
 # A template change (new env var) triggers the surge-first replace. The
-# re-apply carries replicas: 4, because apply lays the whole spec over the
-# stored one and the file's original count would silently undo the scale.
+# re-applied file still says replicas: 2, matching the stored count, so the
+# rollout is the only change in flight.
 B_BEFORE="$("$KLITE" get instances | awk '$2=="b" {print $1}' | sort)"
-awk '{sub(/^  replicas: 2$/, "  replicas: 4"); print}
-     /value: b$/ {print "          - name: DEMO_ROLLOUT"; print "            value: \"1\""}' \
+awk '{print} /value: b$/ {print "          - name: DEMO_ROLLOUT"; print "            value: \"1\""}' \
   "$DEV_DIR/apps/b-whoami.yaml" | "$KLITE" apply -f - >/dev/null || die "apply the rolled b template"
 info "watching the surge-first replace (create one, wait Ready, drain one, repeat)"
 rolled() {
-  [[ "$("$KLITE" get instances 2>/dev/null | awk '$2=="b" && $4=="Ready"' | wc -l | tr -d ' ')" == 4 ]] || return 1
+  steady || return 1
   local left
   left="$(comm -12 <(echo "$B_BEFORE") <("$KLITE" get instances 2>/dev/null | awk '$2=="b" {print $1}' | sort) | grep -c . || true)"
   [[ "$left" == 0 ]]
 }
-wait_for 180 rolled && pass "all 4 b instances replaced with the new template, all Ready" || die "rollout converged"
+wait_for 180 rolled && pass "both b instances replaced with the new template, all Ready" || die "rollout converged"
 sleep 3
 FAILS="$(failed_since "$MARKER_ROLL")"
 [[ "$FAILS" == 0 ]] \
@@ -354,10 +356,10 @@ sleep 1
 DRAIN_NODE=""
 for cand in node-2 node-3 node-1; do
   [[ "$cand" == "$A_NODE" ]] && continue
-  "$KLITE" get instances | awk -v n="$cand" '$2=="b" && $3==n' | grep -q . && { DRAIN_NODE="$cand"; break; }
+  "$KLITE" get instances | awk -v n="$cand" '($2=="b" || $2=="c") && $3==n' | grep -q . && { DRAIN_NODE="$cand"; break; }
 done
-[[ -n "$DRAIN_NODE" ]] || die "no node hosting b apart from a's own"
-info "draining $DRAIN_NODE (it hosts b endpoints a is dialing right now)"
+[[ -n "$DRAIN_NODE" ]] || die "no node hosting b or c apart from a's own"
+info "draining $DRAIN_NODE (it hosts endpoints a is dialing right now)"
 echo
 echo "  \$ klite drain $DRAIN_NODE"
 "$KLITE" drain "$DRAIN_NODE" 2>&1 | tee "$DEV_DIR/drain.log" | sed 's/^/  /'
@@ -368,7 +370,7 @@ grep -q "^done: $DRAIN_NODE drained" "$DEV_DIR/drain.log" || die "drain stream e
 pass "nomad-style stream: cordoned, surged, draining, done"
 show "$KLITE" get nodes
 show "$KLITE" uncordon "$DRAIN_NODE"
-wait_for 90 b4 && pass "cluster re-converged with $DRAIN_NODE schedulable again" || die "re-converge after uncordon"
+wait_for 90 steady && pass "cluster re-converged with $DRAIN_NODE schedulable again" || die "re-converge after uncordon"
 sleep 3
 FAILS="$(failed_since "$MARKER_CHAOS")"
 [[ "$FAILS" == 0 ]] \
@@ -389,21 +391,23 @@ else
 fi
 LEAD_PID="$(cat "$LEAD_PIDFILE")"
 S_OFF=$(wc -c <"$SURV_LOG" | tr -d ' ')
-"$KLITE" scale workload b --replicas 6 >/dev/null || die "scale b to 6"
+"$KLITE" scale workload b --replicas 4 >/dev/null || die "scale b to 4"
 kill -9 "$LEAD_PID" || die "SIGKILL the leader"
-info "scaled b to 6 and SIGKILLed the leader ($LEAD_EP, pid $LEAD_PID) in the same breath"
+info "scaled b to 4 and SIGKILLed the leader ($LEAD_EP, pid $LEAD_PID) in the same breath"
 survivor_leads() { tail -c +"$((S_OFF + 1))" "$SURV_LOG" | grep -qF "controllers: leading"; }
 T0=$(date +%s)
 wait_for 15 survivor_leads \
   && pass "the survivor took leadership $(( $(date +%s) - T0 ))s after the kill (etcd lease election, ADR 0005)" \
   || die "survivor never logged 'controllers: leading'"
-b6() { counts_ready 6; }
-wait_for 90 b6 && pass "scale to 6 converged through the survivor alone" || die "post-kill convergence"
+b4c3() { counts_ready 4 3; }
+wait_for 90 b4c3 && pass "scale to 4 converged through the survivor alone" || die "post-kill convergence"
 show "$KLITE" --server "$SURV_EP" get instances
+show "$KLITE" scale workload b --replicas 2
+wait_for 90 steady && pass "and back down: the cluster rests at a=1, b=2, c=3" || die "scale b back to 2"
 sleep 3
 FAILS="$(failed_since "$MARKER_CHAOS")"
 [[ "$FAILS" == 0 ]] \
-  && pass "ZERO failed requests across drain + leader kill (the data plane never blinked)" \
+  && pass "ZERO failed requests across drain + leader kill + both scales (the data plane never blinked)" \
   || die "$FAILS failed request(s) across the chaos window"
 
 "$BIN/klited" --listen "127.0.0.1:$LEAD_PORT" >"$DEV_DIR/klited-$LEAD_PORT.log" 2>&1 &
@@ -427,10 +431,12 @@ pass "klited speaks TLS 1.3 and presents the [leaf, CA] chain token pinning depe
 pause
 
 info "cross-node traffic rides per-endpoint mTLS ingress ports (ADRs 0034, 0035):"
+# The beat before this one scaled b down, and the drained instances hold
+# their ports until deletion, so give the allocator a beat to settle.
+allocs_settled() { [[ "$("$KLITE" get ingressallocations 2>/dev/null | tail -n +2 | grep -c .)" == 6 ]]; }
+wait_for 60 allocs_settled || { "$KLITE" get ingressallocations; die "want 6 ingress allocations (a=1, b=2, c=3)"; }
 show "$KLITE" get ingressallocations
-ALLOC_ROWS="$("$KLITE" get ingressallocations | tail -n +2 | grep -c .)"
-[[ "$ALLOC_ROWS" == 9 ]] && pass "9 allocations while traffic flows (a=1, b=6, c=2), each inside its node's slice" \
-  || die "want 9 ingress allocations, got $ALLOC_ROWS"
+pass "6 allocations while traffic flows (a=1, b=2, c=3), each inside its node's slice"
 
 B_PORT="$("$KLITE" get ingressallocations | awk '$2=="b" {print $5; exit}')"
 [[ -n "$B_PORT" ]] || die "no ingress port to probe"
