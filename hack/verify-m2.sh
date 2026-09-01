@@ -60,7 +60,8 @@ restarted_once() {
 
 # --- fresh cluster state ---
 hack/etcd-up.sh down >/dev/null 2>&1
-rm -rf "$HOME/.klite/etcd"
+# Scoped to the canonical members: other stacks keep their data dirs.
+rm -rf "$HOME/.klite/etcd/etcd-1" "$HOME/.klite/etcd/etcd-2" "$HOME/.klite/etcd/etcd-3"
 hack/etcd-up.sh >/dev/null 2>&1 \
   && pass "fresh etcd cluster up" || die "fresh etcd cluster up"
 
@@ -144,9 +145,11 @@ wait_for 10 node3_ready \
   && pass "node-3 Ready again" || die "node-3 Ready again"
 
 # --- scale down ---
+# M5: victims drain (default 30s) before deletion when they were READY
+# (ADR 0010), so the budget covers the drain timeout plus slack.
 "$KLITE" scale workload b --replicas 2 >/dev/null \
   && pass "scale workload b to 2" || die "scale workload b to 2"
-wait_for 30 two_running \
+wait_for 60 two_running \
   && pass "2 instances remain after scale-down" || die "2 instances remain after scale-down"
 wait_for 15 two_containers \
   && pass "2 containers remain in docker" || die "2 containers remain in docker"

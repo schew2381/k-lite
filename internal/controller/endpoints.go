@@ -33,12 +33,13 @@ type Endpoints struct {
 	st       store.Store
 	onChange func(node string, revision int64, net *klitev1.NetDesired)
 
-	mu      sync.Mutex
-	ready   bool
-	version int64
-	nodes   map[string]*NodeSnapshot
-	subs    map[int]chan struct{}
-	nextSub int
+	mu       sync.Mutex
+	ready    bool
+	version  int64
+	nodes    map[string]*NodeSnapshot
+	subs     map[int]chan struct{}
+	nextSub  int
+	onRemove func(node string)
 }
 
 // NewEndpoints wires the engine. onChange fires outside the lock for every
@@ -51,8 +52,21 @@ func NewEndpoints(st store.Store, onChange func(node string, revision int64, net
 	return &Endpoints{
 		st:       st,
 		onChange: onChange,
+		onRemove: func(string) {},
 		nodes:    map[string]*NodeSnapshot{},
 		subs:     map[int]chan struct{}{},
+	}
+}
+
+// OnNodeRemoved registers fn to run, outside the lock, when a departed
+// node's snapshot is dropped for good — after one full pass has already
+// served its watchers the empty state. klited hangs the xDS cache eviction
+// off it, so the ADS cache doesn't hold deleted nodes forever.
+func (e *Endpoints) OnNodeRemoved(fn func(node string)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if fn != nil {
+		e.onRemove = fn
 	}
 }
 
@@ -107,7 +121,14 @@ func (e *Endpoints) recompute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	changed := e.store(buildAll(in))
+	changed, removed := e.store(buildAll(in))
+	e.mu.Lock()
+	onRemove := e.onRemove
+	e.mu.Unlock()
+	for _, node := range removed {
+		onRemove(node)
+		slog.Info("departed node dropped", "node", node)
+	}
 	for _, node := range changed {
 		snap, _ := e.Snapshot(node)
 		e.onChange(node, snap.Revision, snap.Net)
@@ -120,16 +141,23 @@ func (e *Endpoints) recompute(ctx context.Context) error {
 
 // store swaps the freshly built snapshots in, bumping the version once when
 // anything moved and kicking subscribers. A node that left the inputs decays
-// to an empty snapshot rather than vanishing, so its watcher hears about it.
-func (e *Endpoints) store(built map[string]*NodeSnapshot) []string {
+// to an empty snapshot rather than vanishing, so its watcher hears about it;
+// a node that already decayed is dropped for good and reported in removed.
+func (e *Endpoints) store(built map[string]*NodeSnapshot) (changed, removed []string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	for node := range e.nodes {
-		if _, ok := built[node]; !ok {
-			built[node] = &NodeSnapshot{Net: &klitev1.NetDesired{}}
+	emptySnap := &NodeSnapshot{Net: &klitev1.NetDesired{}}
+	for node, prev := range e.nodes {
+		if _, ok := built[node]; ok {
+			continue
 		}
+		if snapshotEqual(prev, emptySnap) {
+			delete(e.nodes, node)
+			removed = append(removed, node)
+			continue
+		}
+		built[node] = &NodeSnapshot{Net: &klitev1.NetDesired{}}
 	}
-	var changed []string
 	for node, next := range built {
 		if prev := e.nodes[node]; prev != nil && snapshotEqual(prev, next) {
 			next.Revision = prev.Revision
@@ -154,7 +182,7 @@ func (e *Endpoints) store(built map[string]*NodeSnapshot) []string {
 		}
 	}
 	e.ready = true
-	return slices.Sorted(slices.Values(changed))
+	return slices.Sorted(slices.Values(changed)), slices.Sorted(slices.Values(removed))
 }
 
 func snapshotEqual(a, b *NodeSnapshot) bool {

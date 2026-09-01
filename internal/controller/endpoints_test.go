@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/netip"
+	"slices"
 	"testing"
 
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
@@ -105,6 +106,50 @@ func TestBuildAllIPIdentity(t *testing.T) {
 	if _, ok := id["10.44.128.13"]; ok {
 		t.Fatal("unselected instance must carry no identity")
 	}
+}
+
+// A departed node decays to an empty snapshot for one pass, so its watchers
+// hear the empty state, then drops out entirely and reports as removed for
+// the xDS cache eviction.
+func TestStoreDropsDepartedNodeAfterDecay(t *testing.T) {
+	t.Parallel()
+	e := NewEndpoints(nil, nil)
+	built := func(nodes ...string) map[string]*NodeSnapshot {
+		out := map[string]*NodeSnapshot{}
+		for _, n := range nodes {
+			out[n] = &NodeSnapshot{Instances: []*klitev1.Instance{
+				inst("b-aa", n, "10.44.128.10", klitev1.InstancePhase_INSTANCE_PHASE_READY, nil, 0),
+			}, Net: &klitev1.NetDesired{}}
+		}
+		return out
+	}
+
+	assertPass := func(step string, gotChanged, gotRemoved, wantChanged, wantRemoved []string) {
+		t.Helper()
+		if !slices.Equal(gotChanged, wantChanged) || !slices.Equal(gotRemoved, wantRemoved) {
+			t.Fatalf("%s: changed=%v removed=%v, want %v / %v", step, gotChanged, gotRemoved, wantChanged, wantRemoved)
+		}
+	}
+
+	changed, removed := e.store(built("node-1", "node-2"))
+	assertPass("initial store", changed, removed, []string{"node-1", "node-2"}, nil)
+
+	// node-2 leaves the inputs: first pass decays it to empty.
+	changed, removed = e.store(built("node-1"))
+	assertPass("decay pass", changed, removed, []string{"node-2"}, nil)
+	if snap, ok := e.Snapshot("node-2"); !ok || len(snap.Instances) != 0 || snap.Revision == 0 {
+		t.Fatalf("decay pass must keep an empty snapshot at a real revision, got %+v (%v)", snap, ok)
+	}
+
+	// Second pass without it drops the entry and reports the removal.
+	changed, removed = e.store(built("node-1"))
+	assertPass("drop pass", changed, removed, nil, []string{"node-2"})
+	if snap, ok := e.Snapshot("node-2"); !ok || snap.Revision != 0 {
+		t.Fatalf("dropped node must read as never-seen (empty at revision 0), got %+v (%v)", snap, ok)
+	}
+	// And it stays gone on further passes.
+	changed, removed = e.store(built("node-1"))
+	assertPass("steady state", changed, removed, nil, nil)
 }
 
 func TestBuildAllSkipsServiceWithoutVIP(t *testing.T) {

@@ -27,7 +27,7 @@ func RunAll(ctx context.Context, st store.Store) {
 		kinds []string
 		fn    func(context.Context) error
 	}{
-		{"workload", []string{object.KindWorkload, object.KindInstance}, (&workloadController{st: st}).reconcile},
+		{"workload", []string{object.KindWorkload, object.KindInstance, object.KindNode}, newWorkloadController(st).reconcile},
 		{"scheduler", []string{object.KindInstance, object.KindNode, object.KindWorkload}, (&scheduler{st: st}).reconcile},
 		{"node", []string{object.KindNode, object.KindInstance}, (&nodeController{st: st, now: time.Now}).reconcile},
 		{"vip", []string{object.KindService, object.KindNode, object.KindVIPAllocation}, (&vipController{st: st}).reconcile},

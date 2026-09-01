@@ -11,6 +11,11 @@ import (
 	"github.com/schew2381/k-lite/internal/store"
 )
 
+// MsgNoCapacity is the pending reason for a full cluster. The rollout
+// machinery and the drain narrator match it to spot the drain-first fallback
+// (ADR 0010).
+const MsgNoCapacity = "no ready schedulable node with free capacity"
+
 // scheduler binds unbound instances to nodes: filter on pin, readiness,
 // cordon, and capacity, then pick the node running the fewest instances with
 // names breaking ties (ADR 0012).
@@ -97,7 +102,7 @@ func pickNode(pin string, nodes []*klitev1.Node, counts map[string]int) (string,
 		if pin != "" {
 			return "", fmt.Sprintf("pinned node %q is not schedulable", pin)
 		}
-		return "", "no ready schedulable node with free capacity"
+		return "", MsgNoCapacity
 	}
 	return best.GetMeta().GetName(), ""
 }

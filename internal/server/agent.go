@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -57,7 +58,7 @@ func NewAgent(st store.Store, clusterToken string, hub *CommandHub, net *control
 // (ADR 0003). The response carries the node's stable index and derived
 // network addresses.
 func (a *Agent) Register(ctx context.Context, req *klitev1.RegisterRequest) (*klitev1.RegisterResponse, error) {
-	if req.GetClusterToken() != a.clusterToken {
+	if subtle.ConstantTimeCompare([]byte(req.GetClusterToken()), []byte(a.clusterToken)) != 1 {
 		return nil, status.Error(codes.Unauthenticated, "bad cluster token")
 	}
 	if req.GetNode() == "" {
@@ -180,6 +181,7 @@ func (a *Agent) ReportStatus(ctx context.Context, req *klitev1.ReportStatusReque
 // applyInstanceStatus CAS-writes one instance status, skipping vanished
 // instances, stale UIDs, and no-op updates.
 func (a *Agent) applyInstanceStatus(ctx context.Context, u *klitev1.InstanceStatusUpdate) error {
+	reported := u.GetStatus().GetPhase()
 	for range casRetries {
 		obj, rev, err := a.store.Get(ctx, object.KindInstance, u.GetName())
 		if errors.Is(err, store.ErrNotFound) {
@@ -191,6 +193,13 @@ func (a *Agent) applyInstanceStatus(ctx context.Context, u *klitev1.InstanceStat
 		inst := obj.GetInstance()
 		if inst.GetMeta().GetUid() != u.GetUid() {
 			return nil
+		}
+		// A controller-set DRAINING phase outlives agent reports that still
+		// say the instance serves; the drain only moves forward, to FAILED
+		// or deletion (ADR 0010).
+		u.GetStatus().Phase = reported
+		if inst.GetStatus().GetPhase() == klitev1.InstancePhase_INSTANCE_PHASE_DRAINING && servingPhase(reported) {
+			u.GetStatus().Phase = klitev1.InstancePhase_INSTANCE_PHASE_DRAINING
 		}
 		if proto.Equal(inst.GetStatus(), u.GetStatus()) {
 			return nil
@@ -207,8 +216,17 @@ func (a *Agent) applyInstanceStatus(ctx context.Context, u *klitev1.InstanceStat
 	return fmt.Errorf("instance %s status: %w", u.GetName(), store.ErrConflict)
 }
 
+// servingPhase reports whether a phase could put the endpoint back into
+// service, which a drain must never allow.
+func servingPhase(p klitev1.InstancePhase) bool {
+	return p == klitev1.InstancePhase_INSTANCE_PHASE_READY ||
+		p == klitev1.InstancePhase_INSTANCE_PHASE_RUNNING ||
+		p == klitev1.InstancePhase_INSTANCE_PHASE_PENDING
+}
+
 // stampNode records the heartbeat and marks the node READY. The node
-// controller reverses that once heartbeats stop.
+// controller reverses that once heartbeats stop. A DRAINING phase survives
+// heartbeats: the node controller flips it back once the drain completes.
 func (a *Agent) stampNode(ctx context.Context, name string) error {
 	for range casRetries {
 		obj, rev, err := a.store.Get(ctx, object.KindNode, name)
@@ -219,12 +237,16 @@ func (a *Agent) stampNode(ctx context.Context, name string) error {
 		if node.Status == nil {
 			node.Status = &klitev1.NodeStatus{}
 		}
+		phase := klitev1.NodePhase_NODE_PHASE_READY
+		if node.Status.GetPhase() == klitev1.NodePhase_NODE_PHASE_DRAINING {
+			phase = klitev1.NodePhase_NODE_PHASE_DRAINING
+		}
 		now := time.Now().Unix()
-		if node.Status.LastHeartbeatUnix == now && node.Status.Phase == klitev1.NodePhase_NODE_PHASE_READY {
+		if node.Status.LastHeartbeatUnix == now && node.Status.Phase == phase {
 			return nil
 		}
 		node.Status.LastHeartbeatUnix = now
-		node.Status.Phase = klitev1.NodePhase_NODE_PHASE_READY
+		node.Status.Phase = phase
 		if _, err := a.store.Put(ctx, obj, rev); err != nil {
 			if errors.Is(err, store.ErrConflict) {
 				continue

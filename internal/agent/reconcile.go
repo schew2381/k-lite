@@ -37,6 +37,7 @@ type instState struct {
 	backoff         time.Duration
 	nextTry         time.Time
 	awaitingRestart bool // a crash was seen and the replacement hasn't started yet
+	draining        bool // sticky: once seen DRAINING, never restarted (ADR 0010)
 }
 
 func nextBackoff(d time.Duration) time.Duration {
@@ -47,55 +48,97 @@ func nextBackoff(d time.Duration) time.Duration {
 }
 
 // reconcile converges Docker on the current snapshot. It creates what's
-// missing, replaces what changed, restarts what crashed, and removes what
-// nobody wants. Orphan cleanup runs on every pass, so it covers agent startup
-// for free.
+// missing, restarts what crashed, and removes what nobody wants. Orphan
+// cleanup runs first — a container whose UID or hash no longer matches its
+// instance has lost its claim to the name — and on every pass, so it covers
+// agent startup for free. The controller owns replacement ordering (ADR
+// 0010); the agent only converges on the instance list it's told.
 func (a *Agent) reconcile(ctx context.Context) error {
 	desired := a.snapshotDesired()
 	actual, err := a.rt.ListInstances(ctx, a.node)
 	if err != nil {
 		return err
 	}
-
-	byName := make(map[string]*runtime.RunningInstance, len(actual))
-	var orphans []*runtime.RunningInstance
-	for i := range actual {
-		ri := &actual[i]
-		if _, ok := desired[ri.InstanceName]; ok && byName[ri.InstanceName] == nil {
-			byName[ri.InstanceName] = ri
-		} else {
-			orphans = append(orphans, ri)
-		}
-	}
+	byName, orphans := matchContainers(desired, actual)
 
 	var errs []error
-	for name, inst := range desired {
-		if err := a.reconcileInstance(ctx, inst, byName[name]); err != nil {
-			errs = append(errs, fmt.Errorf("instance %s: %w", name, err))
-		}
-	}
 	for _, ri := range orphans {
 		if err := a.removeOrphan(ctx, ri); err != nil {
 			errs = append(errs, fmt.Errorf("orphan %s: %w", ri.InstanceName, err))
+		}
+	}
+	for name, inst := range desired {
+		if err := a.reconcileInstance(ctx, inst, byName[name]); err != nil {
+			errs = append(errs, fmt.Errorf("instance %s: %w", name, err))
 		}
 	}
 	a.pruneState(desired)
 	return errors.Join(errs...)
 }
 
+// matchContainers pairs containers with the instances they belong to. A
+// container only counts as an instance's when name, UID, and template hash
+// all agree; anything else is an orphan.
+func matchContainers(desired map[string]*klitev1.Instance, actual []runtime.RunningInstance) (map[string]*runtime.RunningInstance, []*runtime.RunningInstance) {
+	byName := make(map[string]*runtime.RunningInstance, len(actual))
+	var orphans []*runtime.RunningInstance
+	for i := range actual {
+		ri := &actual[i]
+		inst, ok := desired[ri.InstanceName]
+		if ok && byName[ri.InstanceName] == nil &&
+			ri.InstanceUID == inst.GetMeta().GetUid() &&
+			ri.TemplateHash == inst.GetSpec().GetTemplateHash() {
+			byName[ri.InstanceName] = ri
+		} else {
+			orphans = append(orphans, ri)
+		}
+	}
+	return byName, orphans
+}
+
 func (a *Agent) reconcileInstance(ctx context.Context, inst *klitev1.Instance, ri *runtime.RunningInstance) error {
 	st := a.stateFor(inst)
+	st.draining = st.draining || inst.GetStatus().GetPhase() == klitev1.InstancePhase_INSTANCE_PHASE_DRAINING
+	if st.draining {
+		a.observeDraining(inst, ri, &st)
+		return nil
+	}
 	switch {
 	case ri == nil:
 		return a.startInstance(ctx, inst, &st)
-	case ri.InstanceUID != inst.GetMeta().GetUid() || ri.TemplateHash != inst.GetSpec().GetTemplateHash():
-		return a.replaceInstance(ctx, inst, ri, &st)
 	case ri.State == runtime.StateRunning:
 		a.markRunning(inst, ri, &st)
 		return nil
 	default:
 		return a.restartInstance(ctx, inst, ri, &st)
 	}
+}
+
+// observeDraining reports on a draining instance without touching its
+// container: it keeps serving in-flight connections until the controller
+// deletes the instance, and Envoy stops sending it new ones via EDS. A crash
+// mid-drain is reported, never restarted (ADR 0010).
+func (a *Agent) observeDraining(inst *klitev1.Instance, ri *runtime.RunningInstance, st *instState) {
+	switch {
+	case ri == nil:
+		st.phase = klitev1.InstancePhase_INSTANCE_PHASE_FAILED
+		st.message = "container gone while draining"
+		st.containerID = ""
+		st.ip = ""
+	case ri.State == runtime.StateRunning:
+		st.phase = klitev1.InstancePhase_INSTANCE_PHASE_DRAINING
+		st.containerID = ri.ContainerID
+		if ri.IP != "" {
+			st.ip = ri.IP
+		}
+		st.message = ""
+	default:
+		st.phase = klitev1.InstancePhase_INSTANCE_PHASE_FAILED
+		st.message = fmt.Sprintf("container exited with code %d while draining", ri.ExitCode)
+		st.containerID = ri.ContainerID
+		st.ip = ""
+	}
+	a.putState(inst.GetMeta().GetName(), st)
 }
 
 // startInstance runs the container once the backoff gate is open.
@@ -161,28 +204,6 @@ func (a *Agent) restartInstance(ctx context.Context, inst *klitev1.Instance, ri 
 	return a.startInstance(ctx, inst, st)
 }
 
-// replaceInstance swaps a container whose template hash or instance UID no
-// longer matches the spec. Stop-then-start is the M2 shape. Surge-first drain
-// choreography lands in M6 (ADR 0010).
-func (a *Agent) replaceInstance(ctx context.Context, inst *klitev1.Instance, ri *runtime.RunningInstance, st *instState) error {
-	name := inst.GetMeta().GetName()
-	st.phase = klitev1.InstancePhase_INSTANCE_PHASE_TERMINATING
-	st.message = "replacing: template changed"
-	a.putState(name, st)
-	logInstance("replacing instance container", name, "hash", inst.GetSpec().GetTemplateHash())
-	if err := a.rt.StopInstance(ctx, ri.ContainerID, graceOf(inst)); err != nil {
-		return a.failInstance(name, st, err)
-	}
-	if err := a.rt.RemoveInstance(ctx, ri.ContainerID); err != nil {
-		return a.failInstance(name, st, err)
-	}
-	st.phase = klitev1.InstancePhase_INSTANCE_PHASE_PENDING
-	st.containerID = ""
-	st.ip = ""
-	st.message = ""
-	return a.startInstance(ctx, inst, st)
-}
-
 // markRunning adopts a live container, including ones inherited from a
 // previous agent life.
 func (a *Agent) markRunning(inst *klitev1.Instance, ri *runtime.RunningInstance, st *instState) {
@@ -233,7 +254,11 @@ func (a *Agent) removeOrphan(ctx context.Context, ri *runtime.RunningInstance) e
 		return err
 	}
 	a.mu.Lock()
-	delete(a.grace, ri.InstanceName)
+	// A stale container of a still-desired instance keeps its grace entry
+	// for the fresh container that follows.
+	if _, still := a.desired[ri.InstanceName]; !still {
+		delete(a.grace, ri.InstanceName)
+	}
 	a.mu.Unlock()
 	return nil
 }
@@ -294,13 +319,6 @@ func (a *Agent) rememberedGrace(name string) time.Duration {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if g, ok := a.grace[name]; ok {
-		return time.Duration(g) * time.Second
-	}
-	return object.DefaultTerminationGraceSeconds * time.Second
-}
-
-func graceOf(inst *klitev1.Instance) time.Duration {
-	if g := inst.GetSpec().GetDrain().GetTerminationGraceSeconds(); g > 0 {
 		return time.Duration(g) * time.Second
 	}
 	return object.DefaultTerminationGraceSeconds * time.Second

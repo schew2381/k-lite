@@ -15,6 +15,6 @@ One line per package so you land in the right place. Packages with real invarian
 - `ca` — certificate authority, join tokens, TLS config builders.
 - `cli` — cobra commands behind the `klite` binary.
 - `gen` — generated protobuf/gRPC code. Never edit by hand.
-- `facade` — OWNED BY THE USER'S SEPARATE SESSION. Do not modify, review, or commit anything here, in `cmd/klite-facade`, or in `ui/`.
+- `facade` — OWNED BY THE USER'S SEPARATE SESSION. Do not modify, review, or commit anything here, in `cmd/klite-facade`, in `frontend/`, or in the Makefile `ui` target.
 
 Identifiers and output speak CONTEXT.md's vocabulary (Workload, Instance, Service, Node — never Pod or Deployment). Architectural boundaries have ADRs in `docs/adr/`. Read the relevant one before moving a boundary, and record a new ADR when you do.

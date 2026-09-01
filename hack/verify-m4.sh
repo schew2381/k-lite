@@ -78,7 +78,8 @@ pkill -f "$BIN/klited" 2>/dev/null
 pkill -f "$BIN/klite-agent" 2>/dev/null
 docker ps -aq --filter label=io.klite.role | xargs docker rm -f >/dev/null 2>&1
 hack/etcd-up.sh down >/dev/null 2>&1
-rm -rf "$HOME/.klite/etcd"
+# Scoped to the canonical members: other stacks keep their data dirs.
+rm -rf "$HOME/.klite/etcd/etcd-1" "$HOME/.klite/etcd/etcd-2" "$HOME/.klite/etcd/etcd-3"
 hack/etcd-up.sh >/dev/null 2>&1 \
   && pass "fresh etcd cluster up" || die "fresh etcd cluster up"
 

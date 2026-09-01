@@ -26,6 +26,7 @@ func Root() *cobra.Command {
 		newDescribeCmd(&server),
 		newDeleteCmd(&server),
 		newScaleCmd(&server),
+		newDrainCmd(&server),
 		newLogsCmd(&server),
 		newPolicyCmd(&server),
 	)

@@ -21,6 +21,12 @@ const (
 // Kinds lists every canonical kind.
 var Kinds = []string{KindWorkload, KindService, KindNode, KindNetworkPolicy, KindInstance, KindVIPAllocation}
 
+// LabelPendingDelete marks a Node whose deletion waits on its drain: the
+// server sets it instead of deleting outright, and the node controller
+// removes the record once the last instance has left (ADR 0010). Re-applying
+// the node's YAML overwrites labels and thereby cancels the pending delete.
+const LabelPendingDelete = "klite.io/pending-delete"
+
 var plurals = map[string]string{
 	KindWorkload:      "workloads",
 	KindService:       "services",

@@ -331,6 +331,10 @@ func TestReconcileBackoffDoubles(t *testing.T) {
 	}
 }
 
+// M5 note: a hash mismatch used to run a dedicated replaceInstance path. The
+// controller owns replacement ordering now, so a mismatched container is an
+// orphan (removed first) and the instance starts fresh — same Docker calls,
+// different route.
 func TestReconcileReplacesOnHashChange(t *testing.T) {
 	t.Parallel()
 	rt := newFakeRuntime()
@@ -392,6 +396,117 @@ func TestReconcileFailedRunArmsRetry(t *testing.T) {
 	// A create failure is not a container crash, so nothing was restarted.
 	if st := stateOf(t, a, "b-aa"); st.restarts != 0 {
 		t.Errorf("restarts = %d, want 0", st.restarts)
+	}
+}
+
+// drainingInstance is desiredInstance with the controller-set DRAINING phase.
+func drainingInstance(name, uid, hash string) *klitev1.Instance {
+	inst := desiredInstance(name, uid, hash)
+	inst.Status = &klitev1.InstanceStatus{Phase: klitev1.InstancePhase_INSTANCE_PHASE_DRAINING}
+	return inst
+}
+
+// A draining instance's container keeps serving until the instance leaves
+// the snapshot: the agent must not stop, remove, or restart it (ADR 0010).
+func TestReconcileDrainingKeepsContainerServing(t *testing.T) {
+	t.Parallel()
+	rt := newFakeRuntime()
+	rt.addContainer(&runtime.RunningInstance{
+		ContainerID: "ctr-1", InstanceName: "b-aa", InstanceUID: "uid-1",
+		TemplateHash: "h1", State: runtime.StateRunning, IP: "10.44.128.7",
+	})
+	a := testAgent(t, rt, drainingInstance("b-aa", "uid-1", "h1"))
+
+	if err := a.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(rt.runs)+len(rt.stops)+len(rt.removes) != 0 {
+		t.Errorf("draining must not touch Docker: runs=%v stops=%v removes=%v", rt.runs, rt.stops, rt.removes)
+	}
+	st := stateOf(t, a, "b-aa")
+	if st.phase != klitev1.InstancePhase_INSTANCE_PHASE_DRAINING || st.ip != "10.44.128.7" {
+		t.Errorf("state = %+v, want DRAINING with the container's IP", st)
+	}
+}
+
+// A crash mid-drain is reported, never restarted.
+func TestReconcileDrainingCrashReportsWithoutRestart(t *testing.T) {
+	t.Parallel()
+	rt := newFakeRuntime()
+	rt.addContainer(&runtime.RunningInstance{
+		ContainerID: "ctr-1", InstanceName: "b-aa", InstanceUID: "uid-1",
+		TemplateHash: "h1", State: "exited", ExitCode: 137,
+	})
+	a := testAgent(t, rt, drainingInstance("b-aa", "uid-1", "h1"))
+	base := time.Now()
+	a.now = func() time.Time { return base }
+
+	if err := a.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	st := stateOf(t, a, "b-aa")
+	if st.phase != klitev1.InstancePhase_INSTANCE_PHASE_FAILED || st.message == "" {
+		t.Fatalf("state = %+v, want FAILED with a message", st)
+	}
+	// Even far past any crash backoff, nothing restarts.
+	a.now = func() time.Time { return base.Add(time.Minute) }
+	if err := a.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(rt.runs)+len(rt.removes) != 0 {
+		t.Errorf("draining crash must not restart: runs=%v removes=%v", rt.runs, rt.removes)
+	}
+}
+
+// Once seen draining, an instance stays draining for the agent even when its
+// own FAILED report overwrote the store phase in the next snapshot.
+func TestReconcileDrainingIsSticky(t *testing.T) {
+	t.Parallel()
+	rt := newFakeRuntime()
+	rt.addContainer(&runtime.RunningInstance{
+		ContainerID: "ctr-1", InstanceName: "b-aa", InstanceUID: "uid-1",
+		TemplateHash: "h1", State: "exited", ExitCode: 1,
+	})
+	a := testAgent(t, rt, drainingInstance("b-aa", "uid-1", "h1"))
+	if err := a.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	failed := desiredInstance("b-aa", "uid-1", "h1")
+	failed.Status = &klitev1.InstanceStatus{Phase: klitev1.InstancePhase_INSTANCE_PHASE_FAILED}
+	a.applySnapshot(&klitev1.DesiredState{Revision: 2, Instances: []*klitev1.Instance{failed}})
+	a.now = func() time.Time { return time.Now().Add(time.Minute) }
+	if err := a.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(rt.runs) != 0 {
+		t.Errorf("runs = %v, a once-draining instance must never restart", rt.runs)
+	}
+}
+
+// Deletion mid-drain turns the container into an orphan, stopped with the
+// remembered termination grace.
+func TestReconcileDrainedInstanceDeletionStopsContainer(t *testing.T) {
+	t.Parallel()
+	rt := newFakeRuntime()
+	rt.addContainer(&runtime.RunningInstance{
+		ContainerID: "ctr-1", InstanceName: "b-aa", InstanceUID: "uid-1",
+		TemplateHash: "h1", State: runtime.StateRunning,
+	})
+	a := testAgent(t, rt, drainingInstance("b-aa", "uid-1", "h1"))
+	if err := a.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// The controller deleted the instance: next snapshot is empty.
+	a.applySnapshot(&klitev1.DesiredState{Revision: 2})
+	if err := a.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(rt.stops, []string{"ctr-1"}) || !slices.Equal(rt.removes, []string{"ctr-1"}) {
+		t.Errorf("stops = %v removes = %v, want both [ctr-1]", rt.stops, rt.removes)
+	}
+	if !slices.Equal(rt.stopWait, []time.Duration{3 * time.Second}) {
+		t.Errorf("stop grace = %v, want the spec's 3s", rt.stopWait)
 	}
 }
 

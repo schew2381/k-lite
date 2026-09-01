@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
@@ -18,10 +19,21 @@ import (
 	"github.com/schew2381/k-lite/internal/store"
 )
 
-// workloadController materializes instance objects from workload specs and
-// keeps workload status counts current.
+// workloadController materializes instance objects from workload specs, keeps
+// workload status counts current, and runs the surge-first drain choreography
+// (ADR 0010) in rollout.go.
 type workloadController struct {
-	st store.Store
+	st  store.Store
+	now func() time.Time
+	// deadlines maps instance UID to the moment its drain expires and the
+	// instance may be deleted. In-memory on purpose: a fresh leader that
+	// finds an unknown DRAINING instance restarts its clock, which only
+	// lengthens the drain (rollout.go).
+	deadlines map[string]time.Time
+}
+
+func newWorkloadController(st store.Store) *workloadController {
+	return &workloadController{st: st, now: time.Now, deadlines: map[string]time.Time{}}
 }
 
 func (c *workloadController) reconcile(ctx context.Context) error {
@@ -33,19 +45,26 @@ func (c *workloadController) reconcile(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	drainingNodes, err := c.drainingNodes(ctx)
+	if err != nil {
+		return err
+	}
 	byWorkload := make(map[string][]*klitev1.Instance)
+	uids := make(map[string]bool, len(insts))
 	for _, o := range insts {
 		inst := o.GetInstance()
 		w := inst.GetSpec().GetWorkload()
 		byWorkload[w] = append(byWorkload[w], inst)
+		uids[inst.GetMeta().GetUid()] = true
 	}
+	maps.DeleteFunc(c.deadlines, func(uid string, _ time.Time) bool { return !uids[uid] })
 
 	var errs []error
 	live := make(map[string]bool, len(wls))
 	for _, o := range wls {
 		name := o.GetWorkload().GetMeta().GetName()
 		live[name] = true
-		errs = append(errs, c.reconcileWorkload(ctx, o, byWorkload[name]))
+		errs = append(errs, c.reconcileWorkload(ctx, o, byWorkload[name], drainingNodes))
 	}
 	// Instances whose workload is gone get deleted, and the owning agents
 	// then drop the containers.
@@ -60,7 +79,23 @@ func (c *workloadController) reconcile(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (c *workloadController) reconcileWorkload(ctx context.Context, obj *klitev1.Object, instances []*klitev1.Instance) error {
+// drainingNodes names the nodes mid-drain: their instances count as retiring
+// so the rollout machinery replaces them elsewhere (ADR 0010).
+func (c *workloadController) drainingNodes(ctx context.Context) (map[string]bool, error) {
+	nodeObjs, _, err := c.st.List(ctx, object.KindNode)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for _, o := range nodeObjs {
+		if o.GetNode().GetStatus().GetPhase() == klitev1.NodePhase_NODE_PHASE_DRAINING {
+			out[o.GetNode().GetMeta().GetName()] = true
+		}
+	}
+	return out, nil
+}
+
+func (c *workloadController) reconcileWorkload(ctx context.Context, obj *klitev1.Object, instances []*klitev1.Instance, drainingNodes map[string]bool) error {
 	w := obj.GetWorkload()
 	name := w.GetMeta().GetName()
 	if len(w.GetSpec().GetTemplate().GetContainers()) != 1 {
@@ -70,34 +105,16 @@ func (c *workloadController) reconcileWorkload(ctx context.Context, obj *klitev1
 	if err != nil {
 		return fmt.Errorf("workload %s: %w", name, err)
 	}
-	create, del := diffInstances(int(w.GetSpec().GetReplicas()), hash, instances)
-	var errs []error
-	for _, inst := range del {
-		errs = append(errs, c.deleteInstance(ctx, inst))
-	}
-	for range create {
-		errs = append(errs, c.createInstance(ctx, w, hash))
-	}
-	errs = append(errs, c.updateStatus(ctx, obj, hash, instances))
-	return errors.Join(errs...)
+	return errors.Join(
+		c.advance(ctx, w, hash, instances, drainingNodes),
+		c.updateStatus(ctx, obj, hash, instances),
+	)
 }
 
-// diffInstances decides creations and deletions for one workload. Instances on
-// a stale template hash all go at once and come back on the new hash. M5
-// replaces that with the surge-first rolling update (ADR 0010). Scale-down
-// removes newest-first.
-func diffInstances(replicas int, hash string, instances []*klitev1.Instance) (create int, del []*klitev1.Instance) {
-	var current []*klitev1.Instance
-	for _, inst := range instances {
-		if inst.GetSpec().GetTemplateHash() == hash {
-			current = append(current, inst)
-		} else {
-			del = append(del, inst)
-		}
-	}
-	slices.SortFunc(current, func(x, y *klitev1.Instance) int {
-		// Newest first: creation time, then store revision, then name so
-		// same-second creations still order deterministically.
+// sortNewestFirst orders by creation time, then store revision, then name so
+// same-second creations still order deterministically.
+func sortNewestFirst(instances []*klitev1.Instance) {
+	slices.SortFunc(instances, func(x, y *klitev1.Instance) int {
 		if d := cmp.Compare(y.GetMeta().GetCreatedUnix(), x.GetMeta().GetCreatedUnix()); d != 0 {
 			return d
 		}
@@ -106,10 +123,6 @@ func diffInstances(replicas int, hash string, instances []*klitev1.Instance) (cr
 		}
 		return cmp.Compare(y.GetMeta().GetName(), x.GetMeta().GetName())
 	})
-	if len(current) > replicas {
-		del = append(del, current[:len(current)-replicas]...)
-	}
-	return max(0, replicas-len(current)), del
 }
 
 // createInstance materializes one instance for the workload. A name collision
@@ -150,15 +163,13 @@ func (c *workloadController) deleteInstance(ctx context.Context, inst *klitev1.I
 	return nil
 }
 
-// updateStatus writes observed counts. Ready means the agent reported READY,
-// which the probe path gates (ADR 0008); Running alone no longer counts.
+// updateStatus writes observed counts. Ready counts every READY instance
+// regardless of template hash: old-template instances keep serving through a
+// rollout, and a surge may push both counts past replicas briefly.
 func (c *workloadController) updateStatus(ctx context.Context, obj *klitev1.Object, hash string, instances []*klitev1.Instance) error {
 	w := obj.GetWorkload()
 	var ready int32
 	for _, inst := range instances {
-		if inst.GetSpec().GetTemplateHash() != hash {
-			continue
-		}
 		if inst.GetStatus().GetPhase() == klitev1.InstancePhase_INSTANCE_PHASE_READY {
 			ready++
 		}

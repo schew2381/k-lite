@@ -1,16 +1,21 @@
 package controller
 
 import (
+	"context"
 	"slices"
 	"testing"
 
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
+	"github.com/schew2381/k-lite/internal/store/storetest"
 )
 
-func instance(name, hash string, createdUnix, rev int64) *klitev1.Instance {
+// instance builds a bare instance for classification tests. rev doubles as
+// the age tiebreak: higher rev sorts newer.
+func instance(name, hash, node string, phase klitev1.InstancePhase, rev int64) *klitev1.Instance {
 	return &klitev1.Instance{
-		Meta: &klitev1.Meta{Name: name, CreatedUnix: createdUnix, ResourceVersion: rev},
-		Spec: &klitev1.InstanceSpec{Workload: "b", TemplateHash: hash},
+		Meta:   &klitev1.Meta{Name: name, Uid: "uid-" + name, ResourceVersion: rev},
+		Spec:   &klitev1.InstanceSpec{Workload: "b", TemplateHash: hash, Node: node},
+		Status: &klitev1.InstanceStatus{Phase: phase},
 	}
 }
 
@@ -19,99 +24,124 @@ func names(instances []*klitev1.Instance) []string {
 	for _, in := range instances {
 		out = append(out, in.GetMeta().GetName())
 	}
-	slices.Sort(out)
 	return out
 }
 
-func TestDiffInstances(t *testing.T) {
+// M5 note: these cases replace the old diffInstances tests. Deletions of
+// serving instances became retirements (drain first), so the buckets carry
+// what diffInstances' create/delete counts used to.
+func TestClassify(t *testing.T) {
 	t.Parallel()
+	ready := klitev1.InstancePhase_INSTANCE_PHASE_READY
+	pending := klitev1.InstancePhase_INSTANCE_PHASE_PENDING
+	draining := klitev1.InstancePhase_INSTANCE_PHASE_DRAINING
 	tests := []struct {
-		name       string
-		replicas   int
-		hash       string
-		instances  []*klitev1.Instance
-		wantCreate int
-		wantDelete []string
+		name          string
+		hash          string
+		drainingNodes map[string]bool
+		instances     []*klitev1.Instance
+		fresh         []string
+		retiring      []string
+		doomed        []string
+		drainingSet   []string
 	}{
 		{
-			name:       "steady state",
-			replicas:   2,
-			hash:       "h1",
-			instances:  []*klitev1.Instance{instance("b-aa", "h1", 10, 1), instance("b-bb", "h1", 11, 2)},
-			wantCreate: 0,
-		},
-		{
-			name:       "scale up from zero",
-			replicas:   3,
-			hash:       "h1",
-			wantCreate: 3,
-		},
-		{
-			name:     "scale down deletes newest first",
-			replicas: 1,
-			hash:     "h1",
+			name: "steady state",
+			hash: "h1",
 			instances: []*klitev1.Instance{
-				instance("b-old", "h1", 10, 1),
-				instance("b-mid", "h1", 20, 2),
-				instance("b-new", "h1", 30, 3),
+				instance("b-aa", "h1", "node-1", ready, 1),
+				instance("b-bb", "h1", "node-2", ready, 2),
 			},
-			wantDelete: []string{"b-mid", "b-new"},
+			fresh: []string{"b-bb", "b-aa"},
 		},
 		{
-			name:     "same-second creations fall back to revision",
-			replicas: 1,
-			hash:     "h1",
+			name: "hash change: serving instances retire newest-first, pending ones are doomed",
+			hash: "h2",
 			instances: []*klitev1.Instance{
-				instance("b-r5", "h1", 10, 5),
-				instance("b-r9", "h1", 10, 9),
+				instance("b-aa", "h1", "node-1", ready, 1),
+				instance("b-bb", "h1", "node-2", ready, 2),
+				instance("b-cc", "h1", "", pending, 3),
 			},
-			wantDelete: []string{"b-r9"},
+			retiring: []string{"b-bb", "b-aa"},
+			doomed:   []string{"b-cc"},
 		},
 		{
-			name:     "hash change replaces everything",
-			replicas: 2,
-			hash:     "h2",
+			name:          "draining node retires current-hash instances",
+			hash:          "h1",
+			drainingNodes: map[string]bool{"node-2": true},
 			instances: []*klitev1.Instance{
-				instance("b-aa", "h1", 10, 1),
-				instance("b-bb", "h1", 11, 2),
+				instance("b-aa", "h1", "node-1", ready, 1),
+				instance("b-bb", "h1", "node-2", ready, 2),
 			},
-			wantCreate: 2,
-			wantDelete: []string{"b-aa", "b-bb"},
+			fresh:    []string{"b-aa"},
+			retiring: []string{"b-bb"},
 		},
 		{
-			name:     "hash change mid-flight keeps current-hash instances",
-			replicas: 2,
-			hash:     "h2",
+			name: "draining phase wins over everything",
+			hash: "h1",
 			instances: []*klitev1.Instance{
-				instance("b-aa", "h1", 10, 1),
-				instance("b-cc", "h2", 12, 3),
+				instance("b-aa", "h1", "node-1", draining, 1),
+				instance("b-bb", "h9", "node-2", draining, 2),
 			},
-			wantCreate: 1,
-			wantDelete: []string{"b-aa"},
-		},
-		{
-			name:     "scale to zero",
-			replicas: 0,
-			hash:     "h1",
-			instances: []*klitev1.Instance{
-				instance("b-aa", "h1", 10, 1),
-			},
-			wantDelete: []string{"b-aa"},
+			drainingSet: []string{"b-aa", "b-bb"},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			create, del := diffInstances(tt.replicas, tt.hash, tt.instances)
-			if create != tt.wantCreate {
-				t.Errorf("create = %d, want %d", create, tt.wantCreate)
-			}
-			got := names(del)
-			want := slices.Clone(tt.wantDelete)
-			slices.Sort(want)
-			if !slices.Equal(got, want) {
-				t.Errorf("delete = %v, want %v", got, want)
+			g := classify(tt.hash, tt.instances, tt.drainingNodes)
+			for _, cmp := range []struct {
+				field string
+				got   []*klitev1.Instance
+				want  []string
+			}{
+				{"fresh", g.fresh, tt.fresh},
+				{"retiring", g.retiring, tt.retiring},
+				{"doomed", g.doomed, tt.doomed},
+				{"draining", g.draining, tt.drainingSet},
+			} {
+				got := names(cmp.got)
+				want := cmp.want
+				if cmp.field == "doomed" || cmp.field == "draining" {
+					slices.Sort(got)
+					want = slices.Clone(want)
+					slices.Sort(want)
+				}
+				if !slices.Equal(got, want) {
+					t.Errorf("%s = %v, want %v", cmp.field, got, want)
+				}
 			}
 		})
+	}
+}
+
+// Ready counts every READY instance regardless of hash: old-template
+// instances still serve mid-rollout, and totals never clamp to replicas.
+func TestUpdateStatusCountsAllServing(t *testing.T) {
+	t.Parallel()
+	st := storetest.New()
+	ctx := context.Background()
+	obj := workloadObj("b", 2, "v2", 5)
+	if _, err := st.Put(ctx, obj, -1); err != nil {
+		t.Fatal(err)
+	}
+	obj, _, _ = st.Get(ctx, "Workload", "b")
+	instances := []*klitev1.Instance{
+		instance("b-old1", "h1", "node-1", klitev1.InstancePhase_INSTANCE_PHASE_READY, 1),
+		instance("b-old2", "h1", "node-2", klitev1.InstancePhase_INSTANCE_PHASE_READY, 2),
+		instance("b-new1", "h2", "node-1", klitev1.InstancePhase_INSTANCE_PHASE_READY, 3),
+		instance("b-drain", "h1", "node-2", klitev1.InstancePhase_INSTANCE_PHASE_DRAINING, 4),
+	}
+	c := newWorkloadController(st)
+	if err := c.updateStatus(ctx, obj, "h2", instances); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := st.Get(ctx, "Workload", "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := got.GetWorkload().GetStatus()
+	if s.GetReadyInstances() != 3 || s.GetTotalInstances() != 4 || s.GetTemplateHash() != "h2" {
+		t.Errorf("status = %v, want ready 3 total 4 hash h2", s)
 	}
 }

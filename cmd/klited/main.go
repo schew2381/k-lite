@@ -76,6 +76,12 @@ func run(listen string, etcdEndpoints []string, clusterToken string) error {
 			slog.Warn("xds snapshot rejected", "node", node, "err", err)
 		}
 	})
+	// A departed node leaves the ADS cache too, or it holds every node that
+	// ever existed.
+	engine.OnNodeRemoved(func(node string) {
+		xdsCache.ClearSnapshot(node)
+		slog.Info("xds snapshot cleared", "node", node)
+	})
 	// Both services share the hub: agents park command streams through
 	// AgentService, and ClusterService.Logs relays over them.
 	hub := server.NewCommandHub()

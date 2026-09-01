@@ -171,12 +171,12 @@ func (s *Cluster) Delete(ctx context.Context, req *klitev1.DeleteRequest) (*klit
 		resp := &klitev1.DeleteResponse{}
 		for _, o := range objs {
 			res := &klitev1.ApplyResult{Kind: object.KindOf(o), Name: object.MetaOf(o).GetName()}
-			if err := s.store.Delete(ctx, res.Kind, res.Name); err != nil {
+			res.Action, err = s.deleteOne(ctx, res.Kind, res.Name)
+			if err != nil {
 				res.Error = err.Error()
 				slog.Warn("delete failed", "kind", res.Kind, "name", res.Name, "err", res.Error)
 			} else {
-				res.Action = "deleted"
-				slog.Info("delete", "kind", res.Kind, "name", res.Name)
+				slog.Info("delete", "kind", res.Kind, "name", res.Name, "action", res.Action)
 			}
 			resp.Results = append(resp.Results, res)
 		}
@@ -190,13 +190,60 @@ func (s *Cluster) Delete(ctx context.Context, req *klitev1.DeleteRequest) (*klit
 	if req.GetName() == "" {
 		return nil, status.Error(codes.InvalidArgument, "name is required")
 	}
-	if err := s.store.Delete(ctx, kind, req.GetName()); err != nil {
+	action, err := s.deleteOne(ctx, kind, req.GetName())
+	if err != nil {
 		return nil, storeStatus(err)
 	}
-	slog.Info("delete", "kind", kind, "name", req.GetName())
+	slog.Info("delete", "kind", kind, "name", req.GetName(), "action", action)
 	return &klitev1.DeleteResponse{
-		Results: []*klitev1.ApplyResult{{Kind: kind, Name: req.GetName(), Action: "deleted"}},
+		Results: []*klitev1.ApplyResult{{Kind: kind, Name: req.GetName(), Action: action}},
 	}, nil
+}
+
+// deleteOne deletes an object, except nodes: those are marked pending-delete
+// and drained first, and the node controller removes the record once the
+// last instance has left (ADR 0010).
+func (s *Cluster) deleteOne(ctx context.Context, kind, name string) (string, error) {
+	if kind == object.KindNode {
+		return s.markNodeForDelete(ctx, name)
+	}
+	if err := s.store.Delete(ctx, kind, name); err != nil {
+		return "", err
+	}
+	return "deleted", nil
+}
+
+// markNodeForDelete cordons the node, flags it pending-delete, and starts its
+// drain. Idempotent: repeating the delete reports the drain in progress.
+func (s *Cluster) markNodeForDelete(ctx context.Context, name string) (string, error) {
+	for range casRetries {
+		obj, rev, err := s.store.Get(ctx, object.KindNode, name)
+		if err != nil {
+			return "", err
+		}
+		node := obj.GetNode()
+		meta := object.MetaOf(obj)
+		if meta.GetLabels()[object.LabelPendingDelete] == "true" {
+			return "draining (delete pending)", nil
+		}
+		if meta.Labels == nil {
+			meta.Labels = map[string]string{}
+		}
+		meta.Labels[object.LabelPendingDelete] = "true"
+		if node.Status == nil {
+			node.Status = &klitev1.NodeStatus{}
+		}
+		node.Status.Unschedulable = true
+		node.Status.Phase = klitev1.NodePhase_NODE_PHASE_DRAINING
+		if _, err := s.store.Put(ctx, obj, rev); err != nil {
+			if errors.Is(err, store.ErrConflict) {
+				continue
+			}
+			return "", err
+		}
+		return "draining (delete pending)", nil
+	}
+	return "", status.Error(codes.Aborted, "kept losing revision races, try again")
 }
 
 func (s *Cluster) Watch(req *klitev1.WatchRequest, stream grpc.ServerStreamingServer[klitev1.WatchEvent]) error {
