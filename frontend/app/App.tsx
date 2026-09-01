@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Navigate, NavLink, Route, Routes, useSearchParams } from 'react-router-dom'
+import { Navigate, NavLink, Route, Routes } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
-import { useClient } from '@/lib/client-context'
+import { useClientHandle } from '@/lib/client-context'
 import { cn } from '@/lib/utils'
 import ApplyPage from '@/pages/ApplyPage'
 import EtcdPage from '@/pages/EtcdPage'
@@ -10,7 +10,6 @@ import LogsPage from '@/pages/LogsPage'
 import ResourcesPage from '@/pages/ResourcesPage'
 import TopologyPage from '@/pages/TopologyPage'
 import { useSnapshot } from '@/store/store'
-import { useFlow } from '@/topo/flow'
 
 const TABS = [
   { to: '/', label: 'topology' },
@@ -36,13 +35,13 @@ function Legend() {
   )
 }
 
-// The pill is the one control: click it to flip between the mock walkthrough
-// and live-speed traffic (ADR 0027). The dot still reports health.
+// A segmented control picks the data source: mock runs the in-browser
+// simulator, live connects to the real cluster through the facade, and the
+// loser is torn down entirely (no simulation behind live). The dot reports
+// the active source's health.
 function ModeToggle() {
-  const client = useClient()
+  const { client, setMode } = useClientHandle()
   const snap = useSnapshot()
-  const flow = useFlow()
-  const [searchParams, setSearchParams] = useSearchParams()
   const [ok, setOk] = useState(true)
   useEffect(() => {
     let alive = true
@@ -58,32 +57,34 @@ function ModeToggle() {
       clearInterval(t)
     }
   }, [client])
-  const live = flow === 'live'
-  const flip = () => {
-    const next = new URLSearchParams(searchParams)
-    next.set('flow', live ? 'traced' : 'live')
-    setSearchParams(next, { replace: true })
-  }
-  return (
+  const live = client.mode === 'http'
+  const segment = (label: 'mock' | 'live', active: boolean) => (
     <button
+      key={label}
       type="button"
-      onClick={flip}
-      aria-pressed={live}
-      aria-label={live ? 'Switch to the mock walkthrough' : 'Switch to live-speed traffic'}
-      data-testid="mode-toggle"
+      role="radio"
+      aria-checked={active}
+      onClick={() => setMode(label === 'live' ? 'http' : 'mock')}
+      data-testid={`mode-${label}`}
       className={cn(
-        'flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-wide transition-colors',
-        live ? 'border-ctrl bg-accent text-ctrl' : 'border-border bg-card',
+        'cursor-pointer rounded-full px-2.5 py-0.5 uppercase tracking-wide transition-colors',
+        active ? 'bg-ink text-card' : 'text-muted-foreground hover:text-foreground',
       )}
     >
-      <span
-        className={cn(
-          'size-2 rounded-full',
-          ok && snap.synced ? (live ? 'bg-ctrl' : 'bg-traffic') : 'bg-deny',
-        )}
-      />
-      {live ? 'live' : 'mock'}
+      {label}
     </button>
+  )
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Data source"
+      data-testid="mode-toggle"
+      className="flex items-center gap-1 rounded-full border border-border bg-card p-0.5 pl-2.5 font-mono text-[11px]"
+    >
+      <span className={cn('size-2 rounded-full', ok && snap.synced ? 'bg-traffic' : 'bg-deny')} />
+      {segment('mock', !live)}
+      {segment('live', live)}
+    </div>
   )
 }
 
@@ -92,8 +93,8 @@ export default function App() {
     <TooltipProvider delayDuration={300}>
       <div className="min-h-screen">
         <header className="tray sticky top-0 z-40">
-          <div className="mx-auto flex max-w-[1400px] items-center gap-5 px-5 py-2">
-            <span className="hand text-xl font-bold tracking-wide">k-lite</span>
+          <div className="mx-auto flex max-w-[1400px] items-center gap-6 px-5 py-3.5">
+            <span className="font-mono text-2xl font-bold tracking-tight">k-lite</span>
             <nav className="flex flex-1 items-center gap-1 overflow-x-auto" aria-label="Pages">
               {TABS.map((t) => (
                 <NavLink
@@ -102,7 +103,7 @@ export default function App() {
                   end={t.to === '/'}
                   className={({ isActive }) =>
                     cn(
-                      'rounded-full px-3 py-1 text-sm whitespace-nowrap text-muted-foreground hover:text-foreground',
+                      'rounded-full px-3.5 py-1.5 text-base whitespace-nowrap text-muted-foreground hover:text-foreground',
                       isActive && 'border border-[#a8a7a0] bg-white/55 text-foreground',
                     )
                   }

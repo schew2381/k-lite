@@ -57,8 +57,7 @@ export interface KliteClient {
   }
 }
 
-export async function createClient(): Promise<KliteClient> {
-  const mode = import.meta.env.VITE_KLITE_MODE ?? 'mock'
+export async function createClientFor(mode: 'mock' | 'http'): Promise<KliteClient> {
   if (mode === 'http') {
     const { HttpClient } = await import('./httpClient')
     // '' means same-origin: the embedded case, where klite-facade serves the SPA
@@ -66,4 +65,8 @@ export async function createClient(): Promise<KliteClient> {
   }
   const { createMockClient } = await import('./mockClient')
   return createMockClient()
+}
+
+export async function createClient(): Promise<KliteClient> {
+  return createClientFor(import.meta.env.VITE_KLITE_MODE === 'http' ? 'http' : 'mock')
 }

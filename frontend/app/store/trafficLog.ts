@@ -25,6 +25,13 @@ class TrafficLog {
     })
   }
 
+  // a client swap starts a fresh story, so the old source's calls go
+  clear = () => {
+    this.ring = []
+    this.view = []
+    for (const l of this.listeners) l()
+  }
+
   subscribe = (cb: () => void) => {
     this.listeners.add(cb)
     return () => this.listeners.delete(cb)

@@ -156,9 +156,10 @@ test('a service created from the dialog schedules and gets kdns records everywhe
 })
 
 test('live flow: flights run fast and untraced, the panel keeps the latest call', async ({ page }) => {
-  await page.goto('/')
+  // ?flow=live previews live pacing on mock data. The header toggle now
+  // swaps the data source itself, and no facade runs in this suite.
+  await page.goto('/#/?flow=live')
   await fourX(page)
-  await page.getByTestId('mode-toggle').click()
   await expect(page.locator('.traffic-dot').first()).toBeVisible({ timeout: 60_000 })
   // no step-by-step walkthrough in live flow
   expect(await page.getByTestId('trace-step-active').count()).toBe(0)
