@@ -5,7 +5,7 @@ BIN := bin
 MODULE := github.com/schew2381/k-lite
 
 DIST := dist
-RELEASE_PLATFORMS := linux/amd64 linux/arm64 darwin/arm64
+RELEASE_PLATFORMS := linux/amd64 linux/arm64 darwin/arm64 darwin/amd64
 RELEASE_BINS := klite klited klite-agent klite-net
 SHA256 := $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo "shasum -a 256")
 
