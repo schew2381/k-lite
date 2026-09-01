@@ -82,6 +82,12 @@ func (d *Docker) RunOneShot(ctx context.Context, spec *InfraContainer) error {
 	case werr := <-wait.Error:
 		return fmt.Errorf("wait for %s: %w", spec.Name, werr)
 	case res := <-wait.Result:
+		// The daemon can report an error with a zero status code. For a
+		// lockdown helper a swallowed failure means rules silently not
+		// applied, so an error here never passes as success.
+		if res.Error != nil {
+			return fmt.Errorf("wait for %s: %s", spec.Name, res.Error.Message)
+		}
 		if res.StatusCode == 0 {
 			return nil
 		}
@@ -135,6 +141,11 @@ func splitHostBind(addr string) (netip.Addr, string, error) {
 	return ap.Addr(), fmt.Sprintf("%d", ap.Port()), nil
 }
 
+// maxContainerFileBytes caps ReadContainerFile. The method exists to fetch
+// small config files (the donor's /etc/hosts), and an over-cap read errors
+// rather than handing back a silent truncation.
+const maxContainerFileBytes = 1 << 20
+
 // ReadContainerFile pulls one file out of a container through the archive
 // API, which works on scratch images where exec can't.
 func (d *Docker) ReadContainerFile(ctx context.Context, name, path string) ([]byte, error) {
@@ -143,22 +154,31 @@ func (d *Docker) ReadContainerFile(ctx context.Context, name, path string) ([]by
 		return nil, fmt.Errorf("copy %s from %s: %w", path, name, err)
 	}
 	defer res.Content.Close()
-	tr := tar.NewReader(res.Content)
-	for {
-		hdr, err := tr.Next()
-		if err != nil {
-			// io.EOF here means the archive held no regular file entry.
-			return nil, fmt.Errorf("read %s from %s: %w", path, name, err)
-		}
-		if hdr.Typeflag != tar.TypeReg {
-			continue
-		}
-		b, err := io.ReadAll(io.LimitReader(tr, 1<<20))
-		if err != nil {
-			return nil, fmt.Errorf("read %s from %s: %w", path, name, err)
-		}
-		return b, nil
+	b, err := archivedFile(res.Content)
+	if err != nil {
+		return nil, fmt.Errorf("read %s from %s: %w", path, name, err)
 	}
+	return b, nil
+}
+
+// archivedFile extracts the single file a CopyFromContainer archive carries:
+// its first entry, which the daemon names after the requested path. A
+// directory or symlink there fails loudly, where skipping ahead to some
+// deeper regular entry would quietly return another file's bytes.
+func archivedFile(r io.Reader) ([]byte, error) {
+	tr := tar.NewReader(r)
+	hdr, err := tr.Next()
+	if err != nil {
+		// io.EOF here means an empty archive.
+		return nil, err
+	}
+	if hdr.Typeflag != tar.TypeReg {
+		return nil, fmt.Errorf("%s is not a regular file", hdr.Name)
+	}
+	if hdr.Size > maxContainerFileBytes {
+		return nil, fmt.Errorf("%s is %d bytes, over the %d-byte cap", hdr.Name, hdr.Size, maxContainerFileBytes)
+	}
+	return io.ReadAll(io.LimitReader(tr, maxContainerFileBytes))
 }
 
 // ListInfra lists infra containers carrying the given role label.
