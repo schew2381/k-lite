@@ -151,6 +151,54 @@ func TestStoreDropsDepartedNodeAfterDecay(t *testing.T) {
 	assertPass("steady state", changed, removed, nil, nil)
 }
 
+// TestStoreKeepsRevisionWhenContentUnchanged: rapid no-op recomputes must not
+// churn revisions, or every resync tick would re-push identical xDS state.
+func TestStoreKeepsRevisionWhenContentUnchanged(t *testing.T) {
+	t.Parallel()
+	e := NewEndpoints(nil, nil)
+	if _, ok := e.Snapshot("node-1"); ok {
+		t.Fatal("Snapshot must report not-ready before the first pass")
+	}
+	built := func(ip string) map[string]*NodeSnapshot {
+		return map[string]*NodeSnapshot{"node-1": {Instances: []*klitev1.Instance{
+			inst("b-aa", "node-1", ip, klitev1.InstancePhase_INSTANCE_PHASE_READY, nil, 0),
+		}, Net: &klitev1.NetDesired{}}}
+	}
+	kicks, cancel := e.Subscribe()
+	defer cancel()
+
+	changed, _ := e.store(built("10.44.128.10"))
+	if len(changed) != 1 {
+		t.Fatalf("first pass changed = %v, want node-1", changed)
+	}
+	snap, _ := e.Snapshot("node-1")
+	first := snap.Revision
+	select {
+	case <-kicks:
+	default:
+		t.Fatal("subscriber missed the first kick")
+	}
+
+	if changed, _ = e.store(built("10.44.128.10")); len(changed) != 0 {
+		t.Fatalf("no-op pass changed = %v, want none", changed)
+	}
+	if snap, _ = e.Snapshot("node-1"); snap.Revision != first {
+		t.Fatalf("revision moved to %d on identical content, want %d", snap.Revision, first)
+	}
+	select {
+	case <-kicks:
+		t.Fatal("subscriber kicked for a no-op pass")
+	default:
+	}
+
+	if changed, _ = e.store(built("10.44.128.11")); len(changed) != 1 {
+		t.Fatalf("content change pass changed = %v, want node-1", changed)
+	}
+	if snap, _ = e.Snapshot("node-1"); snap.Revision <= first {
+		t.Fatalf("revision = %d after a content change, want above %d", snap.Revision, first)
+	}
+}
+
 func TestBuildAllSkipsServiceWithoutVIP(t *testing.T) {
 	t.Parallel()
 	in := &inputs{

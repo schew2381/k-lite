@@ -27,7 +27,7 @@ type NodeSnapshot struct {
 // Endpoints turns the store's services, instances, nodes, policies, and VIP
 // allocations into per-node NodeSnapshots. Unlike the leader-only loops it
 // runs on every klited replica, because each replica's xDS server must answer
-// whichever Envoy dials it (ADR 0007); it only reads the store, so replicas
+// whichever Envoy dials it (ADR 0007). It only reads the store, so replicas
 // converge on identical output.
 type Endpoints struct {
 	st       store.Store
@@ -83,7 +83,8 @@ func (e *Endpoints) Run(ctx context.Context) {
 // Snapshot returns the node's current desired state. ok is false until the
 // first successful recompute, so callers never mistake "not computed yet"
 // for "nothing desired". A node the engine has never seen yields an empty
-// snapshot at revision zero.
+// snapshot at revision zero. The instances and net inside are shared with
+// the engine and later passes, so treat them as read-only.
 func (e *Endpoints) Snapshot(node string) (NodeSnapshot, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -141,8 +142,8 @@ func (e *Endpoints) recompute(ctx context.Context) error {
 
 // store swaps the freshly built snapshots in, bumping the version once when
 // anything moved and kicking subscribers. A node that left the inputs decays
-// to an empty snapshot rather than vanishing, so its watcher hears about it;
-// a node that already decayed is dropped for good and reported in removed.
+// to an empty snapshot rather than vanishing, so its watcher hears about it.
+// A node that already decayed is dropped for good and reported in removed.
 func (e *Endpoints) store(built map[string]*NodeSnapshot) (changed, removed []string) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -277,7 +278,7 @@ func buildAll(in *inputs) map[string]*NodeSnapshot {
 			name := svc.GetMeta().GetName()
 			vip, ok := in.vips[AllocationName(name, node)]
 			if !ok {
-				continue // allocation in flight; the write will re-kick us
+				continue // the allocation is still in flight and its write re-kicks us
 			}
 			net.Services = append(net.Services, &klitev1.ServiceVIP{
 				Service:    name,
