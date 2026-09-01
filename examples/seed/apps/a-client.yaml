@@ -14,13 +14,13 @@ spec:
         image: busybox:1.36
         command: ["/bin/sh", "-c"]
         # This is the chatty shape, shared byte-for-byte with dialog-created
-        # services (frontend/app/lib/yamlgen.ts chattyContainer): each
+        # services (frontend/app/lib/yamlgen.ts chattyContainer). Each
         # instance serves its hostname on :80 and calls one random name from
         # TARGETS through the real data path (kdns, VIP, Envoy). Calls fire
         # in waves: every instance sleeps to the same 10-second wall-clock
         # boundary, then rolls one die. 16384 of 65536 is 25%, the per-wave
         # equivalent of the old 2.5% per second. sh as pid 1 drops SIGTERM by
-        # default, so the trap comes first, and the sleep runs backgrounded
+        # default, so the trap comes first and the sleep runs backgrounded
         # under wait, where a trap can fire. Both together let drains and
         # orphan sweeps finish in a second instead of the full grace period.
         # The folded block below must parse to the exact string the frontend
