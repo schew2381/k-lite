@@ -107,6 +107,20 @@ message NetDesired {
   repeated CompiledPolicy policies = 4;
   // What this node's klite-net should TCP-probe: its own instances.
   repeated ProbeTarget probe_targets = 5;
+  // This node's mTLS ingress listeners (ADR 0024), one per local
+  // allocated endpoint. Driven by allocations rather than endpoint
+  // health, so the listener is up well before any consumer routes to it
+  // and stays up while the endpoint drains.
+  repeated IngressListener ingress_listeners = 6;
+}
+
+// IngressListener is one 0.0.0.0:<port> mTLS listener on the node's Envoy,
+// forwarding to a local instance (ADR 0024).
+message IngressListener {
+  string service = 1; // names the listener, ingress/<service>/<port>
+  int32 port = 2; // host-published ingress port from the node's slice
+  string pod_ip = 3;
+  int32 target_port = 4;
 }
 
 message ProbeTarget {

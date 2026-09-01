@@ -199,13 +199,17 @@ type inputs struct {
 	instances []*klitev1.Instance
 	nodes     []string
 	policies  []*klitev1.NetworkPolicy
-	vips      map[string]string // AllocationName -> VIP
-	ingress   map[string]int32  // IngressAllocationName -> host ingress port
-	advertise map[string]string // node -> advertised machine IP (ADR 0024)
+	vips      map[string]string                         // AllocationName -> VIP
+	ingress   map[string]*klitev1.IngressAllocationSpec // by IngressAllocationName
+	advertise map[string]string                         // node -> advertised machine IP (ADR 0024)
 }
 
 func listInputs(ctx context.Context, st store.Store) (*inputs, error) {
-	in := &inputs{vips: map[string]string{}, ingress: map[string]int32{}, advertise: map[string]string{}}
+	in := &inputs{
+		vips:      map[string]string{},
+		ingress:   map[string]*klitev1.IngressAllocationSpec{},
+		advertise: map[string]string{},
+	}
 	svcObjs, _, err := st.List(ctx, object.KindService)
 	if err != nil {
 		return nil, err
@@ -279,7 +283,7 @@ func listAllocations(ctx context.Context, st store.Store, in *inputs) error {
 	}
 	for _, o := range ingObjs {
 		alloc := o.GetIngressAllocation()
-		in.ingress[alloc.GetMeta().GetName()] = alloc.GetSpec().GetPort()
+		in.ingress[alloc.GetMeta().GetName()] = alloc.GetSpec()
 	}
 	return nil
 }
@@ -315,7 +319,44 @@ func buildAll(in *inputs) map[string]*NodeSnapshot {
 			}
 		}
 		net.ProbeTargets = buildProbeTargets(in, node)
+		net.IngressListeners = buildIngressListeners(in, node)
 		out[node] = &NodeSnapshot{Instances: nodeInstances(in, node), Net: net}
+	}
+	return out
+}
+
+// buildIngressListeners lists the node's mTLS ingress listeners: one per
+// allocation whose instance lives here and has an address. Allocation-driven
+// rather than endpoint-driven on purpose — the listener stands from instance
+// birth, well before any consumer's EDS routes to it, and outlives Ready so
+// draining endpoints stay reachable through the hop (ADR 0024, ADR 0010).
+func buildIngressListeners(in *inputs, node string) []*klitev1.IngressListener {
+	instances := make(map[string]*klitev1.Instance, len(in.instances))
+	for _, inst := range in.instances {
+		instances[inst.GetMeta().GetName()] = inst
+	}
+	targetPorts := make(map[string]int32, len(in.services))
+	for _, svc := range in.services {
+		targetPorts[svc.GetMeta().GetName()] = svc.GetSpec().GetTargetPort()
+	}
+	var out []*klitev1.IngressListener
+	for _, name := range slices.Sorted(maps.Keys(in.ingress)) {
+		alloc := in.ingress[name]
+		if alloc.GetNode() != node {
+			continue
+		}
+		inst := instances[alloc.GetInstance()]
+		ip := inst.GetStatus().GetInstanceIp()
+		targetPort, ok := targetPorts[alloc.GetService()]
+		if ip == "" || !ok {
+			continue // not addressed yet, or the allocation outlived its service
+		}
+		out = append(out, &klitev1.IngressListener{
+			Service:    alloc.GetService(),
+			Port:       alloc.GetPort(),
+			PodIp:      ip,
+			TargetPort: targetPort,
+		})
 	}
 	return out
 }
@@ -345,7 +386,7 @@ func buildGroups(in *inputs) map[string]*klitev1.EndpointGroup {
 				Port:           svc.GetSpec().GetTargetPort(),
 				Node:           node,
 				Health:         health,
-				IngressPort:    in.ingress[IngressAllocationName(name, inst.GetMeta().GetName())],
+				IngressPort:    in.ingress[IngressAllocationName(name, inst.GetMeta().GetName())].GetPort(),
 				MachineAddress: in.advertise[node],
 			})
 		}

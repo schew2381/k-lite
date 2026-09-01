@@ -726,9 +726,14 @@ type NetDesired struct {
 	IpIdentity map[string]string      `protobuf:"bytes,3,rep,name=ip_identity,json=ipIdentity,proto3" json:"ip_identity,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // instance IP -> service name
 	Policies   []*CompiledPolicy      `protobuf:"bytes,4,rep,name=policies,proto3" json:"policies,omitempty"`
 	// What this node's klite-net should TCP-probe: its own instances.
-	ProbeTargets  []*ProbeTarget `protobuf:"bytes,5,rep,name=probe_targets,json=probeTargets,proto3" json:"probe_targets,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ProbeTargets []*ProbeTarget `protobuf:"bytes,5,rep,name=probe_targets,json=probeTargets,proto3" json:"probe_targets,omitempty"`
+	// This node's mTLS ingress listeners (ADR 0024), one per local
+	// allocated endpoint. Driven by allocations rather than endpoint
+	// health, so the listener is up well before any consumer routes to it
+	// and stays up while the endpoint drains.
+	IngressListeners []*IngressListener `protobuf:"bytes,6,rep,name=ingress_listeners,json=ingressListeners,proto3" json:"ingress_listeners,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *NetDesired) Reset() {
@@ -796,6 +801,83 @@ func (x *NetDesired) GetProbeTargets() []*ProbeTarget {
 	return nil
 }
 
+func (x *NetDesired) GetIngressListeners() []*IngressListener {
+	if x != nil {
+		return x.IngressListeners
+	}
+	return nil
+}
+
+// IngressListener is one 0.0.0.0:<port> mTLS listener on the node's Envoy,
+// forwarding to a local instance (ADR 0024).
+type IngressListener struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Service       string                 `protobuf:"bytes,1,opt,name=service,proto3" json:"service,omitempty"` // names the listener, ingress/<service>/<port>
+	Port          int32                  `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`      // host-published ingress port from the node's slice
+	PodIp         string                 `protobuf:"bytes,3,opt,name=pod_ip,json=podIp,proto3" json:"pod_ip,omitempty"`
+	TargetPort    int32                  `protobuf:"varint,4,opt,name=target_port,json=targetPort,proto3" json:"target_port,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IngressListener) Reset() {
+	*x = IngressListener{}
+	mi := &file_klite_v1_agent_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IngressListener) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IngressListener) ProtoMessage() {}
+
+func (x *IngressListener) ProtoReflect() protoreflect.Message {
+	mi := &file_klite_v1_agent_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IngressListener.ProtoReflect.Descriptor instead.
+func (*IngressListener) Descriptor() ([]byte, []int) {
+	return file_klite_v1_agent_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *IngressListener) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+func (x *IngressListener) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *IngressListener) GetPodIp() string {
+	if x != nil {
+		return x.PodIp
+	}
+	return ""
+}
+
+func (x *IngressListener) GetTargetPort() int32 {
+	if x != nil {
+		return x.TargetPort
+	}
+	return 0
+}
+
 type ProbeTarget struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Instance      string                 `protobuf:"bytes,1,opt,name=instance,proto3" json:"instance,omitempty"`
@@ -807,7 +889,7 @@ type ProbeTarget struct {
 
 func (x *ProbeTarget) Reset() {
 	*x = ProbeTarget{}
-	mi := &file_klite_v1_agent_proto_msgTypes[10]
+	mi := &file_klite_v1_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -819,7 +901,7 @@ func (x *ProbeTarget) String() string {
 func (*ProbeTarget) ProtoMessage() {}
 
 func (x *ProbeTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_agent_proto_msgTypes[10]
+	mi := &file_klite_v1_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -832,7 +914,7 @@ func (x *ProbeTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProbeTarget.ProtoReflect.Descriptor instead.
 func (*ProbeTarget) Descriptor() ([]byte, []int) {
-	return file_klite_v1_agent_proto_rawDescGZIP(), []int{10}
+	return file_klite_v1_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ProbeTarget) GetInstance() string {
@@ -867,7 +949,7 @@ type InstanceStatusUpdate struct {
 
 func (x *InstanceStatusUpdate) Reset() {
 	*x = InstanceStatusUpdate{}
-	mi := &file_klite_v1_agent_proto_msgTypes[11]
+	mi := &file_klite_v1_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -879,7 +961,7 @@ func (x *InstanceStatusUpdate) String() string {
 func (*InstanceStatusUpdate) ProtoMessage() {}
 
 func (x *InstanceStatusUpdate) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_agent_proto_msgTypes[11]
+	mi := &file_klite_v1_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -892,7 +974,7 @@ func (x *InstanceStatusUpdate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstanceStatusUpdate.ProtoReflect.Descriptor instead.
 func (*InstanceStatusUpdate) Descriptor() ([]byte, []int) {
-	return file_klite_v1_agent_proto_rawDescGZIP(), []int{11}
+	return file_klite_v1_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *InstanceStatusUpdate) GetName() string {
@@ -926,7 +1008,7 @@ type KliteNetStatus struct {
 
 func (x *KliteNetStatus) Reset() {
 	*x = KliteNetStatus{}
-	mi := &file_klite_v1_agent_proto_msgTypes[12]
+	mi := &file_klite_v1_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -938,7 +1020,7 @@ func (x *KliteNetStatus) String() string {
 func (*KliteNetStatus) ProtoMessage() {}
 
 func (x *KliteNetStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_agent_proto_msgTypes[12]
+	mi := &file_klite_v1_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -951,7 +1033,7 @@ func (x *KliteNetStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KliteNetStatus.ProtoReflect.Descriptor instead.
 func (*KliteNetStatus) Descriptor() ([]byte, []int) {
-	return file_klite_v1_agent_proto_rawDescGZIP(), []int{12}
+	return file_klite_v1_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *KliteNetStatus) GetHealthy() bool {
@@ -986,7 +1068,7 @@ type ReportStatusRequest struct {
 
 func (x *ReportStatusRequest) Reset() {
 	*x = ReportStatusRequest{}
-	mi := &file_klite_v1_agent_proto_msgTypes[13]
+	mi := &file_klite_v1_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -998,7 +1080,7 @@ func (x *ReportStatusRequest) String() string {
 func (*ReportStatusRequest) ProtoMessage() {}
 
 func (x *ReportStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_agent_proto_msgTypes[13]
+	mi := &file_klite_v1_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1011,7 +1093,7 @@ func (x *ReportStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportStatusRequest.ProtoReflect.Descriptor instead.
 func (*ReportStatusRequest) Descriptor() ([]byte, []int) {
-	return file_klite_v1_agent_proto_rawDescGZIP(), []int{13}
+	return file_klite_v1_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ReportStatusRequest) GetNode() string {
@@ -1050,7 +1132,7 @@ type ReportStatusResponse struct {
 
 func (x *ReportStatusResponse) Reset() {
 	*x = ReportStatusResponse{}
-	mi := &file_klite_v1_agent_proto_msgTypes[14]
+	mi := &file_klite_v1_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1062,7 +1144,7 @@ func (x *ReportStatusResponse) String() string {
 func (*ReportStatusResponse) ProtoMessage() {}
 
 func (x *ReportStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_agent_proto_msgTypes[14]
+	mi := &file_klite_v1_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1075,7 +1157,7 @@ func (x *ReportStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReportStatusResponse.ProtoReflect.Descriptor instead.
 func (*ReportStatusResponse) Descriptor() ([]byte, []int) {
-	return file_klite_v1_agent_proto_rawDescGZIP(), []int{14}
+	return file_klite_v1_agent_proto_rawDescGZIP(), []int{15}
 }
 
 type StreamCommandsRequest struct {
@@ -1087,7 +1169,7 @@ type StreamCommandsRequest struct {
 
 func (x *StreamCommandsRequest) Reset() {
 	*x = StreamCommandsRequest{}
-	mi := &file_klite_v1_agent_proto_msgTypes[15]
+	mi := &file_klite_v1_agent_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1099,7 +1181,7 @@ func (x *StreamCommandsRequest) String() string {
 func (*StreamCommandsRequest) ProtoMessage() {}
 
 func (x *StreamCommandsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_agent_proto_msgTypes[15]
+	mi := &file_klite_v1_agent_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1112,7 +1194,7 @@ func (x *StreamCommandsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamCommandsRequest.ProtoReflect.Descriptor instead.
 func (*StreamCommandsRequest) Descriptor() ([]byte, []int) {
-	return file_klite_v1_agent_proto_rawDescGZIP(), []int{15}
+	return file_klite_v1_agent_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *StreamCommandsRequest) GetNode() string {
@@ -1133,7 +1215,7 @@ type LogsCommand struct {
 
 func (x *LogsCommand) Reset() {
 	*x = LogsCommand{}
-	mi := &file_klite_v1_agent_proto_msgTypes[16]
+	mi := &file_klite_v1_agent_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1145,7 +1227,7 @@ func (x *LogsCommand) String() string {
 func (*LogsCommand) ProtoMessage() {}
 
 func (x *LogsCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_agent_proto_msgTypes[16]
+	mi := &file_klite_v1_agent_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1158,7 +1240,7 @@ func (x *LogsCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogsCommand.ProtoReflect.Descriptor instead.
 func (*LogsCommand) Descriptor() ([]byte, []int) {
-	return file_klite_v1_agent_proto_rawDescGZIP(), []int{16}
+	return file_klite_v1_agent_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *LogsCommand) GetInstance() string {
@@ -1191,7 +1273,7 @@ type StopCommand struct {
 
 func (x *StopCommand) Reset() {
 	*x = StopCommand{}
-	mi := &file_klite_v1_agent_proto_msgTypes[17]
+	mi := &file_klite_v1_agent_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1203,7 +1285,7 @@ func (x *StopCommand) String() string {
 func (*StopCommand) ProtoMessage() {}
 
 func (x *StopCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_agent_proto_msgTypes[17]
+	mi := &file_klite_v1_agent_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1216,7 +1298,7 @@ func (x *StopCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopCommand.ProtoReflect.Descriptor instead.
 func (*StopCommand) Descriptor() ([]byte, []int) {
-	return file_klite_v1_agent_proto_rawDescGZIP(), []int{17}
+	return file_klite_v1_agent_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *StopCommand) GetCommandId() string {
@@ -1240,7 +1322,7 @@ type Command struct {
 
 func (x *Command) Reset() {
 	*x = Command{}
-	mi := &file_klite_v1_agent_proto_msgTypes[18]
+	mi := &file_klite_v1_agent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1252,7 +1334,7 @@ func (x *Command) String() string {
 func (*Command) ProtoMessage() {}
 
 func (x *Command) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_agent_proto_msgTypes[18]
+	mi := &file_klite_v1_agent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1265,7 +1347,7 @@ func (x *Command) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Command.ProtoReflect.Descriptor instead.
 func (*Command) Descriptor() ([]byte, []int) {
-	return file_klite_v1_agent_proto_rawDescGZIP(), []int{18}
+	return file_klite_v1_agent_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *Command) GetId() string {
@@ -1328,7 +1410,7 @@ type CommandOutput struct {
 
 func (x *CommandOutput) Reset() {
 	*x = CommandOutput{}
-	mi := &file_klite_v1_agent_proto_msgTypes[19]
+	mi := &file_klite_v1_agent_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1340,7 +1422,7 @@ func (x *CommandOutput) String() string {
 func (*CommandOutput) ProtoMessage() {}
 
 func (x *CommandOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_agent_proto_msgTypes[19]
+	mi := &file_klite_v1_agent_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1353,7 +1435,7 @@ func (x *CommandOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommandOutput.ProtoReflect.Descriptor instead.
 func (*CommandOutput) Descriptor() ([]byte, []int) {
-	return file_klite_v1_agent_proto_rawDescGZIP(), []int{19}
+	return file_klite_v1_agent_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *CommandOutput) GetCommandId() string {
@@ -1385,7 +1467,7 @@ type PushCommandOutputResponse struct {
 
 func (x *PushCommandOutputResponse) Reset() {
 	*x = PushCommandOutputResponse{}
-	mi := &file_klite_v1_agent_proto_msgTypes[20]
+	mi := &file_klite_v1_agent_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1397,7 +1479,7 @@ func (x *PushCommandOutputResponse) String() string {
 func (*PushCommandOutputResponse) ProtoMessage() {}
 
 func (x *PushCommandOutputResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_agent_proto_msgTypes[20]
+	mi := &file_klite_v1_agent_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1410,7 +1492,7 @@ func (x *PushCommandOutputResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PushCommandOutputResponse.ProtoReflect.Descriptor instead.
 func (*PushCommandOutputResponse) Descriptor() ([]byte, []int) {
-	return file_klite_v1_agent_proto_rawDescGZIP(), []int{20}
+	return file_klite_v1_agent_proto_rawDescGZIP(), []int{21}
 }
 
 var File_klite_v1_agent_proto protoreflect.FileDescriptor
@@ -1472,7 +1554,7 @@ const file_klite_v1_agent_proto_rawDesc = "" +
 	"\x02to\x18\x03 \x01(\tR\x02to\x12\x16\n" +
 	"\x06except\x18\x04 \x03(\tR\x06except\x12\x1f\n" +
 	"\vpolicy_name\x18\x05 \x01(\tR\n" +
-	"policyName\"\xed\x02\n" +
+	"policyName\"\xb5\x03\n" +
 	"\n" +
 	"NetDesired\x120\n" +
 	"\bservices\x18\x01 \x03(\v2\x14.klite.v1.ServiceVIPR\bservices\x125\n" +
@@ -1480,10 +1562,17 @@ const file_klite_v1_agent_proto_rawDesc = "" +
 	"\vip_identity\x18\x03 \x03(\v2$.klite.v1.NetDesired.IpIdentityEntryR\n" +
 	"ipIdentity\x124\n" +
 	"\bpolicies\x18\x04 \x03(\v2\x18.klite.v1.CompiledPolicyR\bpolicies\x12:\n" +
-	"\rprobe_targets\x18\x05 \x03(\v2\x15.klite.v1.ProbeTargetR\fprobeTargets\x1a=\n" +
+	"\rprobe_targets\x18\x05 \x03(\v2\x15.klite.v1.ProbeTargetR\fprobeTargets\x12F\n" +
+	"\x11ingress_listeners\x18\x06 \x03(\v2\x19.klite.v1.IngressListenerR\x10ingressListeners\x1a=\n" +
 	"\x0fIpIdentityEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"M\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"w\n" +
+	"\x0fIngressListener\x12\x18\n" +
+	"\aservice\x18\x01 \x01(\tR\aservice\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x15\n" +
+	"\x06pod_ip\x18\x03 \x01(\tR\x05podIp\x12\x1f\n" +
+	"\vtarget_port\x18\x04 \x01(\x05R\n" +
+	"targetPort\"M\n" +
 	"\vProbeTarget\x12\x1a\n" +
 	"\binstance\x18\x01 \x01(\tR\binstance\x12\x0e\n" +
 	"\x02ip\x18\x02 \x01(\tR\x02ip\x12\x12\n" +
@@ -1546,7 +1635,7 @@ func file_klite_v1_agent_proto_rawDescGZIP() []byte {
 }
 
 var file_klite_v1_agent_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_klite_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
+var file_klite_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_klite_v1_agent_proto_goTypes = []any{
 	(EndpointHealth)(0),               // 0: klite.v1.EndpointHealth
 	(*RegisterRequest)(nil),           // 1: klite.v1.RegisterRequest
@@ -1559,54 +1648,56 @@ var file_klite_v1_agent_proto_goTypes = []any{
 	(*EndpointGroup)(nil),             // 8: klite.v1.EndpointGroup
 	(*CompiledPolicy)(nil),            // 9: klite.v1.CompiledPolicy
 	(*NetDesired)(nil),                // 10: klite.v1.NetDesired
-	(*ProbeTarget)(nil),               // 11: klite.v1.ProbeTarget
-	(*InstanceStatusUpdate)(nil),      // 12: klite.v1.InstanceStatusUpdate
-	(*KliteNetStatus)(nil),            // 13: klite.v1.KliteNetStatus
-	(*ReportStatusRequest)(nil),       // 14: klite.v1.ReportStatusRequest
-	(*ReportStatusResponse)(nil),      // 15: klite.v1.ReportStatusResponse
-	(*StreamCommandsRequest)(nil),     // 16: klite.v1.StreamCommandsRequest
-	(*LogsCommand)(nil),               // 17: klite.v1.LogsCommand
-	(*StopCommand)(nil),               // 18: klite.v1.StopCommand
-	(*Command)(nil),                   // 19: klite.v1.Command
-	(*CommandOutput)(nil),             // 20: klite.v1.CommandOutput
-	(*PushCommandOutputResponse)(nil), // 21: klite.v1.PushCommandOutputResponse
-	nil,                               // 22: klite.v1.NetDesired.IpIdentityEntry
-	(*Instance)(nil),                  // 23: klite.v1.Instance
-	(PolicyAction)(0),                 // 24: klite.v1.PolicyAction
-	(*InstanceStatus)(nil),            // 25: klite.v1.InstanceStatus
+	(*IngressListener)(nil),           // 11: klite.v1.IngressListener
+	(*ProbeTarget)(nil),               // 12: klite.v1.ProbeTarget
+	(*InstanceStatusUpdate)(nil),      // 13: klite.v1.InstanceStatusUpdate
+	(*KliteNetStatus)(nil),            // 14: klite.v1.KliteNetStatus
+	(*ReportStatusRequest)(nil),       // 15: klite.v1.ReportStatusRequest
+	(*ReportStatusResponse)(nil),      // 16: klite.v1.ReportStatusResponse
+	(*StreamCommandsRequest)(nil),     // 17: klite.v1.StreamCommandsRequest
+	(*LogsCommand)(nil),               // 18: klite.v1.LogsCommand
+	(*StopCommand)(nil),               // 19: klite.v1.StopCommand
+	(*Command)(nil),                   // 20: klite.v1.Command
+	(*CommandOutput)(nil),             // 21: klite.v1.CommandOutput
+	(*PushCommandOutputResponse)(nil), // 22: klite.v1.PushCommandOutputResponse
+	nil,                               // 23: klite.v1.NetDesired.IpIdentityEntry
+	(*Instance)(nil),                  // 24: klite.v1.Instance
+	(PolicyAction)(0),                 // 25: klite.v1.PolicyAction
+	(*InstanceStatus)(nil),            // 26: klite.v1.InstanceStatus
 }
 var file_klite_v1_agent_proto_depIdxs = []int32{
 	2,  // 0: klite.v1.RegisterResponse.net:type_name -> klite.v1.NetBootstrap
-	23, // 1: klite.v1.DesiredState.instances:type_name -> klite.v1.Instance
+	24, // 1: klite.v1.DesiredState.instances:type_name -> klite.v1.Instance
 	10, // 2: klite.v1.DesiredState.net:type_name -> klite.v1.NetDesired
 	0,  // 3: klite.v1.Endpoint.health:type_name -> klite.v1.EndpointHealth
 	7,  // 4: klite.v1.EndpointGroup.endpoints:type_name -> klite.v1.Endpoint
-	24, // 5: klite.v1.CompiledPolicy.action:type_name -> klite.v1.PolicyAction
+	25, // 5: klite.v1.CompiledPolicy.action:type_name -> klite.v1.PolicyAction
 	6,  // 6: klite.v1.NetDesired.services:type_name -> klite.v1.ServiceVIP
 	8,  // 7: klite.v1.NetDesired.endpoints:type_name -> klite.v1.EndpointGroup
-	22, // 8: klite.v1.NetDesired.ip_identity:type_name -> klite.v1.NetDesired.IpIdentityEntry
+	23, // 8: klite.v1.NetDesired.ip_identity:type_name -> klite.v1.NetDesired.IpIdentityEntry
 	9,  // 9: klite.v1.NetDesired.policies:type_name -> klite.v1.CompiledPolicy
-	11, // 10: klite.v1.NetDesired.probe_targets:type_name -> klite.v1.ProbeTarget
-	25, // 11: klite.v1.InstanceStatusUpdate.status:type_name -> klite.v1.InstanceStatus
-	12, // 12: klite.v1.ReportStatusRequest.instances:type_name -> klite.v1.InstanceStatusUpdate
-	13, // 13: klite.v1.ReportStatusRequest.klite_net:type_name -> klite.v1.KliteNetStatus
-	17, // 14: klite.v1.Command.logs:type_name -> klite.v1.LogsCommand
-	18, // 15: klite.v1.Command.stop:type_name -> klite.v1.StopCommand
-	1,  // 16: klite.v1.AgentService.Register:input_type -> klite.v1.RegisterRequest
-	4,  // 17: klite.v1.AgentService.WatchDesired:input_type -> klite.v1.WatchDesiredRequest
-	14, // 18: klite.v1.AgentService.ReportStatus:input_type -> klite.v1.ReportStatusRequest
-	16, // 19: klite.v1.AgentService.StreamCommands:input_type -> klite.v1.StreamCommandsRequest
-	20, // 20: klite.v1.AgentService.PushCommandOutput:input_type -> klite.v1.CommandOutput
-	3,  // 21: klite.v1.AgentService.Register:output_type -> klite.v1.RegisterResponse
-	5,  // 22: klite.v1.AgentService.WatchDesired:output_type -> klite.v1.DesiredState
-	15, // 23: klite.v1.AgentService.ReportStatus:output_type -> klite.v1.ReportStatusResponse
-	19, // 24: klite.v1.AgentService.StreamCommands:output_type -> klite.v1.Command
-	21, // 25: klite.v1.AgentService.PushCommandOutput:output_type -> klite.v1.PushCommandOutputResponse
-	21, // [21:26] is the sub-list for method output_type
-	16, // [16:21] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	12, // 10: klite.v1.NetDesired.probe_targets:type_name -> klite.v1.ProbeTarget
+	11, // 11: klite.v1.NetDesired.ingress_listeners:type_name -> klite.v1.IngressListener
+	26, // 12: klite.v1.InstanceStatusUpdate.status:type_name -> klite.v1.InstanceStatus
+	13, // 13: klite.v1.ReportStatusRequest.instances:type_name -> klite.v1.InstanceStatusUpdate
+	14, // 14: klite.v1.ReportStatusRequest.klite_net:type_name -> klite.v1.KliteNetStatus
+	18, // 15: klite.v1.Command.logs:type_name -> klite.v1.LogsCommand
+	19, // 16: klite.v1.Command.stop:type_name -> klite.v1.StopCommand
+	1,  // 17: klite.v1.AgentService.Register:input_type -> klite.v1.RegisterRequest
+	4,  // 18: klite.v1.AgentService.WatchDesired:input_type -> klite.v1.WatchDesiredRequest
+	15, // 19: klite.v1.AgentService.ReportStatus:input_type -> klite.v1.ReportStatusRequest
+	17, // 20: klite.v1.AgentService.StreamCommands:input_type -> klite.v1.StreamCommandsRequest
+	21, // 21: klite.v1.AgentService.PushCommandOutput:input_type -> klite.v1.CommandOutput
+	3,  // 22: klite.v1.AgentService.Register:output_type -> klite.v1.RegisterResponse
+	5,  // 23: klite.v1.AgentService.WatchDesired:output_type -> klite.v1.DesiredState
+	16, // 24: klite.v1.AgentService.ReportStatus:output_type -> klite.v1.ReportStatusResponse
+	20, // 25: klite.v1.AgentService.StreamCommands:output_type -> klite.v1.Command
+	22, // 26: klite.v1.AgentService.PushCommandOutput:output_type -> klite.v1.PushCommandOutputResponse
+	22, // [22:27] is the sub-list for method output_type
+	17, // [17:22] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_klite_v1_agent_proto_init() }
@@ -1615,7 +1706,7 @@ func file_klite_v1_agent_proto_init() {
 		return
 	}
 	file_klite_v1_objects_proto_init()
-	file_klite_v1_agent_proto_msgTypes[18].OneofWrappers = []any{
+	file_klite_v1_agent_proto_msgTypes[19].OneofWrappers = []any{
 		(*Command_Logs)(nil),
 		(*Command_Stop)(nil),
 	}
@@ -1625,7 +1716,7 @@ func file_klite_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_klite_v1_agent_proto_rawDesc), len(file_klite_v1_agent_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   22,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

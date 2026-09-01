@@ -17,8 +17,9 @@ import (
 )
 
 // crossNet is service a spread over two nodes, as node-1 sees it: one local
-// endpoint with an ingress allocation, one remote draining endpoint with its
-// rider, and one remote endpoint whose allocation hasn't landed yet.
+// endpoint with an ingress allocation (and the matching local listener), one
+// remote draining endpoint with its rider, and one remote endpoint whose
+// allocation hasn't landed yet.
 func crossNet() *klitev1.NetDesired {
 	return &klitev1.NetDesired{
 		Services: []*klitev1.ServiceVIP{
@@ -41,6 +42,9 @@ func crossNet() *klitev1.NetDesired {
 					Health: klitev1.EndpointHealth_ENDPOINT_HEALTH_READY,
 				},
 			}},
+		},
+		IngressListeners: []*klitev1.IngressListener{
+			{Service: "a", Port: 20001, PodIp: "10.44.128.10", TargetPort: 8080},
 		},
 	}
 }
@@ -139,10 +143,11 @@ func TestBuildSnapshotClusterTransportMatches(t *testing.T) {
 	}
 }
 
-// The destination side of ADR 0024: each locally hosted endpoint with an
-// allocation gets a 0.0.0.0:<port> listener that terminates mTLS with the
-// node identity, demands a CA-chained client cert, and proxies straight to
-// the pod through a same-named one-endpoint static cluster.
+// The destination side of ADR 0024: each entry in the node's
+// allocation-driven listener list becomes a 0.0.0.0:<port> listener that
+// terminates mTLS with the node identity, demands a CA-chained client cert,
+// and proxies straight to the pod through a same-named one-endpoint static
+// cluster.
 func TestBuildSnapshotIngressListeners(t *testing.T) {
 	t.Parallel()
 	snap, err := xds.BuildSnapshot("node-1", "1", crossNet())
@@ -190,7 +195,8 @@ func TestBuildSnapshotIngressListeners(t *testing.T) {
 		t.Fatalf("ingress target = %s:%d, want the local pod", pod.GetAddress(), pod.GetPortValue())
 	}
 
-	// Remote endpoints never spawn listeners here.
+	// Remote endpoints never spawn listeners here: only the node's own
+	// listener list does, and it names only port 20001.
 	if _, ok := snap.GetResources(resourcev3.ListenerType)["ingress/a/20033"]; ok {
 		t.Fatal("a remote endpoint's ingress listener leaked into this node's snapshot")
 	}
@@ -206,9 +212,8 @@ func TestBuildSnapshotRejectsIngressGarbage(t *testing.T) {
 		{
 			name: "duplicate local ingress port",
 			mutate: func(net *klitev1.NetDesired) {
-				eps := net.Endpoints[0].Endpoints
-				eps[1].Node = "node-1"
-				eps[1].IngressPort = 20001
+				net.IngressListeners = append(net.IngressListeners,
+					&klitev1.IngressListener{Service: "b", Port: 20001, PodIp: "10.44.128.11", TargetPort: 8080})
 			},
 			wantErr: "claimed by two local endpoints",
 		},
@@ -220,11 +225,25 @@ func TestBuildSnapshotRejectsIngressGarbage(t *testing.T) {
 			wantErr: "machine address",
 		},
 		{
-			name: "ingress port out of range",
+			name: "ingress rider port out of range",
 			mutate: func(net *klitev1.NetDesired) {
 				net.Endpoints[0].Endpoints[0].IngressPort = 70000
 			},
 			wantErr: "outside 0-65535",
+		},
+		{
+			name: "listener without a service",
+			mutate: func(net *klitev1.NetDesired) {
+				net.IngressListeners[0].Service = ""
+			},
+			wantErr: "without a service",
+		},
+		{
+			name: "listener pod ip garbage",
+			mutate: func(net *klitev1.NetDesired) {
+				net.IngressListeners[0].PodIp = "not-an-ip"
+			},
+			wantErr: "pod ip",
 		},
 	}
 	for _, tt := range cases {

@@ -44,11 +44,39 @@ func fixtureInputs() *inputs {
 			AllocationName("b", "node-1"): "10.44.64.1",
 			AllocationName("b", "node-2"): "10.44.64.2",
 		},
-		ingress: map[string]int32{
-			IngressAllocationName("b", "b-ready"):    20000,
-			IngressAllocationName("b", "b-draining"): 20033,
+		ingress: map[string]*klitev1.IngressAllocationSpec{
+			IngressAllocationName("b", "b-ready"): {
+				Service: "b", Instance: "b-ready", Node: "node-1", Port: 20000,
+			},
+			IngressAllocationName("b", "b-draining"): {
+				Service: "b", Instance: "b-draining", Node: "node-2", Port: 20033,
+			},
+			// Allocated at birth, before the instance turns Ready: the
+			// listener must exist while the endpoint is still absent.
+			IngressAllocationName("b", "b-running"): {
+				Service: "b", Instance: "b-running", Node: "node-2", Port: 20034,
+			},
 		},
 		advertise: map[string]string{"node-1": "192.168.5.2", "node-2": "10.10.17.5"},
+	}
+}
+
+// Ingress listeners are per-node, allocation-driven, and sorted: node-2
+// carries its draining AND its merely-running instance (the listener
+// predates Ready and outlives it), while node-1 carries only its own.
+func TestBuildAllIngressListeners(t *testing.T) {
+	t.Parallel()
+	out := buildAll(fixtureInputs())
+	n1 := out["node-1"].Net.GetIngressListeners()
+	if len(n1) != 1 || n1[0].GetPort() != 20000 || n1[0].GetPodIp() != "10.44.128.10" || n1[0].GetTargetPort() != 80 {
+		t.Fatalf("node-1 ingress listeners = %v", n1)
+	}
+	n2 := out["node-2"].Net.GetIngressListeners()
+	if len(n2) != 2 {
+		t.Fatalf("node-2 ingress listeners = %v, want draining and running", n2)
+	}
+	if n2[0].GetPort() != 20033 || n2[1].GetPort() != 20034 {
+		t.Fatalf("node-2 listener ports = %d, %d, want 20033 then 20034", n2[0].GetPort(), n2[1].GetPort())
 	}
 }
 

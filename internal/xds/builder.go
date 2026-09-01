@@ -64,14 +64,14 @@ const (
 // node decides sidedness (ADR 0024): endpoints on it get ingress listeners
 // here, endpoints elsewhere render as mTLS dials to their ingress ports.
 func BuildSnapshot(node, version string, net *klitev1.NetDesired) (*cachev3.Snapshot, error) {
-	if err := validateNet(node, net); err != nil {
+	if err := validateNet(net); err != nil {
 		return nil, fmt.Errorf("node %s: %w", node, err)
 	}
 	listeners, err := buildListeners(net)
 	if err != nil {
 		return nil, fmt.Errorf("node %s: %w", node, err)
 	}
-	ingressListeners, ingressClusters, err := buildIngress(node, net)
+	ingressListeners, ingressClusters, err := buildIngress(net)
 	if err != nil {
 		return nil, fmt.Errorf("node %s: %w", node, err)
 	}
@@ -100,7 +100,7 @@ func BuildSnapshot(node, version string, net *klitev1.NetDesired) (*cachev3.Snap
 // snapshot serving and puts the reason in klited's log. Duplicate names are
 // rejected too, because snapshot indexing is last-wins and would drop the
 // earlier resource.
-func validateNet(node string, net *klitev1.NetDesired) error {
+func validateNet(net *klitev1.NetDesired) error {
 	seenSvc := make(map[string]bool, len(net.GetServices()))
 	for _, svc := range net.GetServices() {
 		name := svc.GetService()
@@ -118,7 +118,10 @@ func validateNet(node string, net *klitev1.NetDesired) error {
 			return fmt.Errorf("service %s: port %d outside 1-65535", name, p)
 		}
 	}
-	if err := validateEndpointGroups(node, net); err != nil {
+	if err := validateEndpointGroups(net); err != nil {
+		return err
+	}
+	if err := validateIngressListeners(net); err != nil {
 		return err
 	}
 	for ip := range net.GetIpIdentity() {
@@ -129,15 +132,10 @@ func validateNet(node string, net *klitev1.NetDesired) error {
 	return nil
 }
 
-// validateEndpointGroups extends the screen to the cross-node riders: a
-// machine address must be a literal IP because it lands in EDS, and two
-// LOCAL endpoints must not claim one ingress port, since that would put two
-// same-named listeners in the snapshot and last-wins indexing would silently
-// drop one. Allocator repair fixes the store within a pass, and this node
-// serves its previous snapshot until then.
-func validateEndpointGroups(node string, net *klitev1.NetDesired) error {
+// validateEndpointGroups extends the screen to the cross-node rider fields:
+// a machine address must be a literal IP because it lands in EDS.
+func validateEndpointGroups(net *klitev1.NetDesired) error {
 	seenGroup := make(map[string]bool, len(net.GetEndpoints()))
-	seenIngress := map[int32]bool{}
 	for _, group := range net.GetEndpoints() {
 		svc := group.GetService()
 		if seenGroup[svc] {
@@ -156,17 +154,38 @@ func validateEndpointGroups(node string, net *klitev1.NetDesired) error {
 					return fmt.Errorf("endpoint for %s: machine address: %w", svc, err)
 				}
 			}
-			p := ep.GetIngressPort()
-			if p < 0 || p > 65535 {
+			if p := ep.GetIngressPort(); p < 0 || p > 65535 {
 				return fmt.Errorf("endpoint for %s: ingress port %d outside 0-65535", svc, p)
 			}
-			if p != 0 && ep.GetNode() == node {
-				if seenIngress[p] {
-					return fmt.Errorf("ingress port %d claimed by two local endpoints", p)
-				}
-				seenIngress[p] = true
-			}
 		}
+	}
+	return nil
+}
+
+// validateIngressListeners rejects listeners that would NACK (bad addresses,
+// bad ports) or silently drop each other: two entries on one port become two
+// same-named-or-colliding listeners, and snapshot indexing is last-wins.
+// Allocator repair fixes the store within a pass, and the node serves its
+// previous snapshot until then.
+func validateIngressListeners(net *klitev1.NetDesired) error {
+	seen := map[int32]bool{}
+	for _, ing := range net.GetIngressListeners() {
+		if ing.GetService() == "" {
+			return fmt.Errorf("ingress listener on port %d without a service", ing.GetPort())
+		}
+		if p := ing.GetPort(); p < 1 || p > 65535 {
+			return fmt.Errorf("ingress %s: port %d outside 1-65535", ing.GetService(), p)
+		}
+		if p := ing.GetTargetPort(); p < 1 || p > 65535 {
+			return fmt.Errorf("ingress %s: target port %d outside 1-65535", ing.GetService(), p)
+		}
+		if _, err := netip.ParseAddr(ing.GetPodIp()); err != nil {
+			return fmt.Errorf("ingress %s: pod ip: %w", ing.GetService(), err)
+		}
+		if seen[ing.GetPort()] {
+			return fmt.Errorf("ingress port %d claimed by two local endpoints", ing.GetPort())
+		}
+		seen[ing.GetPort()] = true
 	}
 	return nil
 }
@@ -506,38 +525,35 @@ func socketAddress(host string, port uint32) *corev3.Address {
 	}
 }
 
-// buildIngress emits the destination half of ADR 0024 for every endpoint on
-// this node that holds an ingress allocation: a listener on
-// 0.0.0.0:<ingressPort> inside the donor's published slice, terminating TLS
-// with the node identity and requiring a client cert that chains to the
-// cluster CA, tcp-proxying to a one-endpoint static cluster at the local pod.
-// No RBAC here: policy runs where the connection originates, on the source
-// node's VIP listener, and admission at this layer is deliberately
-// node-level. No freebind either — unlike VIPs, 0.0.0.0 always exists.
-func buildIngress(node string, net *klitev1.NetDesired) (listeners, clusters []types.Resource, err error) {
-	for _, group := range net.GetEndpoints() {
-		for _, ep := range group.GetEndpoints() {
-			if ep.GetNode() != node || ep.GetIngressPort() <= 0 {
-				continue
-			}
-			lst, cl, err := buildIngressPair(group.GetService(), ep)
-			if err != nil {
-				return nil, nil, err
-			}
-			listeners = append(listeners, lst)
-			clusters = append(clusters, cl)
+// buildIngress emits the destination half of ADR 0024 from the node's
+// allocation-driven listener list: one listener on 0.0.0.0:<ingressPort>
+// inside the donor's published slice, terminating TLS with the node identity
+// and requiring a client cert that chains to the cluster CA, tcp-proxying to
+// a one-endpoint static cluster at the local pod. The list stands from
+// instance birth through draining, so consumers never route at a port whose
+// listener hasn't committed yet. No RBAC here: policy runs where the
+// connection originates, on the source node's VIP listener, and admission at
+// this layer is deliberately node-level. No freebind either — unlike VIPs,
+// 0.0.0.0 always exists.
+func buildIngress(net *klitev1.NetDesired) (listeners, clusters []types.Resource, err error) {
+	for _, ing := range net.GetIngressListeners() {
+		lst, cl, err := buildIngressPair(ing)
+		if err != nil {
+			return nil, nil, err
 		}
+		listeners = append(listeners, lst)
+		clusters = append(clusters, cl)
 	}
 	return listeners, clusters, nil
 }
 
-func buildIngressPair(service string, ep *klitev1.Endpoint) (*listenerv3.Listener, *clusterv3.Cluster, error) {
+func buildIngressPair(ing *klitev1.IngressListener) (*listenerv3.Listener, *clusterv3.Cluster, error) {
 	// The port names both resources: it's unique on the node (the allocator
 	// hands each endpoint its own), while instance names never reach this
 	// layer.
-	name := fmt.Sprintf("ingress/%s/%d", service, ep.GetIngressPort())
+	name := fmt.Sprintf("ingress/%s/%d", ing.GetService(), ing.GetPort())
 	tcpProxy, err := anypb.New(&tcpproxyv3.TcpProxy{
-		StatPrefix:       fmt.Sprintf("ingress_%d", ep.GetIngressPort()),
+		StatPrefix:       fmt.Sprintf("ingress_%d", ing.GetPort()),
 		ClusterSpecifier: &tcpproxyv3.TcpProxy_Cluster{Cluster: name},
 		// Same deliberate zero as the VIP listeners: the 1h default
 		// silently kills idle connections.
@@ -557,7 +573,7 @@ func buildIngressPair(service string, ep *klitev1.Endpoint) (*listenerv3.Listene
 	}
 	lst := &listenerv3.Listener{
 		Name:    name,
-		Address: socketAddress("0.0.0.0", uint32(ep.GetIngressPort())),
+		Address: socketAddress("0.0.0.0", uint32(ing.GetPort())),
 		FilterChains: []*listenerv3.FilterChain{{
 			TransportSocket: &corev3.TransportSocket{
 				Name:       tlsSocketName,
@@ -577,7 +593,7 @@ func buildIngressPair(service string, ep *klitev1.Endpoint) (*listenerv3.Listene
 			ClusterName: name,
 			Endpoints: []*endpointv3.LocalityLbEndpoints{{
 				LbEndpoints: []*endpointv3.LbEndpoint{{
-					HostIdentifier: lbAddress(ep.GetIp(), uint32(ep.GetPort())),
+					HostIdentifier: lbAddress(ing.GetPodIp(), uint32(ing.GetTargetPort())),
 				}},
 			}},
 		},
