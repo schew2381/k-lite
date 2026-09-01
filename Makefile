@@ -38,7 +38,7 @@ precommit:
 	prek run --all-files
 
 ui:
-	cd ui && npm ci && npm run build
+	cd frontend && bun install --frozen-lockfile && bun run build
 
 # make node-1 runs an agent for node-1. Any suffix works.
 node-%:
