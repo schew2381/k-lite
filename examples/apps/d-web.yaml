@@ -1,30 +1,25 @@
 apiVersion: klite/v1
 kind: Workload
 metadata:
-  name: a
+  name: d
   labels:
-    app: a
+    app: d
 spec:
-  replicas: 1
+  replicas: 4
   template:
     labels:
-      app: a
+      app: d
     containers:
       - name: web
         image: busybox:1.36
         command: ["/bin/sh", "-c"]
-        # The chatty shape, shared with dialog-created services (see
-        # frontend/app/lib/yamlgen.ts chattyContainer): serve this instance's
-        # hostname on :80, and once a second roll two urandom bytes. A roll
-        # under 3277 of 65536 (5%) wgets one random name from TARGETS through
-        # the real data path (kdns, VIP, Envoy). sh as pid 1 drops SIGTERM
-        # by default, so the TERM trap lets drains and orphan sweeps finish
-        # in a second instead of the full grace period.
+        # Same chatty shape as a (see a-client.yaml), differing only in the
+        # served name and TARGETS.
         args:
           - |
             trap "exit 0" TERM
             mkdir -p /www
-            echo "$(hostname) is a" > /www/index.html
+            echo "$(hostname) is d" > /www/index.html
             httpd -p 80 -h /www
             while sleep 1; do
               r=$(head -c2 /dev/urandom | od -An -tu2 | tr -d " ")
@@ -37,7 +32,7 @@ spec:
             done
         env:
           - name: TARGETS
-            value: b c d
+            value: a b c
         ports:
           - containerPort: 80
         readinessProbe:
@@ -46,9 +41,9 @@ spec:
 apiVersion: klite/v1
 kind: Service
 metadata:
-  name: a
+  name: d
 spec:
   selector:
-    app: a
+    app: d
   port: 8080
   targetPort: 80

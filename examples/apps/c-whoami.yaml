@@ -5,7 +5,7 @@ metadata:
   labels:
     app: c
 spec:
-  replicas: 2
+  replicas: 3
   template:
     labels:
       app: c
@@ -32,7 +32,7 @@ spec:
             done
         env:
           - name: TARGETS
-            value: a b
+            value: a b d
         ports:
           - containerPort: 80
         readinessProbe:

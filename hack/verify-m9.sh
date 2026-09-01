@@ -81,11 +81,12 @@ infra_up() {
   done
 }
 
-counts_ready() { # a=1, b=<$1>, c=2 all Ready
+counts_ready() { # a=1, b=<$1>, c=3, d=4 all Ready
   local snap; snap="$("$KLITE" get instances 2>/dev/null)"
   [[ "$(echo "$snap" | awk '$2=="a" && $4=="Ready"' | wc -l | tr -d ' ')" == 1 ]] || return 1
   [[ "$(echo "$snap" | awk '$2=="b" && $4=="Ready"' | wc -l | tr -d ' ')" == "$1" ]] || return 1
-  [[ "$(echo "$snap" | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == 2 ]]
+  [[ "$(echo "$snap" | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == 3 ]] || return 1
+  [[ "$(echo "$snap" | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == 4 ]]
 }
 
 # idx_of <node>: the node's cluster-assigned index, read off its donor's
@@ -198,11 +199,11 @@ patch_drain() { # patch_drain <src> <dst>
     print "  drain:"; print "    drainTimeoutSeconds: 4"; print "    terminationGraceSeconds: 4"; done=1
   }' "$1" > "$2"
 }
-for app in a-client b-whoami c-whoami; do
+for app in a-client b-whoami c-whoami d-web; do
   patch_drain "examples/apps/$app.yaml" "$TMP/$app-fast.yaml"
   "$KLITE" apply -f "$TMP/$app-fast.yaml" >/dev/null || die "apply $app.yaml (fast drains)"
 done
-wait_for 90 counts_ready 2 && pass "workloads a, b, c all Ready (probe-gated)" || die "workloads Ready"
+wait_for 90 counts_ready 2 && pass "workloads a, b, c, d all Ready (probe-gated)" || die "workloads Ready"
 A_INST="$("$KLITE" get instances | awk '$2=="a" {print $1}' | head -1)"
 A_NODE="$("$KLITE" get instances | awk '$2=="a" {print $3}' | head -1)"
 [[ -n "$A_INST" && -n "$A_NODE" ]] || die "resolve a's instance and node"
@@ -213,8 +214,8 @@ disown $!
 
 # ============================================================
 STEP=4-allocations
-allocs_settled() { [[ "$("$KLITE" get ingressallocations 2>/dev/null | tail -n +2 | grep -c .)" == 5 ]]; }
-wait_for 30 allocs_settled || { "$KLITE" get ingressallocations; die "want 5 ingress allocations (a=1, b=2, c=2)"; }
+allocs_settled() { [[ "$("$KLITE" get ingressallocations 2>/dev/null | tail -n +2 | grep -c .)" == 10 ]]; }
+wait_for 30 allocs_settled || { "$KLITE" get ingressallocations; die "want 10 ingress allocations (a=1, b=2, c=3, d=4)"; }
 "$KLITE" get ingressallocations | tail -n +2 | while read -r name svc inst node port; do
   i="$(idx_of "$node")"
   lo=$((INGRESS_BASE + INGRESS_PER_NODE * (i - 1)))
@@ -224,7 +225,7 @@ wait_for 30 allocs_settled || { "$KLITE" get ingressallocations; die "want 5 ing
   [[ "$("$KLITE" get instances | awk -v n="$inst" '$1==n {print $3}')" == "$node" ]] \
     || die "allocation $name names node $node but the instance lives elsewhere"
 done || exit 1
-pass "klite get ingressallocations: 5 rows, each inside its owner's slice"
+pass "klite get ingressallocations: 10 rows, each inside its owner's slice"
 
 echo 'apiVersion: klite/v1
 kind: IngressAllocation
@@ -333,7 +334,7 @@ wait_for 60 b3 && pass "scale b 2->3 converged" || die "scale b to 3 converged"
 # stored one and the file's replicas: 2 would silently undo the scale step.
 B_BEFORE="$("$KLITE" get instances | awk '$2=="b" {print $1}' | sort)"
 awk '{sub(/^  replicas: 2$/, "  replicas: 3"); print}
-     /^            value: a c$/ {print "          - name: M9_ROLLOUT"; print "            value: \"1\""}' \
+     /^            value: a c d$/ {print "          - name: M9_ROLLOUT"; print "            value: \"1\""}' \
   "$TMP/b-whoami-fast.yaml" | "$KLITE" apply -f - >/dev/null || die "apply rolled b template"
 rolled() {
   [[ "$("$KLITE" get instances 2>/dev/null | awk '$2=="b" && $4=="Ready"' | wc -l | tr -d ' ')" == 3 ]] || return 1

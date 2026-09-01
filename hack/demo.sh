@@ -7,9 +7,9 @@
 #   wipe        fresh store, fresh CA, fresh identities
 #   boot        etcd trio plus two stateless klited replicas
 #   join        three nodes trade a token for an mTLS identity
-#   apps        a, b, c go Ready: each serves its hostname and chats
+#   apps        a, b, c, d go Ready: each serves its hostname and chats
 #   discovery   a finds b by name through kdns and the VIP
-#   scale       c grows 2 -> 3 live, landing the resting shape
+#   scale       d grows 3 -> 4 live, landing the resting shape
 #   rollout     every b replaced, probe loop provably clean
 #   policy      deny a -> c on both planes (chatter included), restore
 #   drain       a node empties surge-first, stream on screen
@@ -92,14 +92,15 @@ infra_up() {
     docker ps --format '{{.Names}}' | grep -qx "klite.$n.envoy" || return 1
   done
 }
-counts_ready() { # counts_ready <b> <c>: a=1 plus these counts, all Ready
+counts_ready() { # counts_ready <b> <c> <d>: a=1 plus these counts, all Ready
   local snap; snap="$("$KLITE" get instances 2>/dev/null)"
   [[ "$(echo "$snap" | awk '$2=="a" && $4=="Ready"' | wc -l | tr -d ' ')" == 1 ]] || return 1
   [[ "$(echo "$snap" | awk '$2=="b" && $4=="Ready"' | wc -l | tr -d ' ')" == "$1" ]] || return 1
-  [[ "$(echo "$snap" | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == "$2" ]]
+  [[ "$(echo "$snap" | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == "$2" ]] || return 1
+  [[ "$(echo "$snap" | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == "$3" ]]
 }
 # The resting shape every beat returns to, and what the board shows at the end.
-steady() { counts_ready 2 3; }
+steady() { counts_ready 2 3 4; }
 a_ctr() { echo "klite.$A_NODE.$A_INST"; }
 alloc_row() { "$KLITE" get ingressallocations 2>/dev/null | awk -v s="$1" -v i="$2" '$2==s && $3==i {print $4, $5}'; }
 
@@ -110,6 +111,7 @@ alloc_row() { "$KLITE" get ingressallocations 2>/dev/null | awk -v s="$1" -v i="
 # Zero-failure gates diff the FAILED counts over a window and demand growth.
 PROBE_B="$DEV_DIR/probe-b.log"
 PROBE_C="$DEV_DIR/probe-c.log"
+PROBE_D="$DEV_DIR/probe-d.log"
 PROBE_PIDS=()
 probe_loop() { # probe_loop <file> <url>
   local file=$1 url=$2
@@ -121,9 +123,12 @@ probe_loop() { # probe_loop <file> <url>
 start_probes() {
   : >"$PROBE_B"
   : >"$PROBE_C"
+  : >"$PROBE_D"
   probe_loop "$PROBE_B" http://b:8080 &
   PROBE_PIDS+=($!); disown $!
   probe_loop "$PROBE_C" http://c:8080 &
+  PROBE_PIDS+=($!); disown $!
+  probe_loop "$PROBE_D" http://d:8080 &
   PROBE_PIDS+=($!); disown $!
 }
 stop_probes() {
@@ -274,7 +279,7 @@ wait_for 90 infra_up && pass "infra pods running on every node (klite-net + Envo
 pause
 
 # ============================================================
-banner "4. DECLARE THE APPS: a, b, c each serve their name and chat"
+banner "4. DECLARE THE APPS: a, b, c, d each serve their name and chat"
 STEP=apps
 
 # Demo pace lives in the YAML, never in code (ADR 0010): 4s drain knobs go
@@ -285,11 +290,17 @@ patch_drain() { # patch_drain <src> <dst>
     print "  drain:"; print "    drainTimeoutSeconds: 4"; print "    terminationGraceSeconds: 4"; done=1
   }' "$1" > "$2"
 }
-for app in a-client b-whoami c-whoami; do
+for app in a-client b-whoami c-whoami d-web; do
   patch_drain "examples/apps/$app.yaml" "$DEV_DIR/apps/$app.yaml"
+done
+# d seeds at 3 of its resting 4, so the scale beat can land the resting
+# shape live. Replicas sit outside the template, so the hash is untouched.
+awk '{sub(/^  replicas: 4$/, "  replicas: 3"); print}' "$DEV_DIR/apps/d-web.yaml" > "$DEV_DIR/apps/d-web-seed.yaml"
+mv "$DEV_DIR/apps/d-web-seed.yaml" "$DEV_DIR/apps/d-web.yaml"
+for app in a-client b-whoami c-whoami d-web; do
   "$KLITE" apply -f "$DEV_DIR/apps/$app.yaml" >/dev/null || die "apply $app.yaml"
 done
-wait_for 120 counts_ready 2 2 && pass "a, b, c all Ready (readiness probes gate all three)" || die "workloads Ready"
+wait_for 120 counts_ready 2 3 3 && pass "a, b, c, d all Ready (readiness probes gate all four)" || die "workloads Ready"
 show "$KLITE" get instances
 A_INST="$("$KLITE" get instances | awk '$2=="a" {print $1}' | head -1)"
 A_NODE="$("$KLITE" get instances | awk '$2=="a" {print $3}' | head -1)"
@@ -329,19 +340,19 @@ show "$KLITE" get vipallocations
 pause
 
 # ============================================================
-banner "6. SCALE c LIVE: 2 -> 3"
+banner "6. SCALE d LIVE: 3 -> 4"
 STEP=scale
 
-# This lands the cluster on its resting shape (a=1, b=2, c=3), which every
-# later beat returns to and the board shows at the end.
-ROLL_B_F0="$(fails_in "$PROBE_B")"; ROLL_C_F0="$(fails_in "$PROBE_C")"
-ROLL_B_L0="$(lines_in "$PROBE_B")"; ROLL_C_L0="$(lines_in "$PROBE_C")"
-show "$KLITE" scale workload c --replicas 3
-wait_for 90 steady && pass "c converged to 3/3 Ready" || die "scale c to 3"
+# This lands the cluster on its resting shape (a=1, b=2, c=3, d=4), which
+# every later beat returns to and the board shows at the end.
+ROLL_B_F0="$(fails_in "$PROBE_B")"; ROLL_C_F0="$(fails_in "$PROBE_C")"; ROLL_D_F0="$(fails_in "$PROBE_D")"
+ROLL_B_L0="$(lines_in "$PROBE_B")"; ROLL_C_L0="$(lines_in "$PROBE_C")"; ROLL_D_L0="$(lines_in "$PROBE_D")"
+show "$KLITE" scale workload d --replicas 4
+wait_for 90 steady && pass "d converged to 4/4 Ready" || die "scale d to 4"
 show "$KLITE" get instances
-[[ "$("$KLITE" get instances | awk '$2=="c" {print $3}' | sort -u | wc -l | tr -d ' ')" -ge 2 ]] \
-  && pass "c spans multiple nodes (spread-by-count scheduler, ADR 0012)" \
-  || die "c landed on a single node"
+[[ "$("$KLITE" get instances | awk '$2=="d" {print $3}' | sort -u | wc -l | tr -d ' ')" -ge 2 ]] \
+  && pass "d spans multiple nodes (spread-by-count scheduler, ADR 0012)" \
+  || die "d landed on a single node"
 pause
 
 # ============================================================
@@ -363,18 +374,19 @@ rolled() {
 }
 wait_for 180 rolled && pass "both b instances replaced with the new template, all Ready" || die "rollout converged"
 sleep 3
-FAILS=$(( $(fails_in "$PROBE_B") - ROLL_B_F0 + $(fails_in "$PROBE_C") - ROLL_C_F0 ))
-[[ "$FAILS" == 0 && "$(lines_in "$PROBE_B")" -gt "$ROLL_B_L0" && "$(lines_in "$PROBE_C")" -gt "$ROLL_C_L0" ]] \
+FAILS=$(( $(fails_in "$PROBE_B") - ROLL_B_F0 + $(fails_in "$PROBE_C") - ROLL_C_F0 + $(fails_in "$PROBE_D") - ROLL_D_F0 ))
+[[ "$FAILS" == 0 && "$(lines_in "$PROBE_B")" -gt "$ROLL_B_L0" \
+   && "$(lines_in "$PROBE_C")" -gt "$ROLL_C_L0" && "$(lines_in "$PROBE_D")" -gt "$ROLL_D_L0" ]] \
   && pass "ZERO failed requests across the scale and the rollout (the probe loops are the witness)" \
-  || { tail -n 3 "$PROBE_B" "$PROBE_C"; die "$FAILS failed request(s) during the rollout"; }
+  || { tail -n 3 "$PROBE_B" "$PROBE_C" "$PROBE_D"; die "$FAILS failed request(s) during the rollout"; }
 pause
 
 # ============================================================
 banner "8. POLICY: deny a -> c live, both planes agree, then restore"
 STEP=policy
 
-info "right now a reaches both b and c (the last probe against each):"
-show tail -n 1 "$PROBE_B" "$PROBE_C"
+info "right now a reaches b, c, and d (the last probe against each):"
+show tail -n 1 "$PROBE_B" "$PROBE_C" "$PROBE_D"
 CHAT_MARK="$(date +%s)"
 show "$KLITE" apply -f examples/policies/deny-a-to-c.yaml
 c_denied() {
@@ -411,14 +423,21 @@ STEP=drain
 
 # One failure window spans this beat and the next: the drain, the leader
 # kill, and both scales all answer to the same baseline.
-CHAOS_B_F0="$(fails_in "$PROBE_B")"; CHAOS_C_F0="$(fails_in "$PROBE_C")"
-CHAOS_B_L0="$(lines_in "$PROBE_B")"; CHAOS_C_L0="$(lines_in "$PROBE_C")"
-chaos_fails() { echo $(( $(fails_in "$PROBE_B") - CHAOS_B_F0 + $(fails_in "$PROBE_C") - CHAOS_C_F0 )); }
-chaos_grew()  { [[ "$(lines_in "$PROBE_B")" -gt "$CHAOS_B_L0" && "$(lines_in "$PROBE_C")" -gt "$CHAOS_C_L0" ]]; }
+CHAOS_B_F0="$(fails_in "$PROBE_B")"; CHAOS_C_F0="$(fails_in "$PROBE_C")"; CHAOS_D_F0="$(fails_in "$PROBE_D")"
+CHAOS_B_L0="$(lines_in "$PROBE_B")"; CHAOS_C_L0="$(lines_in "$PROBE_C")"; CHAOS_D_L0="$(lines_in "$PROBE_D")"
+chaos_fails() {
+  echo $(( $(fails_in "$PROBE_B") - CHAOS_B_F0 \
+         + $(fails_in "$PROBE_C") - CHAOS_C_F0 \
+         + $(fails_in "$PROBE_D") - CHAOS_D_F0 ))
+}
+chaos_grew() {
+  [[ "$(lines_in "$PROBE_B")" -gt "$CHAOS_B_L0" && "$(lines_in "$PROBE_C")" -gt "$CHAOS_C_L0" \
+     && "$(lines_in "$PROBE_D")" -gt "$CHAOS_D_L0" ]]
+}
 DRAIN_NODE=""
 for cand in node-2 node-3 node-1; do
   [[ "$cand" == "$A_NODE" ]] && continue
-  "$KLITE" get instances | awk -v n="$cand" '($2=="b" || $2=="c") && $3==n' | grep -q . && { DRAIN_NODE="$cand"; break; }
+  "$KLITE" get instances | awk -v n="$cand" '($2=="b" || $2=="c" || $2=="d") && $3==n' | grep -q . && { DRAIN_NODE="$cand"; break; }
 done
 [[ -n "$DRAIN_NODE" ]] || die "no node hosting b or c apart from a's own"
 info "draining $DRAIN_NODE (it hosts endpoints a is dialing right now)"
@@ -460,11 +479,11 @@ T0=$(date +%s)
 wait_for 15 survivor_leads \
   && pass "the survivor took leadership $(( $(date +%s) - T0 ))s after the kill (etcd lease election, ADR 0005)" \
   || die "survivor never logged 'controllers: leading'"
-b4c3() { counts_ready 4 3; }
-wait_for 90 b4c3 && pass "scale to 4 converged through the survivor alone" || die "post-kill convergence"
+b4() { counts_ready 4 3 4; }
+wait_for 90 b4 && pass "scale to 4 converged through the survivor alone" || die "post-kill convergence"
 show "$KLITE" --server "$SURV_EP" get instances
 show "$KLITE" scale workload b --replicas 2
-wait_for 90 steady && pass "and back down: the cluster rests at a=1, b=2, c=3" || die "scale b back to 2"
+wait_for 90 steady && pass "and back down: the cluster rests at a=1, b=2, c=3, d=4" || die "scale b back to 2"
 sleep 3
 [[ "$(chaos_fails)" == 0 ]] && chaos_grew \
   && pass "ZERO failed requests across drain + leader kill + both scales (the data plane never blinked)" \
@@ -493,10 +512,10 @@ pause
 info "cross-node traffic rides per-endpoint mTLS ingress ports (ADRs 0034, 0035):"
 # The beat before this one scaled b down, and the drained instances hold
 # their ports until deletion, so give the allocator a beat to settle.
-allocs_settled() { [[ "$("$KLITE" get ingressallocations 2>/dev/null | tail -n +2 | grep -c .)" == 6 ]]; }
-wait_for 60 allocs_settled || { "$KLITE" get ingressallocations; die "want 6 ingress allocations (a=1, b=2, c=3)"; }
+allocs_settled() { [[ "$("$KLITE" get ingressallocations 2>/dev/null | tail -n +2 | grep -c .)" == 10 ]]; }
+wait_for 60 allocs_settled || { "$KLITE" get ingressallocations; die "want 10 ingress allocations (a=1, b=2, c=3, d=4)"; }
 show "$KLITE" get ingressallocations
-pass "6 allocations while traffic flows (a=1, b=2, c=3), each inside its node's slice"
+pass "10 allocations while traffic flows (a=1, b=2, c=3, d=4), each inside its node's slice"
 
 B_PORT="$("$KLITE" get ingressallocations | awk '$2=="b" {print $5; exit}')"
 [[ -n "$B_PORT" ]] || die "no ingress port to probe"
@@ -515,13 +534,13 @@ STEP=finale
 # its way into at least one completed call.
 chatty_flowing() {
   local wl
-  for wl in a b c; do
+  for wl in a b c d; do
     docker ps --filter "label=io.klite.workload=$wl" --format '{{.Names}}' \
-      | xargs -I{} docker logs {} 2>/dev/null | grep -q '^-> [abc] ok$' || return 1
+      | xargs -I{} docker logs {} 2>/dev/null | grep -q '^-> [abcd] ok$' || return 1
   done
 }
 wait_for 90 chatty_flowing \
-  && pass "every app chats on its own: a, b, and c each completed a random call" \
+  && pass "every app chats on its own: a, b, c, and d each completed a random call" \
   || die "an app has not completed a single chatty call"
 info "a's chatter so far:"
 echo

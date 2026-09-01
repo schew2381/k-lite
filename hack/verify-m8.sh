@@ -81,11 +81,12 @@ infra_up() {
   done
 }
 
-counts_ready() { # a=1, b=<n>, c=2 all Ready
+counts_ready() { # a=1, b=<n>, c=3, d=4 all Ready
   local snap; snap="$("$KLITE" --server "$BOTH" get instances 2>/dev/null)"
   [[ "$(echo "$snap" | awk '$2=="a" && $4=="Ready"' | wc -l | tr -d ' ')" == 1 ]] || return 1
   [[ "$(echo "$snap" | awk '$2=="b" && $4=="Ready"' | wc -l | tr -d ' ')" == "$1" ]] || return 1
-  [[ "$(echo "$snap" | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == 2 ]]
+  [[ "$(echo "$snap" | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == 3 ]] || return 1
+  [[ "$(echo "$snap" | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == 4 ]]
 }
 
 # ============================================================
@@ -220,10 +221,10 @@ pass "infra containers labeled io.klite.cluster=$CLUSTER_ID"
 
 # ============================================================
 STEP=6-envoy-mtls
-for app in a-client b-whoami c-whoami; do
+for app in a-client b-whoami c-whoami d-web; do
   "$KLITE" --server "$BOTH" apply -f "examples/apps/$app.yaml" >/dev/null || die "apply $app.yaml"
 done
-wait_for 90 counts_ready 2 && pass "workloads a, b, c all Ready (probe-gated)" || die "workloads Ready"
+wait_for 90 counts_ready 2 && pass "workloads a, b, c, d all Ready (probe-gated)" || die "workloads Ready"
 
 for i in 1 2 3; do
   CS="$(curl -s --max-time 3 "127.0.0.1:$((19500 + i))/stats" 2>/dev/null | awk '/^control_plane.connected_state/ {print $2}')"

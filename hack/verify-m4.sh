@@ -64,11 +64,12 @@ infra_up() {
   done
 }
 
-# Ready instance counts per workload: a=1, b=2, c=2.
+# Ready instance counts per workload: a=1, b=2, c=3, d=4.
 all_ready() {
   [[ "$("$KLITE" get instances | awk '$2=="a" && $4=="Ready"' | wc -l | tr -d ' ')" == 1 ]] || return 1
   [[ "$("$KLITE" get instances | awk '$2=="b" && $4=="Ready"' | wc -l | tr -d ' ')" == 2 ]] || return 1
-  [[ "$("$KLITE" get instances | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == 2 ]]
+  [[ "$("$KLITE" get instances | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == 3 ]] || return 1
+  [[ "$("$KLITE" get instances | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == 4 ]]
 }
 
 # The seeded apps chat at random (a 5% roll per second, see examples/apps),
@@ -130,14 +131,14 @@ wait_for 60 infra_up \
   && pass "infra pods up on all nodes (klite.<n>.net + klite.<n>.envoy)" \
   || die "infra pods up on all nodes"
 
-# --- workloads a, b, c -------------------------------------------------------
-for app in a-client b-whoami c-whoami; do
+# --- workloads a, b, c, d ------------------------------------------------------
+for app in a-client b-whoami c-whoami d-web; do
   "$KLITE" apply -f "examples/apps/$app.yaml" >/dev/null || die "apply $app.yaml"
 done
-pass "applied a, b, c workloads and services"
+pass "applied a, b, c, d workloads and services"
 
 wait_for 90 all_ready \
-  && pass "all instances READY (a=1, b=2, c=2, probe-gated)" \
+  && pass "all instances READY (a=1, b=2, c=3, d=4, probe-gated)" \
   || { "$KLITE" get instances; die "all instances READY"; }
 
 A_INST="$("$KLITE" get instances | awk '$2=="a" {print $1}' | head -1)"
@@ -220,14 +221,14 @@ wait_for 30 b_answers_again \
 # is minutes old, so every workload should have landed at least one call.
 chatty_flowing() {
   local wl
-  for wl in a b c; do
+  for wl in a b c d; do
     docker ps --filter "label=io.klite.workload=$wl" --format '{{.Names}}' \
-      | xargs -I{} docker logs {} 2>/dev/null | grep -q '^-> [abc] ok$' || return 1
+      | xargs -I{} docker logs {} 2>/dev/null | grep -q '^-> [abcd] ok$' || return 1
   done
 }
 wait_for 90 chatty_flowing \
-  && pass "chatty traffic flows: a, b, and c each logged a '-> <target> ok' call" \
-  || die "a workload (a, b, or c) never completed a chatty call"
+  && pass "chatty traffic flows: a, b, c, and d each logged a '-> <target> ok' call" \
+  || die "a workload (a, b, c, or d) never completed a chatty call"
 
 echo
 echo "verify-m4: all steps passed (etcd, klite0, and images left in place)"

@@ -32,7 +32,7 @@ spec:
             done
         env:
           - name: TARGETS
-            value: a c
+            value: a c d
         ports:
           - containerPort: 80
         readinessProbe:

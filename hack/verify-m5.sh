@@ -84,13 +84,14 @@ one_infra_up() {
     && docker ps --format '{{.Names}}' | grep -qx "klite.$1.envoy"
 }
 
-# counts_ready <b-replicas>: a=1, b=<n>, c=2, all READY and nothing extra.
+# counts_ready <b-replicas>: a=1, b=<n>, c=3, d=4, all READY and nothing extra.
 counts_ready() {
   local snap; snap="$("$KLITE" get instances)"
   [[ "$(echo "$snap" | awk '$2=="a" && $4=="Ready"' | wc -l | tr -d ' ')" == 1 ]] || return 1
   [[ "$(echo "$snap" | awk '$2=="b"' | wc -l | tr -d ' ')" == "$1" ]] || return 1
   [[ "$(echo "$snap" | awk '$2=="b" && $4=="Ready"' | wc -l | tr -d ' ')" == "$1" ]] || return 1
-  [[ "$(echo "$snap" | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == 2 ]]
+  [[ "$(echo "$snap" | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == 3 ]] || return 1
+  [[ "$(echo "$snap" | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == 4 ]]
 }
 
 a_inst() { "$KLITE" get instances | awk '$2=="a" {print $1}' | head -1; }
@@ -198,17 +199,17 @@ wait_for 15 nodes_ready 3 \
 wait_for 60 infra_up \
   && pass "infra pods up on all nodes" || die "infra pods up on all nodes"
 
-# --- workloads a, b, c with fast drain knobs ----------------------------------
+# --- workloads a, b, c, d with fast drain knobs ---------------------------------
 # The example apps get the 4s/4s drain knobs (ADR 0010: demo pace lives in
 # YAML) and are applied once, so every instance is born with the fast drains.
-for app in a-client b-whoami c-whoami; do
+for app in a-client b-whoami c-whoami d-web; do
   patch_drain "examples/apps/$app.yaml" "$TMP/${app}-fast.yaml"
   "$KLITE" apply -f "$TMP/${app}-fast.yaml" >/dev/null || die "apply ${app}-fast.yaml"
 done
-pass "applied a, b, c with drain 4s/4s"
+pass "applied a, b, c, d with drain 4s/4s"
 
 wait_for 90 counts_ready 2 \
-  && pass "all instances READY (a=1, b=2, c=2)" \
+  && pass "all instances READY (a=1, b=2, c=3, d=4)" \
   || { "$KLITE" get instances; die "all instances READY"; }
 
 "$KLITE" scale workload b --replicas 3 >/dev/null || die "scale b to 3"
@@ -230,7 +231,7 @@ B_LINES0="$(lines_in "$PROBE_B")"
 # says 2, which would fold a scale-down into the rollout. The marker env var
 # changes the template hash without touching the chatty behavior.
 awk '{sub(/^  replicas: 2$/, "  replicas: 3"); print}
-     /^            value: a c$/ {print "          - name: M5_ROLLOUT"; print "            value: \"1\""}' \
+     /^            value: a c d$/ {print "          - name: M5_ROLLOUT"; print "            value: \"1\""}' \
   "$TMP/b-whoami-fast.yaml" > "$TMP/b-v2.yaml"
 grep -q 'M5_ROLLOUT' "$TMP/b-v2.yaml" && grep -q '^  replicas: 3$' "$TMP/b-v2.yaml" \
   || die "craft b-v2.yaml (env change at replicas 3)"
@@ -346,23 +347,23 @@ docker rm -f "klite.$DRAIN_NODE.net" "klite.$DRAIN_NODE.envoy" >/dev/null 2>&1
 pass "$DRAIN_NODE agent stopped and infra removed"
 
 # --- capacity-blocked fallback (informational: timing-sensitive) ---------------
-sed 's/maxInstances: 32/maxInstances: 5/' "examples/nodes/$DRAIN_NODE.yaml" > "$TMP/$DRAIN_NODE-cap5.yaml"
-"$KLITE" apply -f "$TMP/$DRAIN_NODE-cap5.yaml" >/dev/null || die "re-declare $DRAIN_NODE with maxInstances 5"
+sed 's/maxInstances: 32/maxInstances: 10/' "examples/nodes/$DRAIN_NODE.yaml" > "$TMP/$DRAIN_NODE-cap10.yaml"
+"$KLITE" apply -f "$TMP/$DRAIN_NODE-cap10.yaml" >/dev/null || die "re-declare $DRAIN_NODE with maxInstances 10"
 start_agent "$DRAIN_NODE"
 wait_for 30 nodes_ready 3 || warn "rejoined $DRAIN_NODE not Ready in 30s"
 wait_for 60 one_infra_up "$DRAIN_NODE" || warn "rejoined $DRAIN_NODE infra not up in 60s"
-pass "$DRAIN_NODE rejoined with capacity for exactly the 5 instances"
+pass "$DRAIN_NODE rejoined with capacity for exactly the 10 instances"
 
 for n in "${NODES[@]}"; do
   [[ "$n" == "$DRAIN_NODE" ]] && continue
   run_drain "$TMP/drain-$n.log" "$n" || warn "drain $n did not complete (see $TMP/drain-$n.log)"
 done
 wait_for 30 all_on "$DRAIN_NODE" \
-  && pass "all instances consolidated on $DRAIN_NODE (5/5, no headroom)" \
+  && pass "all instances consolidated on $DRAIN_NODE (10/10, no headroom)" \
   || warn "instances did not consolidate on $DRAIN_NODE"
 
 start_probes # a moved during the consolidation drains, so rebind the loops
-awk '{print} /^            value: a b$/ {print "          - name: M5_ROLLOUT"; print "            value: \"1\""}' \
+awk '{print} /^            value: a b d$/ {print "          - name: M5_ROLLOUT"; print "            value: \"1\""}' \
   "$TMP/c-whoami-fast.yaml" > "$TMP/c-v2.yaml"
 OLD_C="$("$KLITE" get instances | awk '$2=="c" {print $1}' | sort)"
 C_FAILS0="$(fails_in "$PROBE_C")"
@@ -374,8 +375,8 @@ wait_for 90 fallback_logged \
   || warn "fallback log line not seen in 90s"
 c_converged() {
   local snap; snap="$("$KLITE" get instances | awk '$2=="c" {print $1, $4}')"
-  [[ "$(echo "$snap" | grep -c '[^ ]')" == 2 ]] || return 1
-  [[ "$(echo "$snap" | awk '$2=="Ready"' | wc -l | tr -d ' ')" == 2 ]] || return 1
+  [[ "$(echo "$snap" | grep -c '[^ ]')" == 3 ]] || return 1
+  [[ "$(echo "$snap" | awk '$2=="Ready"' | wc -l | tr -d ' ')" == 3 ]] || return 1
   ! echo "$snap" | awk '{print $1}' | grep -qxF -f <(echo "$OLD_C")
 }
 wait_for 180 c_converged \
