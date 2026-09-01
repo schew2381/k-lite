@@ -61,7 +61,7 @@ h2{font-size:clamp(26px,3.6vw,36px);font-weight:760}
 .lede code, p code, li code, td code{font-family:var(--mono);font-size:.86em;background:rgba(43,42,36,.06);padding:1px 5px;border-radius:4px}
 .takeaway{font-family:var(--mono);font-size:12.5px;color:var(--ink-soft);margin:14px 0 0;max-width:86ch}
 
-/* ADR chips */
+/* record chips */
 .adrs{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 0}
 .adrchip{
   font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;color:var(--ctrl);
@@ -158,6 +158,8 @@ table.truth td.bad{color:var(--deny);font-weight:700}
 
 /* plain tight bullets */
 ul.plain{margin:10px 0 0;padding-left:20px;max-width:78ch}
+p.audit{margin-left:18px}
+ul.plain.audit{margin-left:18px}
 ul.plain li{margin:4px 0;font-size:14px;color:#3c3b33}
 
 /* numbered join steps */
@@ -285,29 +287,30 @@ footer .mono{font-family:var(--mono);font-size:12px}
       <li><b>nginx</b> — reload-based config, wrong for per-second endpoint churn</li>
       <li><b>Linkerd</b> — effectively requires Kubernetes underneath</li>
       <li><b>Envoy</b> — drains, balancing, hitless config over an open protocol (xDS)</li>
-      <li><b>Cilium</b> — eBPF in the Linux kernel, no story on a macOS-hosted cluster</li>
+      <li><b>Cilium</b> — load balancing and policy compile into eBPF programs inside the Linux kernel, and it's built as a Kubernetes CNI plugin. That replaces the exact layer this project exists to build by hand, and kernel-level packet steering is invisible where k-lite wants every mechanism watchable</li>
       <li><b>Istio</b> — same: needs Kubernetes under it</li>
-      <li><b>Traefik / Caddy / Consul</b> (rest of ADR 0007) — static listeners where per-VIP listeners must appear at runtime · a second raft-and-gossip system bigger than k-lite</li>
+      <li><b>Traefik / Caddy</b> — routing rules are dynamic, but the listening addresses are fixed at startup. k-lite needs a new VIP listener to appear at runtime every time a Service lands on a node, and both would still need our DNS server running beside them</li>
+      <li><b>Consul</b> — discovery and policy in one tool, but it brings its own raft consensus and gossip cluster. That's a second distributed system bigger than k-lite itself, doing the job etcd already does</li>
     </ul>
     <p>Agent chose: <b>custom L4 proxy, with Envoy as the documented swap</b>.</p>
 
     <h3 class="sub">2 · Auditing agent decisions</h3>
-    <p><b>custom L4 proxy → choosing Envoy</b></p>
-    <ul class="plain">
+    <p class="audit"><b>a · custom L4 proxy → choosing Envoy</b></p>
+    <ul class="plain audit">
       <li>learning about the xDS gRPC protocols pushed toward it</li>
       <li>easy-to-use open standard</li>
     </ul>
-    <p><b>choosing bbolt originally → using etcd</b></p>
-    <ul class="plain">
+    <p class="audit"><b>b · choosing bbolt originally → using etcd</b></p>
+    <ul class="plain audit">
       <li>want a robust, battle-tested system that mirrors k8s</li>
     </ul>
-    <p><b>peer-to-peer internet communication over Wi-Fi to mimic the real thing → Tailscale as the mesh VPN</b></p>
-    <ul class="plain">
+    <p class="audit"><b>c · peer-to-peer internet communication over Wi-Fi to mimic the real thing → Tailscale as the mesh VPN</b></p>
+    <ul class="plain audit">
       <li>deferred the harder implementation until later</li>
       <li>pushed the agent to actually research and complete a full working model (slide 11)</li>
     </ul>
-    <p><b>bad design for UI</b></p>
-    <ul class="plain">
+    <p class="audit"><b>d · bad design for UI</b></p>
+    <ul class="plain audit">
       <li>more subjective, but good taste in the live UI</li>
       <li>pull from real-world examples like turbopuffer + raft/paxos visualizations</li>
     </ul>
@@ -371,7 +374,7 @@ spec:
   nodeName: <span class="y">node-2</span>     <span class="c"># optional pin — skips the scheduler</span>
   template:
     labels: { app: b } <span class="c"># what Service selectors match</span>
-    containers:        <span class="c"># exactly one (ADR 0014)</span>
+    containers:        <span class="c"># exactly one container</span>
       - name: web
         image: busybox:1.36
         command: ["/bin/sh", "-c"]
@@ -436,7 +439,7 @@ spec:
 <section id="loop">
   <div class="wrap">
     <p class="eyebrow"><b>05</b>declare → converge</p>
-    <h2>One apply, six hand-offs, ~180 ms</h2>
+    <h2>Making changes and converging using reconciliation</h2>
     <p class="lede">
       Nothing executes your YAML. Watch-loops converge on it — each owns one step, none call each other,
       and the objects are the only coordination.
@@ -466,7 +469,7 @@ spec:
     <p class="eyebrow"><b>06</b>service discovery</p>
     <h2>Names resolve to a proxy, not an instance</h2>
     <div class="decs">
-      <div class="dec yes"><span class="opt">own DNS + a VIP per (Service, Node)</span><span class="why">each node's instances hear their own node's answer — churn hides behind a fixed address</span><span class="tag">ADR 0006</span></div>
+      <div class="dec yes"><span class="opt">own DNS + a VIP per (Service, Node)</span><span class="why">each node's instances hear their own node's answer — churn hides behind a fixed address</span><span class="tag">chosen</span></div>
     </div>
 
     <div class="boardbox" style="margin-top:18px">
@@ -488,13 +491,13 @@ spec:
 
     <div class="split">
       <div>
-        <p class="filetag">on this machine — one button (ADR 0040)</p>
+        <p class="filetag">on this machine — one button in the UI</p>
         <div class="codepane"><span class="c"># the UI's join dialog: the facade starts</span>
 <span class="c"># the agent itself, right where klited runs</span>
 klite-agent --node node-5 --token K10…</div>
       </div>
       <div>
-        <p class="filetag">over the internet — printed by klite node add (ADR 0038)</p>
+        <p class="filetag">over the internet — printed by klite node add</p>
         <div class="codepane">curl -sfL https://…/join.sh | \
   KLITE_URL=<span class="g">203.0.113.7:7443</span> \
   KLITE_TOKEN='K10…' KLITE_NODE=node-5 sh -
@@ -546,7 +549,7 @@ klite-agent --node node-5 --token K10…</div>
     <p class="eyebrow"><b>09</b>crossing machines</p>
     <h2>Remote endpoints become machine:port, behind proxy mTLS</h2>
     <p class="lede">
-      Cross-machine traffic was deliberately deferred (ADR 0016), then landed as the smallest honest
+      Cross-machine traffic was deliberately deferred, then landed as the smallest honest
       design: when the picked endpoint lives elsewhere, EDS hands over
       <code>advertiseAddress:ingressPort</code> instead of an instance IP.
     </p>
@@ -555,7 +558,7 @@ klite-agent --node node-5 --token K10…</div>
       <div class="dec no"><span class="opt">published ports, plaintext</span><span class="why">smallest change — every cross-node byte readable, no peer authenticated</span><span class="tag">rejected</span></div>
       <div class="dec no"><span class="opt">WireGuard mesh now</span><span class="why">real encryption + NAT traversal, at the price of key lifecycles, MTU, rendezvous — recorded as step two</span><span class="tag">deferred</span></div>
       <div class="dec no"><span class="opt">relay through klited</span><span class="why">the control plane must never sit in the data path</span><span class="tag">rejected</span></div>
-      <div class="dec yes"><span class="opt">published ports behind node-cert mTLS</span><span class="why">the join identity reused wholesale · ports live as stored allocations · listeners follow allocations, not health, so drains stay hitless</span><span class="tag">ADR 0034 · 0035</span></div>
+      <div class="dec yes"><span class="opt">published ports behind node-cert mTLS</span><span class="why">the join identity reused wholesale · ports live as stored allocations · listeners follow allocations, not health, so drains stay hitless</span><span class="tag">chosen</span></div>
     </div>
 
     <div class="boardbox" style="margin-top:18px">
@@ -623,8 +626,8 @@ curl -sfL https://…/join.sh | \
       <div class="dec no"><span class="opt">self-hosted headscale</span><span class="why">drops the account, but the coordinator needs exactly the public endpoint whose absence motivates this</span><span class="tag">rejected as default</span></div>
       <div class="dec no"><span class="opt">single-hub WireGuard</span><span class="why">no account, one udp/51820 forward total — spoke traffic hairpins through the hub, keys move by hand</span><span class="tag">recorded variant</span></div>
       <div class="dec no"><span class="opt">IPv6 end to end</span><span class="why">no NAT, no traversal — and no cluster has run it; an unexercised raw path</span><span class="tag">recorded</span></div>
-      <div class="dec no"><span class="opt">native reverse tunnels</span><span class="why">klited is already everyone's dial target — but that's a relay in the data path, the thing ADR 0034 refused</span><span class="tag">future</span></div>
-      <div class="dec yes"><span class="opt">a Tailscale tailnet</span><span class="why">both ends dial out, DERP relays carry what hole-punching can't, and k-lite changes zero lines — the tailnet IP is simply what nodes advertise and what klited serves. k3s ships the same integration shape, marked experimental</span><span class="tag">ADR 0043</span></div>
+      <div class="dec no"><span class="opt">native reverse tunnels</span><span class="why">klited is already everyone's dial target — but that's a relay in the data path, the one thing the design refuses</span><span class="tag">future</span></div>
+      <div class="dec yes"><span class="opt">a Tailscale tailnet</span><span class="why">both ends dial out, DERP relays carry what hole-punching can't, and k-lite changes zero lines — the tailnet IP is simply what nodes advertise and what klited serves. k3s ships the same integration shape, marked experimental</span><span class="tag">chosen</span></div>
     </div>
 
     <div class="split">
@@ -733,7 +736,7 @@ curl -sfL https://…/join.sh | \
 
 <footer>
   <div class="wrap">
-    <span>k-lite — drawn from the ADRs, CONTEXT.md, and the code at the time of writing. When this page and an ADR disagree, the ADR wins. When code and an ADR disagree, the code is wrong.</span>
+    <span>k-lite — drawn from the decision records, CONTEXT.md, and the code at the time of writing. When this page and the records disagree, the records win. When code and the records disagree, the code is wrong.</span>
     <span class="mono"><span style="color:var(--ctrl)">control</span> · <span style="color:var(--data)">traffic</span> · <span style="color:var(--deny)">policy</span></span>
   </div>
 </footer>
@@ -1088,7 +1091,7 @@ function makeScene(svgId, vw, vh){
   sc.rect(230, 210, 190, 52, { rx:9, sw:1.7, dash:"6 5" });
   sc.txt(325, 231, "envoy admins :19500+n", { size:9.5, anchor:"middle", cls:"mono" });
   sc.txt(325, 247, "/clusters counters", { size:9, anchor:"middle", cls:"mono soft" });
-  sc.arrow("M 424 236 C 480 236, 520 200, 560 170", { sw:1.9, stroke:C.data, label:"traffic: counter deltas, polled 1s (ADR 0041)", lx:436, ly:280, lsize:9.5, lcolor:C.data });
+  sc.arrow("M 424 236 C 480 236, 520 200, 560 170", { sw:1.9, stroke:C.data, label:"traffic: counter deltas, polled 1s", lx:436, ly:280, lsize:9.5, lcolor:C.data });
 
 
 })();
