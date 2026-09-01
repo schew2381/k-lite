@@ -19,6 +19,10 @@ message RegisterRequest {
   string node = 1;
   string cluster_token = 2; // join secret; optional when the caller holds a node cert
   bytes csr_pem = 3; // join CSR; the response returns it signed (ADR 0013)
+  // Machine address other nodes dial for this node's ingress ports (ADR
+  // 0024), when the agent already knows it as a literal IP. Hostnames
+  // resolve later, against the donor, and arrive via ReportStatus instead.
+  string advertise_address = 4;
 }
 
 message NetBootstrap {
@@ -32,6 +36,11 @@ message NetBootstrap {
   string cluster_id = 5;
   int32 net_admin_port_base = 6; // 0 means the 19000 default
   int32 envoy_admin_port_base = 7; // 0 means the 19500 default
+  // Cross-node ingress range (ADR 0024): the donor publishes host ports
+  // [base + per_node*(index-1), base + per_node*index) at creation. Both
+  // arrive resolved; zero means the server predates M9 and no range exists.
+  int32 ingress_port_base = 8;
+  int32 ingress_ports_per_node = 9;
 }
 
 message RegisterResponse {
@@ -68,8 +77,12 @@ enum EndpointHealth {
 message Endpoint {
   string ip = 1;
   int32 port = 2;
-  string node = 3; // carried for the future cross-machine dialer (ADR 0016)
+  string node = 3; // consumers compare it to their own name: remote endpoints dial ingress (ADR 0024)
   EndpointHealth health = 4;
+  // How OTHER nodes reach this endpoint: the owning node's advertised IP
+  // and its mTLS ingress port. The owning node keeps dialing ip:port raw.
+  int32 ingress_port = 5;
+  string machine_address = 6;
 }
 
 message EndpointGroup {
@@ -119,6 +132,11 @@ message ReportStatusRequest {
   string node = 1;
   repeated InstanceStatusUpdate instances = 2;
   KliteNetStatus klite_net = 3;
+  // Resolved advertise IP (ADR 0024), once the agent knows it. Hostname
+  // flags resolve against the donor's /etc/hosts, which exists only after
+  // the infra pod converges — later than Register. Empty leaves the stored
+  // value alone.
+  string advertise_address = 4;
 }
 
 message ReportStatusResponse {}

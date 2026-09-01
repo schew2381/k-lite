@@ -101,6 +101,10 @@ message NodeStatus {
   int64 last_heartbeat_unix = 3;
   int32 node_index = 4; // assigned at registration, drives IPAM
   int32 instance_count = 5;
+  // The machine address other nodes' proxies dial to reach this node's
+  // ingress listeners (ADR 0024). Always a literal IP: the agent resolves
+  // its --advertise-address before reporting, because EDS rejects hostnames.
+  string advertise_address = 6;
 }
 
 message Node {
@@ -180,6 +184,21 @@ message VIPAllocation {
   VIPAllocationSpec spec = 2;
 }
 
+// ---- IngressAllocation (server-materialized, one per (Service, Instance)
+// endpoint, ADR 0024) ----
+
+message IngressAllocationSpec {
+  string service = 1;
+  string instance = 2;
+  string node = 3; // owns the published range the port comes from
+  int32 port = 4; // host-published mTLS ingress port, fixed for the endpoint's lifetime
+}
+
+message IngressAllocation {
+  Meta meta = 1; // name is "<service>.<instance>"
+  IngressAllocationSpec spec = 2;
+}
+
 // ---- Generic envelope for Apply/List/Watch ----
 
 message Object {
@@ -190,5 +209,6 @@ message Object {
     NetworkPolicy network_policy = 4;
     Instance instance = 5;
     VIPAllocation vip_allocation = 6;
+    IngressAllocation ingress_allocation = 7;
   }
 }

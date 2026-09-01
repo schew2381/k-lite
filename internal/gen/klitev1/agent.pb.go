@@ -71,12 +71,16 @@ func (EndpointHealth) EnumDescriptor() ([]byte, []int) {
 }
 
 type RegisterRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Node          string                 `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
-	ClusterToken  string                 `protobuf:"bytes,2,opt,name=cluster_token,json=clusterToken,proto3" json:"cluster_token,omitempty"` // join secret; optional when the caller holds a node cert
-	CsrPem        []byte                 `protobuf:"bytes,3,opt,name=csr_pem,json=csrPem,proto3" json:"csr_pem,omitempty"`                   // join CSR; the response returns it signed (ADR 0013)
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Node         string                 `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
+	ClusterToken string                 `protobuf:"bytes,2,opt,name=cluster_token,json=clusterToken,proto3" json:"cluster_token,omitempty"` // join secret; optional when the caller holds a node cert
+	CsrPem       []byte                 `protobuf:"bytes,3,opt,name=csr_pem,json=csrPem,proto3" json:"csr_pem,omitempty"`                   // join CSR; the response returns it signed (ADR 0013)
+	// Machine address other nodes dial for this node's ingress ports (ADR
+	// 0024), when the agent already knows it as a literal IP. Hostnames
+	// resolve later, against the donor, and arrive via ReportStatus instead.
+	AdvertiseAddress string `protobuf:"bytes,4,opt,name=advertise_address,json=advertiseAddress,proto3" json:"advertise_address,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RegisterRequest) Reset() {
@@ -130,6 +134,13 @@ func (x *RegisterRequest) GetCsrPem() []byte {
 	return nil
 }
 
+func (x *RegisterRequest) GetAdvertiseAddress() string {
+	if x != nil {
+		return x.AdvertiseAddress
+	}
+	return ""
+}
+
 type NetBootstrap struct {
 	state      protoimpl.MessageState `protogen:"open.v1"`
 	Subnet     string                 `protobuf:"bytes,1,opt,name=subnet,proto3" json:"subnet,omitempty"`                             // 10.44.0.0/16
@@ -142,8 +153,13 @@ type NetBootstrap struct {
 	ClusterId          string `protobuf:"bytes,5,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
 	NetAdminPortBase   int32  `protobuf:"varint,6,opt,name=net_admin_port_base,json=netAdminPortBase,proto3" json:"net_admin_port_base,omitempty"`       // 0 means the 19000 default
 	EnvoyAdminPortBase int32  `protobuf:"varint,7,opt,name=envoy_admin_port_base,json=envoyAdminPortBase,proto3" json:"envoy_admin_port_base,omitempty"` // 0 means the 19500 default
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Cross-node ingress range (ADR 0024): the donor publishes host ports
+	// [base + per_node*(index-1), base + per_node*index) at creation. Both
+	// arrive resolved; zero means the server predates M9 and no range exists.
+	IngressPortBase     int32 `protobuf:"varint,8,opt,name=ingress_port_base,json=ingressPortBase,proto3" json:"ingress_port_base,omitempty"`
+	IngressPortsPerNode int32 `protobuf:"varint,9,opt,name=ingress_ports_per_node,json=ingressPortsPerNode,proto3" json:"ingress_ports_per_node,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *NetBootstrap) Reset() {
@@ -221,6 +237,20 @@ func (x *NetBootstrap) GetNetAdminPortBase() int32 {
 func (x *NetBootstrap) GetEnvoyAdminPortBase() int32 {
 	if x != nil {
 		return x.EnvoyAdminPortBase
+	}
+	return 0
+}
+
+func (x *NetBootstrap) GetIngressPortBase() int32 {
+	if x != nil {
+		return x.IngressPortBase
+	}
+	return 0
+}
+
+func (x *NetBootstrap) GetIngressPortsPerNode() int32 {
+	if x != nil {
+		return x.IngressPortsPerNode
 	}
 	return 0
 }
@@ -474,13 +504,17 @@ func (x *ServiceVIP) GetTargetPort() int32 {
 }
 
 type Endpoint struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ip            string                 `protobuf:"bytes,1,opt,name=ip,proto3" json:"ip,omitempty"`
-	Port          int32                  `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	Node          string                 `protobuf:"bytes,3,opt,name=node,proto3" json:"node,omitempty"` // carried for the future cross-machine dialer (ADR 0016)
-	Health        EndpointHealth         `protobuf:"varint,4,opt,name=health,proto3,enum=klite.v1.EndpointHealth" json:"health,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Ip     string                 `protobuf:"bytes,1,opt,name=ip,proto3" json:"ip,omitempty"`
+	Port   int32                  `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	Node   string                 `protobuf:"bytes,3,opt,name=node,proto3" json:"node,omitempty"` // consumers compare it to their own name: remote endpoints dial ingress (ADR 0024)
+	Health EndpointHealth         `protobuf:"varint,4,opt,name=health,proto3,enum=klite.v1.EndpointHealth" json:"health,omitempty"`
+	// How OTHER nodes reach this endpoint: the owning node's advertised IP
+	// and its mTLS ingress port. The owning node keeps dialing ip:port raw.
+	IngressPort    int32  `protobuf:"varint,5,opt,name=ingress_port,json=ingressPort,proto3" json:"ingress_port,omitempty"`
+	MachineAddress string `protobuf:"bytes,6,opt,name=machine_address,json=machineAddress,proto3" json:"machine_address,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Endpoint) Reset() {
@@ -539,6 +573,20 @@ func (x *Endpoint) GetHealth() EndpointHealth {
 		return x.Health
 	}
 	return EndpointHealth_ENDPOINT_HEALTH_UNSPECIFIED
+}
+
+func (x *Endpoint) GetIngressPort() int32 {
+	if x != nil {
+		return x.IngressPort
+	}
+	return 0
+}
+
+func (x *Endpoint) GetMachineAddress() string {
+	if x != nil {
+		return x.MachineAddress
+	}
+	return ""
 }
 
 type EndpointGroup struct {
@@ -923,12 +971,17 @@ func (x *KliteNetStatus) GetAdminPort() int32 {
 // Unary on purpose: a client stream would hide send failures until the
 // next Recv (research/grpc-go.md). Doubles as the 5s heartbeat.
 type ReportStatusRequest struct {
-	state         protoimpl.MessageState  `protogen:"open.v1"`
-	Node          string                  `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
-	Instances     []*InstanceStatusUpdate `protobuf:"bytes,2,rep,name=instances,proto3" json:"instances,omitempty"`
-	KliteNet      *KliteNetStatus         `protobuf:"bytes,3,opt,name=klite_net,json=kliteNet,proto3" json:"klite_net,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState  `protogen:"open.v1"`
+	Node      string                  `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
+	Instances []*InstanceStatusUpdate `protobuf:"bytes,2,rep,name=instances,proto3" json:"instances,omitempty"`
+	KliteNet  *KliteNetStatus         `protobuf:"bytes,3,opt,name=klite_net,json=kliteNet,proto3" json:"klite_net,omitempty"`
+	// Resolved advertise IP (ADR 0024), once the agent knows it. Hostname
+	// flags resolve against the donor's /etc/hosts, which exists only after
+	// the infra pod converges — later than Register. Empty leaves the stored
+	// value alone.
+	AdvertiseAddress string `protobuf:"bytes,4,opt,name=advertise_address,json=advertiseAddress,proto3" json:"advertise_address,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ReportStatusRequest) Reset() {
@@ -980,6 +1033,13 @@ func (x *ReportStatusRequest) GetKliteNet() *KliteNetStatus {
 		return x.KliteNet
 	}
 	return nil
+}
+
+func (x *ReportStatusRequest) GetAdvertiseAddress() string {
+	if x != nil {
+		return x.AdvertiseAddress
+	}
+	return ""
 }
 
 type ReportStatusResponse struct {
@@ -1357,11 +1417,12 @@ var File_klite_v1_agent_proto protoreflect.FileDescriptor
 
 const file_klite_v1_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x14klite/v1/agent.proto\x12\bklite.v1\x1a\x16klite/v1/objects.proto\"c\n" +
+	"\x14klite/v1/agent.proto\x12\bklite.v1\x1a\x16klite/v1/objects.proto\"\x90\x01\n" +
 	"\x0fRegisterRequest\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12#\n" +
 	"\rcluster_token\x18\x02 \x01(\tR\fclusterToken\x12\x17\n" +
-	"\acsr_pem\x18\x03 \x01(\fR\x06csrPem\"\x85\x02\n" +
+	"\acsr_pem\x18\x03 \x01(\fR\x06csrPem\x12+\n" +
+	"\x11advertise_address\x18\x04 \x01(\tR\x10advertiseAddress\"\xe6\x02\n" +
 	"\fNetBootstrap\x12\x16\n" +
 	"\x06subnet\x18\x01 \x01(\tR\x06subnet\x12 \n" +
 	"\fklite_net_ip\x18\x02 \x01(\tR\n" +
@@ -1372,7 +1433,9 @@ const file_klite_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"cluster_id\x18\x05 \x01(\tR\tclusterId\x12-\n" +
 	"\x13net_admin_port_base\x18\x06 \x01(\x05R\x10netAdminPortBase\x121\n" +
-	"\x15envoy_admin_port_base\x18\a \x01(\x05R\x12envoyAdminPortBase\"\x8d\x01\n" +
+	"\x15envoy_admin_port_base\x18\a \x01(\x05R\x12envoyAdminPortBase\x12*\n" +
+	"\x11ingress_port_base\x18\b \x01(\x05R\x0fingressPortBase\x123\n" +
+	"\x16ingress_ports_per_node\x18\t \x01(\x05R\x13ingressPortsPerNode\"\x8d\x01\n" +
 	"\x10RegisterResponse\x12\x1d\n" +
 	"\n" +
 	"node_token\x18\x01 \x01(\tR\tnodeToken\x12\x19\n" +
@@ -1392,12 +1455,14 @@ const file_klite_v1_agent_proto_rawDesc = "" +
 	"\x03vip\x18\x02 \x01(\tR\x03vip\x12\x12\n" +
 	"\x04port\x18\x03 \x01(\x05R\x04port\x12\x1f\n" +
 	"\vtarget_port\x18\x04 \x01(\x05R\n" +
-	"targetPort\"t\n" +
+	"targetPort\"\xc0\x01\n" +
 	"\bEndpoint\x12\x0e\n" +
 	"\x02ip\x18\x01 \x01(\tR\x02ip\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
 	"\x04node\x18\x03 \x01(\tR\x04node\x120\n" +
-	"\x06health\x18\x04 \x01(\x0e2\x18.klite.v1.EndpointHealthR\x06health\"[\n" +
+	"\x06health\x18\x04 \x01(\x0e2\x18.klite.v1.EndpointHealthR\x06health\x12!\n" +
+	"\fingress_port\x18\x05 \x01(\x05R\vingressPort\x12'\n" +
+	"\x0fmachine_address\x18\x06 \x01(\tR\x0emachineAddress\"[\n" +
 	"\rEndpointGroup\x12\x18\n" +
 	"\aservice\x18\x01 \x01(\tR\aservice\x120\n" +
 	"\tendpoints\x18\x02 \x03(\v2\x12.klite.v1.EndpointR\tendpoints\"\x9d\x01\n" +
@@ -1430,11 +1495,12 @@ const file_klite_v1_agent_proto_rawDesc = "" +
 	"\x0eKliteNetStatus\x12\x18\n" +
 	"\ahealthy\x18\x01 \x01(\bR\ahealthy\x12\x1d\n" +
 	"\n" +
-	"admin_port\x18\x02 \x01(\x05R\tadminPort\"\x9e\x01\n" +
+	"admin_port\x18\x02 \x01(\x05R\tadminPort\"\xcb\x01\n" +
 	"\x13ReportStatusRequest\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12<\n" +
 	"\tinstances\x18\x02 \x03(\v2\x1e.klite.v1.InstanceStatusUpdateR\tinstances\x125\n" +
-	"\tklite_net\x18\x03 \x01(\v2\x18.klite.v1.KliteNetStatusR\bkliteNet\"\x16\n" +
+	"\tklite_net\x18\x03 \x01(\v2\x18.klite.v1.KliteNetStatusR\bkliteNet\x12+\n" +
+	"\x11advertise_address\x18\x04 \x01(\tR\x10advertiseAddress\"\x16\n" +
 	"\x14ReportStatusResponse\"+\n" +
 	"\x15StreamCommandsRequest\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\"U\n" +

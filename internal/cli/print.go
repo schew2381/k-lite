@@ -59,13 +59,9 @@ func printTable(w io.Writer, kind string, objs []*klitev1.Object) error {
 				formatRules(p.GetSpec().GetRules()))
 		}
 	case object.KindVIPAllocation:
-		fmt.Fprintln(tw, "NAME\tSERVICE\tNODE\tVIP")
-		for _, o := range objs {
-			v := o.GetVipAllocation()
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
-				v.GetMeta().GetName(),
-				v.GetSpec().GetService(), v.GetSpec().GetNode(), v.GetSpec().GetVip())
-		}
+		printVIPAllocations(tw, objs)
+	case object.KindIngressAllocation:
+		printIngressAllocations(tw, objs)
 	case object.KindInstance:
 		fmt.Fprintln(tw, "NAME\tWORKLOAD\tNODE\tPHASE\tRESTARTS\tIP\tAGE")
 		for _, o := range objs {
@@ -82,6 +78,27 @@ func printTable(w io.Writer, kind string, objs []*klitev1.Object) error {
 		return fmt.Errorf("no table renderer for kind %q", kind)
 	}
 	return nil
+}
+
+func printVIPAllocations(tw io.Writer, objs []*klitev1.Object) {
+	fmt.Fprintln(tw, "NAME\tSERVICE\tNODE\tVIP")
+	for _, o := range objs {
+		v := o.GetVipAllocation()
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+			v.GetMeta().GetName(),
+			v.GetSpec().GetService(), v.GetSpec().GetNode(), v.GetSpec().GetVip())
+	}
+}
+
+func printIngressAllocations(tw io.Writer, objs []*klitev1.Object) {
+	fmt.Fprintln(tw, "NAME\tSERVICE\tINSTANCE\tNODE\tPORT")
+	for _, o := range objs {
+		ia := o.GetIngressAllocation()
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\n",
+			ia.GetMeta().GetName(),
+			ia.GetSpec().GetService(), ia.GetSpec().GetInstance(),
+			ia.GetSpec().GetNode(), ia.GetSpec().GetPort())
+	}
 }
 
 // phase turns an enum value name into display form: NODE_PHASE_NOT_READY becomes NotReady.

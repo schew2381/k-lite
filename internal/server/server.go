@@ -118,7 +118,7 @@ func (s *Cluster) Apply(ctx context.Context, req *klitev1.ApplyRequest) (*klitev
 func (s *Cluster) applyOne(ctx context.Context, o *klitev1.Object) *klitev1.ApplyResult {
 	kind := object.KindOf(o)
 	res := &klitev1.ApplyResult{Kind: kind, Name: object.MetaOf(o).GetName()}
-	if kind == object.KindInstance || kind == object.KindVIPAllocation {
+	if kind == object.KindInstance || kind == object.KindVIPAllocation || kind == object.KindIngressAllocation {
 		res.Error = strings.ToLower(object.Plural(kind)) + " are server-materialized and read-only"
 		return res
 	}

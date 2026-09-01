@@ -10,16 +10,17 @@ import (
 
 // The canonical kind names match the YAML `kind:` field and the CONTEXT.md vocabulary.
 const (
-	KindWorkload      = "Workload"
-	KindService       = "Service"
-	KindNode          = "Node"
-	KindNetworkPolicy = "NetworkPolicy"
-	KindInstance      = "Instance"
-	KindVIPAllocation = "VIPAllocation"
+	KindWorkload          = "Workload"
+	KindService           = "Service"
+	KindNode              = "Node"
+	KindNetworkPolicy     = "NetworkPolicy"
+	KindInstance          = "Instance"
+	KindVIPAllocation     = "VIPAllocation"
+	KindIngressAllocation = "IngressAllocation"
 )
 
 // Kinds lists every canonical kind.
-var Kinds = []string{KindWorkload, KindService, KindNode, KindNetworkPolicy, KindInstance, KindVIPAllocation}
+var Kinds = []string{KindWorkload, KindService, KindNode, KindNetworkPolicy, KindInstance, KindVIPAllocation, KindIngressAllocation}
 
 // LabelPendingDelete marks a Node whose deletion waits on its drain: the
 // server sets it instead of deleting outright, and the node controller
@@ -28,12 +29,13 @@ var Kinds = []string{KindWorkload, KindService, KindNode, KindNetworkPolicy, Kin
 const LabelPendingDelete = "klite.io/pending-delete"
 
 var plurals = map[string]string{
-	KindWorkload:      "workloads",
-	KindService:       "services",
-	KindNode:          "nodes",
-	KindNetworkPolicy: "networkpolicies",
-	KindInstance:      "instances",
-	KindVIPAllocation: "vipallocations",
+	KindWorkload:          "workloads",
+	KindService:           "services",
+	KindNode:              "nodes",
+	KindNetworkPolicy:     "networkpolicies",
+	KindInstance:          "instances",
+	KindVIPAllocation:     "vipallocations",
+	KindIngressAllocation: "ingressallocations",
 }
 
 var aliases = func() map[string]string {
@@ -73,6 +75,8 @@ func New(kind string) (*klitev1.Object, error) {
 		return &klitev1.Object{Kind: &klitev1.Object_Instance{Instance: &klitev1.Instance{}}}, nil
 	case KindVIPAllocation:
 		return &klitev1.Object{Kind: &klitev1.Object_VipAllocation{VipAllocation: &klitev1.VIPAllocation{}}}, nil
+	case KindIngressAllocation:
+		return &klitev1.Object{Kind: &klitev1.Object_IngressAllocation{IngressAllocation: &klitev1.IngressAllocation{}}}, nil
 	}
 	return nil, fmt.Errorf("unknown kind %q", kind)
 }
@@ -92,6 +96,8 @@ func KindOf(o *klitev1.Object) string {
 		return KindInstance
 	case *klitev1.Object_VipAllocation:
 		return KindVIPAllocation
+	case *klitev1.Object_IngressAllocation:
+		return KindIngressAllocation
 	}
 	return ""
 }
@@ -129,6 +135,11 @@ func MetaOf(o *klitev1.Object) *klitev1.Meta {
 			k.VipAllocation.Meta = &klitev1.Meta{}
 		}
 		return k.VipAllocation.Meta
+	case *klitev1.Object_IngressAllocation:
+		if k.IngressAllocation.Meta == nil {
+			k.IngressAllocation.Meta = &klitev1.Meta{}
+		}
+		return k.IngressAllocation.Meta
 	}
 	return &klitev1.Meta{}
 }
