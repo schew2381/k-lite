@@ -1,4 +1,5 @@
-# "a can talk to everything except b" as one DENY rule with an except list.
+# Lockdown: a may talk ONLY to b. The wildcard DENY covers every
+# destination, and the except list carves b back out of it.
 apiVersion: klite/v1
 kind: NetworkPolicy
 metadata:
