@@ -12,6 +12,7 @@ service KliteNetService {
   rpc ApplyConfig(ApplyConfigRequest) returns (ApplyConfigResponse);
   rpc Probes(ProbesRequest) returns (ProbesResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
+  rpc RecentQueries(RecentQueriesRequest) returns (RecentQueriesResponse);
 }
 
 // Full-state push, replacing whatever config klite-net held (it keeps
@@ -40,4 +41,24 @@ message HealthRequest {}
 message HealthResponse {
   bool dns_ready = 1;
   int32 vips_bound = 2;
+}
+
+// Asks for the in-zone A answers kdns served since a caller-held cursor.
+// since_unix_ms is inclusive, and zero means everything still retained (~30s).
+message RecentQueriesRequest {
+  int64 since_unix_ms = 1;
+}
+
+// Each entry pairs a querying container's IP with the service it asked for,
+// and when. The demo apps resolve fresh on every wget (TTL 5), so an entry
+// tracks a real call closely enough for the traffic feed: best-effort
+// attribution, never a policy record.
+message RecentQuery {
+  string source_ip = 1;
+  string service = 2;
+  int64 unix_ms = 3;
+}
+
+message RecentQueriesResponse {
+  repeated RecentQuery queries = 1;
 }

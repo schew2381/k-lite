@@ -19,9 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	KliteNetService_ApplyConfig_FullMethodName = "/klite.v1.KliteNetService/ApplyConfig"
-	KliteNetService_Probes_FullMethodName      = "/klite.v1.KliteNetService/Probes"
-	KliteNetService_Health_FullMethodName      = "/klite.v1.KliteNetService/Health"
+	KliteNetService_ApplyConfig_FullMethodName   = "/klite.v1.KliteNetService/ApplyConfig"
+	KliteNetService_Probes_FullMethodName        = "/klite.v1.KliteNetService/Probes"
+	KliteNetService_Health_FullMethodName        = "/klite.v1.KliteNetService/Health"
+	KliteNetService_RecentQueries_FullMethodName = "/klite.v1.KliteNetService/RecentQueries"
 )
 
 // KliteNetServiceClient is the client API for KliteNetService service.
@@ -34,6 +35,7 @@ type KliteNetServiceClient interface {
 	ApplyConfig(ctx context.Context, in *ApplyConfigRequest, opts ...grpc.CallOption) (*ApplyConfigResponse, error)
 	Probes(ctx context.Context, in *ProbesRequest, opts ...grpc.CallOption) (*ProbesResponse, error)
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
+	RecentQueries(ctx context.Context, in *RecentQueriesRequest, opts ...grpc.CallOption) (*RecentQueriesResponse, error)
 }
 
 type kliteNetServiceClient struct {
@@ -74,6 +76,16 @@ func (c *kliteNetServiceClient) Health(ctx context.Context, in *HealthRequest, o
 	return out, nil
 }
 
+func (c *kliteNetServiceClient) RecentQueries(ctx context.Context, in *RecentQueriesRequest, opts ...grpc.CallOption) (*RecentQueriesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RecentQueriesResponse)
+	err := c.cc.Invoke(ctx, KliteNetService_RecentQueries_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KliteNetServiceServer is the server API for KliteNetService service.
 // All implementations must embed UnimplementedKliteNetServiceServer
 // for forward compatibility.
@@ -84,6 +96,7 @@ type KliteNetServiceServer interface {
 	ApplyConfig(context.Context, *ApplyConfigRequest) (*ApplyConfigResponse, error)
 	Probes(context.Context, *ProbesRequest) (*ProbesResponse, error)
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
+	RecentQueries(context.Context, *RecentQueriesRequest) (*RecentQueriesResponse, error)
 	mustEmbedUnimplementedKliteNetServiceServer()
 }
 
@@ -102,6 +115,9 @@ func (UnimplementedKliteNetServiceServer) Probes(context.Context, *ProbesRequest
 }
 func (UnimplementedKliteNetServiceServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Health not implemented")
+}
+func (UnimplementedKliteNetServiceServer) RecentQueries(context.Context, *RecentQueriesRequest) (*RecentQueriesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RecentQueries not implemented")
 }
 func (UnimplementedKliteNetServiceServer) mustEmbedUnimplementedKliteNetServiceServer() {}
 func (UnimplementedKliteNetServiceServer) testEmbeddedByValue()                         {}
@@ -178,6 +194,24 @@ func _KliteNetService_Health_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KliteNetService_RecentQueries_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RecentQueriesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KliteNetServiceServer).RecentQueries(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KliteNetService_RecentQueries_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KliteNetServiceServer).RecentQueries(ctx, req.(*RecentQueriesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // KliteNetService_ServiceDesc is the grpc.ServiceDesc for KliteNetService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -196,6 +230,10 @@ var KliteNetService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Health",
 			Handler:    _KliteNetService_Health_Handler,
+		},
+		{
+			MethodName: "RecentQueries",
+			Handler:    _KliteNetService_RecentQueries_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

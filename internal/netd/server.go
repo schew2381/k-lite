@@ -36,6 +36,7 @@ type Server struct {
 	vipsBound atomic.Int32
 	dns       *dnsServer
 	prober    *prober
+	queries   *queryLog
 	bindVIPs  func(string, []netip.Addr) (int, error)
 }
 
@@ -56,7 +57,8 @@ func New(opts Options) *Server {
 	}
 	s := &Server{iface: opts.Iface, bindVIPs: opts.bindVIPs}
 	s.cfg.Store(emptyConfig())
-	s.dns = newDNSServer(opts.DNSListen, opts.Upstream, &s.cfg)
+	s.queries = newQueryLog()
+	s.dns = newDNSServer(opts.DNSListen, opts.Upstream, &s.cfg, s.queries)
 	s.prober = newProber(&s.cfg, opts.dial)
 	return s
 }
@@ -111,4 +113,12 @@ func (s *Server) Health(context.Context, *klitev1.HealthRequest) (*klitev1.Healt
 		DnsReady:  s.dns.ready(),
 		VipsBound: s.vipsBound.Load(),
 	}, nil
+}
+
+// RecentQueries returns the in-zone A answers kdns served since the caller's
+// cursor (inclusive), oldest first, capped by the ring's ~30s retention.
+// Like every RPC here it answers on the admin listener, so the facade
+// reaches it on the donor's published localhost port.
+func (s *Server) RecentQueries(_ context.Context, req *klitev1.RecentQueriesRequest) (*klitev1.RecentQueriesResponse, error) {
+	return &klitev1.RecentQueriesResponse{Queries: s.queries.since(req.GetSinceUnixMs())}, nil
 }

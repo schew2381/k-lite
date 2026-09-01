@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/netip"
 	"strings"
 	"sync/atomic"
@@ -25,17 +26,19 @@ type dnsServer struct {
 	listen   string
 	upstream string
 	cfg      *atomic.Pointer[netConfig]
+	queries  *queryLog
 	udpc     *dns.Client
 	tcpc     *dns.Client
 	mux      *dns.ServeMux
 	started  atomic.Int32 // listeners up, out of 2 (udp+tcp)
 }
 
-func newDNSServer(listen, upstream string, cfg *atomic.Pointer[netConfig]) *dnsServer {
+func newDNSServer(listen, upstream string, cfg *atomic.Pointer[netConfig], queries *queryLog) *dnsServer {
 	s := &dnsServer{
 		listen:   listen,
 		upstream: upstream,
 		cfg:      cfg,
+		queries:  queries,
 		udpc:     &dns.Client{Timeout: forwardBudget},
 		tcpc:     &dns.Client{Net: "tcp", Timeout: forwardBudget},
 		mux:      dns.NewServeMux(),
@@ -106,13 +109,13 @@ func (s *dnsServer) serveZone(w dns.ResponseWriter, r *dns.Msg) {
 	case name == zone:
 		nodata(m, cfg.serial)
 	default:
-		s.serveService(m, q, name, cfg)
+		s.serveService(m, q, name, cfg, remoteIP(w))
 	}
 	reply(w, m)
 }
 
-func (s *dnsServer) serveService(m *dns.Msg, q dns.Question, name string, cfg *netConfig) {
-	vip, ok := lookup(cfg, name)
+func (s *dnsServer) serveService(m *dns.Msg, q dns.Question, name string, cfg *netConfig, src string) {
+	label, vip, ok := lookup(cfg, name)
 	switch {
 	case !ok:
 		// An unknown in-zone name gets a fast authoritative NXDOMAIN,
@@ -124,6 +127,16 @@ func (s *dnsServer) serveService(m *dns.Msg, q dns.Question, name string, cfg *n
 			Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: recordTTL},
 			A:   vip.AsSlice(),
 		}}
+		// Only a served A answer lands in the query log: this is the moment
+		// a caller learns where a service lives, so source IP plus service
+		// name is caller attribution for the traffic feed. NXDOMAIN teaches
+		// nothing, an AAAA's NODATA already has its paired A query carrying
+		// the record, and forwards leave the cluster. Policy never enters
+		// the log. Allowed and denied pairs resolve alike, and denial
+		// happens later, at Envoy.
+		if src != "" {
+			s.queries.record(src, label)
+		}
 	default:
 		// AAAA (and any other type) for an existing service must be NODATA,
 		// never NXDOMAIN, or glibc's parallel A lookup dies with it.
@@ -131,14 +144,28 @@ func (s *dnsServer) serveService(m *dns.Msg, q dns.Question, name string, cfg *n
 	}
 }
 
-// lookup resolves a canonical (lowercase, fqdn) in-zone name to a VIP.
-func lookup(cfg *netConfig, name string) (netip.Addr, bool) {
+// lookup resolves a canonical (lowercase, fqdn) in-zone name to its bare
+// service label and VIP.
+func lookup(cfg *netConfig, name string) (string, netip.Addr, bool) {
 	label, found := strings.CutSuffix(name, "."+zone)
 	if !found || label == "" || strings.Contains(label, ".") {
-		return netip.Addr{}, false
+		return "", netip.Addr{}, false
 	}
 	vip, ok := cfg.vips[label]
-	return vip, ok
+	return label, vip, ok
+}
+
+// remoteIP is the querying client's bare IP, or "" when the transport
+// carries none (then nothing is recorded, since an unattributable entry
+// is noise to the feed).
+func remoteIP(w dns.ResponseWriter) string {
+	switch a := w.RemoteAddr().(type) {
+	case *net.UDPAddr:
+		return a.IP.String()
+	case *net.TCPAddr:
+		return a.IP.String()
+	}
+	return ""
 }
 
 func nodata(m *dns.Msg, serial uint32) {

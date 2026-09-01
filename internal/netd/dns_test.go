@@ -38,7 +38,7 @@ func testDNSServer(t *testing.T, upstream string) *dnsServer {
 	}
 	ptr := &atomic.Pointer[netConfig]{}
 	ptr.Store(cfg)
-	return newDNSServer(":0", upstream, ptr)
+	return newDNSServer(":0", upstream, ptr, newQueryLog())
 }
 
 func ask(s *dnsServer, remote net.Addr, name string, qtype, qclass uint16) *dns.Msg {
@@ -329,5 +329,68 @@ func TestForwardUpstreamDown(t *testing.T) {
 	}
 	if m.Rcode != dns.RcodeServerFailure {
 		t.Fatalf("rcode = %s, want SERVFAIL", dns.RcodeToString[m.Rcode])
+	}
+}
+
+// serveZone records exactly the served in-zone A answers. Every other
+// outcome (misses, NODATA, the apex, refused classes) must leave the log
+// empty.
+func TestServeZoneQueryRecording(t *testing.T) {
+	tests := []struct {
+		name   string
+		qname  string
+		qtype  uint16
+		qclass uint16
+		remote net.Addr
+		wantIP string // non-empty: exactly one entry with this source and service b
+	}{
+		{name: "A hit records", qname: "b.svc.klite.", qtype: dns.TypeA, remote: udpRemote(), wantIP: "10.44.128.5"},
+		{name: "case-folded A hit records the lowercase label", qname: "B.SVC.Klite.", qtype: dns.TypeA, remote: udpRemote(), wantIP: "10.44.128.5"},
+		{name: "tcp source records", qname: "b.svc.klite.", qtype: dns.TypeA, remote: &net.TCPAddr{IP: net.IPv4(10, 44, 128, 7), Port: 41000}, wantIP: "10.44.128.7"},
+		{name: "AAAA NODATA does not record", qname: "b.svc.klite.", qtype: dns.TypeAAAA, remote: udpRemote()},
+		{name: "NXDOMAIN does not record", qname: "nope.svc.klite.", qtype: dns.TypeA, remote: udpRemote()},
+		{name: "apex NODATA does not record", qname: "svc.klite.", qtype: dns.TypeA, remote: udpRemote()},
+		{name: "refused class does not record", qname: "b.svc.klite.", qtype: dns.TypeA, qclass: dns.ClassCHAOS, remote: udpRemote()},
+		{name: "addressless transport records nothing", qname: "b.svc.klite.", qtype: dns.TypeA, remote: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := testDNSServer(t, "127.0.0.1:1")
+			if tt.qclass == 0 {
+				tt.qclass = dns.ClassINET
+			}
+			if m := ask(s, tt.remote, tt.qname, tt.qtype, tt.qclass); m == nil {
+				t.Fatal("no reply written")
+			}
+			got := s.queries.since(0)
+			if tt.wantIP == "" {
+				if len(got) != 0 {
+					t.Fatalf("recorded %v, want nothing", got)
+				}
+				return
+			}
+			if len(got) != 1 {
+				t.Fatalf("recorded %d entries, want 1", len(got))
+			}
+			e := got[0]
+			if e.GetSourceIp() != tt.wantIP || e.GetService() != "b" {
+				t.Errorf("entry = %s asked %s, want %s asked b", e.GetSourceIp(), e.GetService(), tt.wantIP)
+			}
+			if e.GetUnixMs() <= 0 {
+				t.Errorf("unix_ms = %d, want a real timestamp", e.GetUnixMs())
+			}
+		})
+	}
+}
+
+// Forwarded (out-of-zone) exchanges must never touch the query log, whatever
+// the upstream does.
+func TestForwardDoesNotRecord(t *testing.T) {
+	s := testDNSServer(t, "127.0.0.1:1") // dead upstream: SERVFAIL either way
+	if m := ask(s, udpRemote(), "example.com.", dns.TypeA, dns.ClassINET); m == nil {
+		t.Fatal("no reply written")
+	}
+	if got := s.queries.since(0); len(got) != 0 {
+		t.Fatalf("forward recorded %v", got)
 	}
 }

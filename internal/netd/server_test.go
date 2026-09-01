@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/miekg/dns"
 	"google.golang.org/grpc/codes"
@@ -305,4 +306,48 @@ func TestDNSReadsDuringSwaps(t *testing.T) {
 	}
 	close(stop)
 	wg.Wait()
+}
+
+// The ring lives on the same server the agent talks to: answers served by
+// DNS come back out through the RecentQueries RPC with the cursor applied.
+func TestRecentQueriesRPC(t *testing.T) {
+	srv := testServer(nil)
+	if _, err := srv.ApplyConfig(context.Background(), &klitev1.ApplyConfigRequest{Net: desired(9)}); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if m := ask(srv.dns, udpRemote(), "b.svc.klite.", dns.TypeA, dns.ClassINET); m == nil {
+			t.Fatal("no reply written")
+		}
+	}
+	resp, err := srv.RecentQueries(context.Background(), &klitev1.RecentQueriesRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	qs := resp.GetQueries()
+	if len(qs) != 3 {
+		t.Fatalf("queries = %d, want 3", len(qs))
+	}
+	for _, q := range qs {
+		if q.GetSourceIp() != "10.44.128.5" || q.GetService() != "b" || q.GetUnixMs() <= 0 {
+			t.Fatalf("query = %v", q)
+		}
+	}
+	// The cursor is inclusive: asking from the newest timestamp returns at
+	// least that entry, and a future cursor returns nothing.
+	last := qs[len(qs)-1].GetUnixMs()
+	resp, err = srv.RecentQueries(context.Background(), &klitev1.RecentQueriesRequest{SinceUnixMs: last})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.GetQueries()) == 0 {
+		t.Fatal("inclusive cursor dropped the newest entry")
+	}
+	resp, err = srv.RecentQueries(context.Background(), &klitev1.RecentQueriesRequest{SinceUnixMs: last + int64(time.Minute/time.Millisecond)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resp.GetQueries(); len(got) != 0 {
+		t.Fatalf("future cursor returned %v", got)
+	}
 }

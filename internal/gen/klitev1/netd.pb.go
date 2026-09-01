@@ -339,6 +339,160 @@ func (x *HealthResponse) GetVipsBound() int32 {
 	return 0
 }
 
+// Asks for the in-zone A answers kdns served since a caller-held cursor.
+// since_unix_ms is inclusive, and zero means everything still retained (~30s).
+type RecentQueriesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SinceUnixMs   int64                  `protobuf:"varint,1,opt,name=since_unix_ms,json=sinceUnixMs,proto3" json:"since_unix_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecentQueriesRequest) Reset() {
+	*x = RecentQueriesRequest{}
+	mi := &file_klite_v1_netd_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecentQueriesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecentQueriesRequest) ProtoMessage() {}
+
+func (x *RecentQueriesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_klite_v1_netd_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecentQueriesRequest.ProtoReflect.Descriptor instead.
+func (*RecentQueriesRequest) Descriptor() ([]byte, []int) {
+	return file_klite_v1_netd_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RecentQueriesRequest) GetSinceUnixMs() int64 {
+	if x != nil {
+		return x.SinceUnixMs
+	}
+	return 0
+}
+
+// Each entry pairs a querying container's IP with the service it asked for,
+// and when. The demo apps resolve fresh on every wget (TTL 5), so an entry
+// tracks a real call closely enough for the traffic feed: best-effort
+// attribution, never a policy record.
+type RecentQuery struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SourceIp      string                 `protobuf:"bytes,1,opt,name=source_ip,json=sourceIp,proto3" json:"source_ip,omitempty"`
+	Service       string                 `protobuf:"bytes,2,opt,name=service,proto3" json:"service,omitempty"`
+	UnixMs        int64                  `protobuf:"varint,3,opt,name=unix_ms,json=unixMs,proto3" json:"unix_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecentQuery) Reset() {
+	*x = RecentQuery{}
+	mi := &file_klite_v1_netd_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecentQuery) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecentQuery) ProtoMessage() {}
+
+func (x *RecentQuery) ProtoReflect() protoreflect.Message {
+	mi := &file_klite_v1_netd_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecentQuery.ProtoReflect.Descriptor instead.
+func (*RecentQuery) Descriptor() ([]byte, []int) {
+	return file_klite_v1_netd_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *RecentQuery) GetSourceIp() string {
+	if x != nil {
+		return x.SourceIp
+	}
+	return ""
+}
+
+func (x *RecentQuery) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+func (x *RecentQuery) GetUnixMs() int64 {
+	if x != nil {
+		return x.UnixMs
+	}
+	return 0
+}
+
+type RecentQueriesResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Queries       []*RecentQuery         `protobuf:"bytes,1,rep,name=queries,proto3" json:"queries,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecentQueriesResponse) Reset() {
+	*x = RecentQueriesResponse{}
+	mi := &file_klite_v1_netd_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecentQueriesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecentQueriesResponse) ProtoMessage() {}
+
+func (x *RecentQueriesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_klite_v1_netd_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecentQueriesResponse.ProtoReflect.Descriptor instead.
+func (*RecentQueriesResponse) Descriptor() ([]byte, []int) {
+	return file_klite_v1_netd_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *RecentQueriesResponse) GetQueries() []*RecentQuery {
+	if x != nil {
+		return x.Queries
+	}
+	return nil
+}
+
 var File_klite_v1_netd_proto protoreflect.FileDescriptor
 
 const file_klite_v1_netd_proto_rawDesc = "" +
@@ -360,11 +514,20 @@ const file_klite_v1_netd_proto_rawDesc = "" +
 	"\x0eHealthResponse\x12\x1b\n" +
 	"\tdns_ready\x18\x01 \x01(\bR\bdnsReady\x12\x1d\n" +
 	"\n" +
-	"vips_bound\x18\x02 \x01(\x05R\tvipsBound2\xd7\x01\n" +
+	"vips_bound\x18\x02 \x01(\x05R\tvipsBound\":\n" +
+	"\x14RecentQueriesRequest\x12\"\n" +
+	"\rsince_unix_ms\x18\x01 \x01(\x03R\vsinceUnixMs\"]\n" +
+	"\vRecentQuery\x12\x1b\n" +
+	"\tsource_ip\x18\x01 \x01(\tR\bsourceIp\x12\x18\n" +
+	"\aservice\x18\x02 \x01(\tR\aservice\x12\x17\n" +
+	"\aunix_ms\x18\x03 \x01(\x03R\x06unixMs\"H\n" +
+	"\x15RecentQueriesResponse\x12/\n" +
+	"\aqueries\x18\x01 \x03(\v2\x15.klite.v1.RecentQueryR\aqueries2\xa9\x02\n" +
 	"\x0fKliteNetService\x12J\n" +
 	"\vApplyConfig\x12\x1c.klite.v1.ApplyConfigRequest\x1a\x1d.klite.v1.ApplyConfigResponse\x12;\n" +
 	"\x06Probes\x12\x17.klite.v1.ProbesRequest\x1a\x18.klite.v1.ProbesResponse\x12;\n" +
-	"\x06Health\x12\x17.klite.v1.HealthRequest\x1a\x18.klite.v1.HealthResponseB:Z8github.com/schew2381/k-lite/internal/gen/klitev1;klitev1b\x06proto3"
+	"\x06Health\x12\x17.klite.v1.HealthRequest\x1a\x18.klite.v1.HealthResponse\x12P\n" +
+	"\rRecentQueries\x12\x1e.klite.v1.RecentQueriesRequest\x1a\x1f.klite.v1.RecentQueriesResponseB:Z8github.com/schew2381/k-lite/internal/gen/klitev1;klitev1b\x06proto3"
 
 var (
 	file_klite_v1_netd_proto_rawDescOnce sync.Once
@@ -378,31 +541,37 @@ func file_klite_v1_netd_proto_rawDescGZIP() []byte {
 	return file_klite_v1_netd_proto_rawDescData
 }
 
-var file_klite_v1_netd_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_klite_v1_netd_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_klite_v1_netd_proto_goTypes = []any{
-	(*ApplyConfigRequest)(nil),  // 0: klite.v1.ApplyConfigRequest
-	(*ApplyConfigResponse)(nil), // 1: klite.v1.ApplyConfigResponse
-	(*ProbesRequest)(nil),       // 2: klite.v1.ProbesRequest
-	(*ProbeState)(nil),          // 3: klite.v1.ProbeState
-	(*ProbesResponse)(nil),      // 4: klite.v1.ProbesResponse
-	(*HealthRequest)(nil),       // 5: klite.v1.HealthRequest
-	(*HealthResponse)(nil),      // 6: klite.v1.HealthResponse
-	(*NetDesired)(nil),          // 7: klite.v1.NetDesired
+	(*ApplyConfigRequest)(nil),    // 0: klite.v1.ApplyConfigRequest
+	(*ApplyConfigResponse)(nil),   // 1: klite.v1.ApplyConfigResponse
+	(*ProbesRequest)(nil),         // 2: klite.v1.ProbesRequest
+	(*ProbeState)(nil),            // 3: klite.v1.ProbeState
+	(*ProbesResponse)(nil),        // 4: klite.v1.ProbesResponse
+	(*HealthRequest)(nil),         // 5: klite.v1.HealthRequest
+	(*HealthResponse)(nil),        // 6: klite.v1.HealthResponse
+	(*RecentQueriesRequest)(nil),  // 7: klite.v1.RecentQueriesRequest
+	(*RecentQuery)(nil),           // 8: klite.v1.RecentQuery
+	(*RecentQueriesResponse)(nil), // 9: klite.v1.RecentQueriesResponse
+	(*NetDesired)(nil),            // 10: klite.v1.NetDesired
 }
 var file_klite_v1_netd_proto_depIdxs = []int32{
-	7, // 0: klite.v1.ApplyConfigRequest.net:type_name -> klite.v1.NetDesired
-	3, // 1: klite.v1.ProbesResponse.probes:type_name -> klite.v1.ProbeState
-	0, // 2: klite.v1.KliteNetService.ApplyConfig:input_type -> klite.v1.ApplyConfigRequest
-	2, // 3: klite.v1.KliteNetService.Probes:input_type -> klite.v1.ProbesRequest
-	5, // 4: klite.v1.KliteNetService.Health:input_type -> klite.v1.HealthRequest
-	1, // 5: klite.v1.KliteNetService.ApplyConfig:output_type -> klite.v1.ApplyConfigResponse
-	4, // 6: klite.v1.KliteNetService.Probes:output_type -> klite.v1.ProbesResponse
-	6, // 7: klite.v1.KliteNetService.Health:output_type -> klite.v1.HealthResponse
-	5, // [5:8] is the sub-list for method output_type
-	2, // [2:5] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	10, // 0: klite.v1.ApplyConfigRequest.net:type_name -> klite.v1.NetDesired
+	3,  // 1: klite.v1.ProbesResponse.probes:type_name -> klite.v1.ProbeState
+	8,  // 2: klite.v1.RecentQueriesResponse.queries:type_name -> klite.v1.RecentQuery
+	0,  // 3: klite.v1.KliteNetService.ApplyConfig:input_type -> klite.v1.ApplyConfigRequest
+	2,  // 4: klite.v1.KliteNetService.Probes:input_type -> klite.v1.ProbesRequest
+	5,  // 5: klite.v1.KliteNetService.Health:input_type -> klite.v1.HealthRequest
+	7,  // 6: klite.v1.KliteNetService.RecentQueries:input_type -> klite.v1.RecentQueriesRequest
+	1,  // 7: klite.v1.KliteNetService.ApplyConfig:output_type -> klite.v1.ApplyConfigResponse
+	4,  // 8: klite.v1.KliteNetService.Probes:output_type -> klite.v1.ProbesResponse
+	6,  // 9: klite.v1.KliteNetService.Health:output_type -> klite.v1.HealthResponse
+	9,  // 10: klite.v1.KliteNetService.RecentQueries:output_type -> klite.v1.RecentQueriesResponse
+	7,  // [7:11] is the sub-list for method output_type
+	3,  // [3:7] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_klite_v1_netd_proto_init() }
@@ -417,7 +586,7 @@ func file_klite_v1_netd_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_klite_v1_netd_proto_rawDesc), len(file_klite_v1_netd_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
