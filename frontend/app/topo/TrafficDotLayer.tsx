@@ -40,7 +40,7 @@ type Phase =
       toId: string
       label: string
       stepIndex?: number
-      straight?: boolean
+      slow?: boolean // the story's headline leg takes extra time
     }
   | { kind: 'settle'; anchorId: string } // rest after landing, label unchanged
 
@@ -67,26 +67,10 @@ function easeTravel(k: number): number {
   return (1 - RAMP - ((1 - k) * (1 - k)) / (2 * RAMP)) * s
 }
 
-// which infra pod a sub-box anchor belongs to, or null for instance anchors
-function podOf(anchorId: string): string | null {
-  const m = /^(?:kdns|lds|rbac|eds):(.*)$/.exec(anchorId)
-  return m ? m[1] : null
-}
-
-// bow 0 collapses the curve to a straight segment
-function bezier(a: Point, b: Point, t: number, bow: number): Point {
-  const mx = (a.x + b.x) / 2
-  const my = (a.y + b.y) / 2
-  const dx = b.x - a.x
-  const dy = b.y - a.y
-  const len = Math.hypot(dx, dy) || 1
-  const cx = mx - (dy / len) * bow
-  const cy = my + (dx / len) * bow
-  const u = 1 - t
-  return {
-    x: u * u * a.x + 2 * u * t * cx + t * t * b.x,
-    y: u * u * a.y + 2 * u * t * cy + t * t * b.y,
-  }
+// dots travel straight lines, always: anchors move mid-flight anyway, so the
+// path bends only when the endpoints do
+function lerp(a: Point, b: Point, t: number): Point {
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
 }
 
 function anchorIdFor(at: TraceStep['at'], trace: Trace): string {
@@ -107,9 +91,6 @@ function phasesOf(trace: Trace, flow: FlowMode): Phase[] {
   trace.steps.forEach((step, i) => {
     const anchorId = anchorIdFor(step.at, trace)
     const moved = prevAnchor !== null && anchorId !== prevAnchor
-    // hops between sub-boxes of one infra pod run straight, not arced
-    const straight =
-      prevAnchor !== null && podOf(prevAnchor) !== null && podOf(prevAnchor) === podOf(anchorId)
     if (step.motion === 'travel' && prevAnchor && moved) {
       phases.push({
         kind: 'travel',
@@ -117,7 +98,7 @@ function phasesOf(trace: Trace, flow: FlowMode): Phase[] {
         toId: anchorId,
         label: step.short,
         stepIndex: i,
-        straight,
+        slow: step.pace === 'long',
       })
     } else {
       if (prevAnchor && moved) {
@@ -126,7 +107,6 @@ function phasesOf(trace: Trace, flow: FlowMode): Phase[] {
           fromId: prevAnchor,
           toId: anchorId,
           label: `${trace.event.fromService}→${trace.event.toService}`,
-          straight,
         })
       }
       phases.push({ kind: 'pause', anchorId, stepIndex: i, short: step.short })
@@ -165,6 +145,12 @@ export function TrafficDotLayer({
     const pace = PACE[flow]
     const flights: Flight[] = []
     let raf = 0
+    // traced flow alternates between a local story and an internet one: an
+    // event repeating the last locality waits a few beats for its opposite,
+    // since some pairs only exist in one locality (a singleton service is
+    // always remote to other nodes)
+    let lastRemote: boolean | null = null
+    let skipsLeft = 3
 
     const makeDot = (color: string): SVGCircleElement => {
       const dot = document.createElementNS(SVGNS, 'circle')
@@ -240,7 +226,7 @@ export function TrafficDotLayer({
       const phase = f.phases[f.phase]
       let dur = phase.kind === 'settle' ? pace.settle : pace.pause
       if (phase.kind === 'travel') {
-        if (phase.stepIndex !== undefined) dur = pace.stepTravel
+        if (phase.stepIndex !== undefined) dur = phase.slow ? pace.stepTravel * 1.8 : pace.stepTravel
         else {
           const a = anchors[phase.fromId]
           const b = anchors[phase.toId]
@@ -257,7 +243,7 @@ export function TrafficDotLayer({
       } else {
         const from = anchors[phase.fromId]
         const to = anchors[phase.toId]
-        if (from && to) p = bezier(from, to, easeTravel(k), phase.straight ? 0 : 24)
+        if (from && to) p = lerp(from, to, easeTravel(k))
       }
       if (!p) {
         // an endpoint of this trace left the board, so let it go quietly
@@ -313,6 +299,15 @@ export function TrafficDotLayer({
       if (flow === 'traced' && flights.length > 0) return
       if (flights.length >= LIVE_FLIGHT_CAP) return
       const trace = buildTrace(e, clusterStore.getSnapshot())
+      if (flow === 'traced' && e.verdict === 'allowed' && trace.targetNode) {
+        const remote = trace.targetNode !== e.viaNode
+        if (remote === lastRemote && skipsLeft > 0) {
+          skipsLeft--
+          return
+        }
+        lastRemote = remote
+        skipsLeft = 3
+      }
       const anchors = layoutRef.current?.anchors ?? {}
       if (!anchors[anchorIdFor('caller', trace)] || !anchors[anchorIdFor('kdns', trace)]) return
       const color =

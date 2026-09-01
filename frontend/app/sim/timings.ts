@@ -25,7 +25,7 @@ export const DEFAULT_TIMINGS: SimTimings = {
   rescheduleGraceMs: 8000,
   drainTimeoutMs: 4000,
   terminationGraceMs: 2000,
-  trafficPeriodMs: 30000, // one traced call per beat (the flight itself runs ~27s)
+  trafficPeriodMs: 4000, // the played story skips beats while it runs, then the next call is at most one beat away
   restartBackoffMs: [500, 1000, 2000, 4000],
   backoffResetAfterMs: 60000,
 }

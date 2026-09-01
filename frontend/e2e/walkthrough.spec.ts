@@ -3,8 +3,8 @@
 
 import { expect, type Page, test } from '@playwright/test'
 
-// One traced call runs every 30 sim-seconds at 1×, so tests that wait on
-// traffic crank the sim to 4× first.
+// Traffic beats every 4 sim-seconds and one story plays at a time, so tests
+// that wait on specific calls crank the sim to 4× first.
 async function fourX(page: Page) {
   await page.getByRole('radio', { name: 'Four times speed' }).click()
 }
@@ -152,7 +152,9 @@ test('live flow: flights run fast and untraced, the panel keeps the latest call'
   await expect(page.locator('.traffic-dot').first()).toBeVisible({ timeout: 60_000 })
   // no step-by-step walkthrough in live flow
   expect(await page.getByTestId('trace-step-active').count()).toBe(0)
-  // the whole lifecycle finishes in seconds, not the traced half-minute
+  // pause the sim so no new flights spawn: the airborne ones land in seconds,
+  // not the traced half-minute
+  await page.getByRole('radio', { name: 'Pause' }).click()
   await expect(page.locator('.traffic-dot')).toHaveCount(0, { timeout: 15_000 })
   await expect(page.getByTestId('trace-panel')).toContainText('latest call')
   await expect(page.getByTestId('trace-panel').locator('ol li').first()).toBeVisible()

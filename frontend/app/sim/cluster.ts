@@ -84,6 +84,7 @@ export class Cluster {
   private meta = new Map<string, InstanceMeta>()
   private seq = new Map<string, number>()
   private removingNodes = new Set<string>()
+  private preferRemote = false // demo choreography: alternate local and internet picks
   private rrCursor = new Map<string, number>()
   private targetCursor = new Map<string, number>()
   private lastTraffic = 0
@@ -664,11 +665,17 @@ export class Cluster {
       return
     }
 
-    // Envoy keeps per-node LB state: round-robin cursor per (node, service)
+    // Envoy keeps per-node LB state: round-robin cursor per (node, service).
+    // Demo choreography rides on top: consecutive calls prefer alternating
+    // locality so the board flip-flops between a local story and an internet
+    // one whenever the service has both kinds of endpoint.
     const key = `${viaNode}/${toService}`
     const cursor = this.rrCursor.get(key) ?? 0
     this.rrCursor.set(key, cursor + 1)
-    const to = endpoints[cursor % endpoints.length]
+    const wanted = endpoints.filter((e) => (e.spec.node !== viaNode) === this.preferRemote)
+    const pool = wanted.length > 0 ? wanted : endpoints
+    if (wanted.length > 0) this.preferRemote = !this.preferRemote
+    const to = pool[cursor % pool.length]
     // a remote pick crosses the internet between machines, and it shows
     const remote = to.spec.node !== viaNode
     const latencyMs = Math.round(((remote ? 28 : 2) + this.rand() * 8) * 10) / 10

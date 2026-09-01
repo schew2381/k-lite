@@ -112,6 +112,7 @@ export function buildTrace(e: TrafficEvent, s: Snapshot): Trace {
   steps.push({
     at: 'targetInfra',
     motion: 'travel',
+    pace: 'long',
     short: `mTLS → ${via}`,
     detail: `${e.viaNode}'s Envoy dials ${via} across the open internet, inside proxy-to-proxy mTLS.`,
     tone: 'info',
