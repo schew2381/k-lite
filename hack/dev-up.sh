@@ -2,7 +2,7 @@
 # One command to a running k-lite playground: etcd + klited + agents + example apps.
 # Overrides (defaults in parens): KLITED_PORT (7443), ETCD_NAME_PREFIX (etcd),
 # ETCD_PORT_BASE (2379), ETCD_NET (klite-etcd), KLITE_NODE_PREFIX (node),
-# KLITE_NODE_COUNT (3), KLITE_CLUSTER_TOKEN (dev-token), KLITE_DEV_DIR (~/.klite/dev),
+# KLITE_NODE_COUNT (4), KLITE_CLUSTER_TOKEN (dev-token), KLITE_DEV_DIR (~/.klite/dev),
 # KLITE_DEV_SKIP_BUILD (unset; set to 1 to reuse existing bin/ binaries).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -13,7 +13,7 @@ export ETCD_NAME_PREFIX="${ETCD_NAME_PREFIX:-etcd}"
 export ETCD_PORT_BASE="${ETCD_PORT_BASE:-2379}"
 export ETCD_NET="${ETCD_NET:-klite-etcd}"
 KLITE_NODE_PREFIX="${KLITE_NODE_PREFIX:-node}"
-KLITE_NODE_COUNT="${KLITE_NODE_COUNT:-3}"
+KLITE_NODE_COUNT="${KLITE_NODE_COUNT:-4}"
 KLITE_CLUSTER_TOKEN="${KLITE_CLUSTER_TOKEN:-dev-token}"
 DEV_DIR="${KLITE_DEV_DIR:-$HOME/.klite/dev}"
 SKIP_BUILD="${KLITE_DEV_SKIP_BUILD:-}"

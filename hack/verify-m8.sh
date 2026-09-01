@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks M8 end to end on the canonical stack (klited :7443, etcd 2379/81/83,
-# nodes node-1..3). In run order:
+# nodes node-1..4). In run order:
 #   auth        token mint, wrong-token and tampered-pin rejections
 #   join        a fresh-state mTLS join with on-disk proof
 #   data plane  Envoy's TLS xDS stream, the admin-port lockdown
@@ -18,7 +18,7 @@ TMP=/tmp/klite-m8
 EP_A=127.0.0.1:7443
 EP_B=127.0.0.1:7445
 BOTH="$EP_A,$EP_B"
-NODES=(node-1 node-2 node-3)
+NODES=(node-1 node-2 node-3 node-4)
 SRV_DIR="$HOME/.klite/server"
 AGT_DIR="$HOME/.klite/agent"
 
@@ -81,12 +81,12 @@ infra_up() {
   done
 }
 
-counts_ready() { # a=1, b=<n>, c=3, d=4 all Ready
+counts_ready() { # a=1, b=<n>, c=3, d=2 all Ready
   local snap; snap="$("$KLITE" --server "$BOTH" get instances 2>/dev/null)"
   [[ "$(echo "$snap" | awk '$2=="a" && $4=="Ready"' | wc -l | tr -d ' ')" == 1 ]] || return 1
   [[ "$(echo "$snap" | awk '$2=="b" && $4=="Ready"' | wc -l | tr -d ' ')" == "$1" ]] || return 1
   [[ "$(echo "$snap" | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == 3 ]] || return 1
-  [[ "$(echo "$snap" | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == 4 ]]
+  [[ "$(echo "$snap" | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == 2 ]]
 }
 
 # ============================================================
@@ -192,11 +192,11 @@ pass "no identity persisted by either rejected join"
 
 # ============================================================
 STEP=5-fresh-join
-for i in 1 2 3; do
+for i in 1 2 3 4; do
   "$KLITE" --server "$BOTH" apply -f "examples/seed/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
 done
 for n in "${NODES[@]}"; do start_agent "$n"; done
-wait_for 30 nodes_ready 3 && pass "3 nodes joined and Ready" || die "3 nodes Ready"
+wait_for 30 nodes_ready 4 && pass "4 nodes joined and Ready" || die "4 nodes Ready"
 
 for n in "${NODES[@]}"; do
   d="$AGT_DIR/$n/tls"
@@ -226,7 +226,7 @@ for app in a-client b-whoami c-whoami d-web; do
 done
 wait_for 90 counts_ready 2 && pass "workloads a, b, c, d all Ready (probe-gated)" || die "workloads Ready"
 
-for i in 1 2 3; do
+for i in 1 2 3 4; do
   CS="$(curl -s --max-time 3 "127.0.0.1:$((19500 + i))/stats" 2>/dev/null | awk '/^control_plane.connected_state/ {print $2}')"
   [[ "$CS" == 1 ]] || die "envoy on node-$i not connected to xDS over TLS (connected_state=$CS)"
 done
@@ -252,13 +252,13 @@ STEP=7-admin-lockdown
 PROBE() { # PROBE <ip> <port>  -> 0 if reachable from a workload-range container
   docker run --rm --network klite0 alpine:3.20 nc -z -w 2 "$1" "$2" >/dev/null 2>&1
 }
-for i in 1 2 3; do
+for i in 1 2 3 4; do
   ip="10.44.0.$((10 + i))"
   PROBE "$ip" 9090 && die "workload-range source reached klite-net admin at $ip:9090"
   PROBE "$ip" 9901 && die "workload-range source reached Envoy admin at $ip:9901"
 done
-pass "klite-net :9090 and Envoy :9901 unreachable from the workload range on all 3 donors"
-for i in 1 2 3; do
+pass "klite-net :9090 and Envoy :9901 unreachable from the workload range on all 4 donors"
+for i in 1 2 3 4; do
   nc -z -w 2 127.0.0.1 "$((19000 + i))" >/dev/null 2>&1 || die "host path to klite-net admin 1900$i broken"
   [[ "$(curl -s --max-time 2 -o /dev/null -w '%{http_code}' "127.0.0.1:$((19500 + i))/ready")" == 200 ]] \
     || die "host path to Envoy admin 1950$i broken"
@@ -284,10 +284,10 @@ info "SIGKILLed klited A, so agents' streams must resume on B"
 T0=$(date +%s)
 DIP=""
 for _ in $(seq 1 15); do
-  [[ "$("$KLITE" --server "$EP_B" get nodes 2>/dev/null | awk '$2=="Ready"' | wc -l | tr -d ' ')" == 3 ]] || DIP=1
+  [[ "$("$KLITE" --server "$EP_B" get nodes 2>/dev/null | awk '$2=="Ready"' | wc -l | tr -d ' ')" == 4 ]] || DIP=1
   sleep 1
 done
-[[ -z "$DIP" ]] && pass "all 3 nodes stayed Ready for 15s after the kill (heartbeats failed over)" \
+[[ -z "$DIP" ]] && pass "all 4 nodes stayed Ready for 15s after the kill (heartbeats failed over)" \
   || die "a node dipped from Ready after klited A died"
 
 "$KLITE" --server "$EP_B" scale workload b --replicas 3 >/dev/null || die "scale through the survivor"

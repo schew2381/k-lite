@@ -5,7 +5,7 @@
 # fallback (ADR 0010). Leaves etcd, the klite0 network, and images in place.
 #
 # Canonical stack: klited on 127.0.0.1:7443, etcd on 2379/2381/2383 (etcd-up
-# defaults), nodes node-1..3. Other stacks may share the Docker daemon, so
+# defaults), nodes node-1..4. Other stacks may share the Docker daemon, so
 # every kill and container removal is scoped to those names and labels.
 #
 # The zero-failure gates ride deterministic probe loops (wget once a second
@@ -20,7 +20,7 @@ unset KLITE_SERVER
 BIN=bin
 KLITE="$BIN/klite"
 KLITED_PID=""
-NODES=(node-1 node-2 node-3)
+NODES=(node-1 node-2 node-3 node-4)
 declare -A AGENT_PID=()
 TMP=/tmp/klite-m5
 mkdir -p "$TMP"
@@ -84,14 +84,14 @@ one_infra_up() {
     && docker ps --format '{{.Names}}' | grep -qx "klite.$1.envoy"
 }
 
-# counts_ready <b-replicas>: a=1, b=<n>, c=3, d=4, all READY and nothing extra.
+# counts_ready <b-replicas>: a=1, b=<n>, c=3, d=2, all READY and nothing extra.
 counts_ready() {
   local snap; snap="$("$KLITE" get instances)"
   [[ "$(echo "$snap" | awk '$2=="a" && $4=="Ready"' | wc -l | tr -d ' ')" == 1 ]] || return 1
   [[ "$(echo "$snap" | awk '$2=="b"' | wc -l | tr -d ' ')" == "$1" ]] || return 1
   [[ "$(echo "$snap" | awk '$2=="b" && $4=="Ready"' | wc -l | tr -d ' ')" == "$1" ]] || return 1
   [[ "$(echo "$snap" | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == 3 ]] || return 1
-  [[ "$(echo "$snap" | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == 4 ]]
+  [[ "$(echo "$snap" | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == 2 ]]
 }
 
 a_inst() { "$KLITE" get instances | awk '$2=="a" {print $1}' | head -1; }
@@ -189,13 +189,13 @@ wait_for 15 klited_ready \
 TOKEN="$("$KLITE" node token)" && pass "minted join token" || die "mint join token"
 
 # --- nodes, agents, infra (the m4 recipe) ------------------------------------
-for i in 1 2 3; do
+for i in 1 2 3 4; do
   "$KLITE" apply -f "examples/seed/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
 done
-pass "applied 3 node YAMLs"
+pass "applied 4 node YAMLs"
 for n in "${NODES[@]}"; do start_agent "$n"; done
-wait_for 15 nodes_ready 3 \
-  && pass "all 3 nodes Ready" || die "all 3 nodes Ready"
+wait_for 15 nodes_ready 4 \
+  && pass "all 4 nodes Ready" || die "all 4 nodes Ready"
 wait_for 60 infra_up \
   && pass "infra pods up on all nodes" || die "infra pods up on all nodes"
 
@@ -209,7 +209,7 @@ done
 pass "applied a, b, c, d with drain 4s/4s"
 
 wait_for 90 counts_ready 2 \
-  && pass "all instances READY (a=1, b=2, c=3, d=4)" \
+  && pass "all instances READY (a=1, b=2, c=3, d=2)" \
   || { "$KLITE" get instances; die "all instances READY"; }
 
 "$KLITE" scale workload b --replicas 3 >/dev/null || die "scale b to 3"
@@ -294,7 +294,7 @@ B_FAILS1="$(fails_in "$PROBE_B")"
 # --- node drain ----------------------------------------------------------------
 # Pick a node a does not live on, so its log stays continuous for the check.
 DRAIN_NODE=""
-for cand in node-2 node-3 node-1; do
+for cand in node-2 node-3 node-4 node-1; do
   [[ "$cand" == "$A_NODE" ]] && continue
   [[ "$("$KLITE" get instances | awk -v n="$cand" 'NR>1 && $3==n' | wc -l | tr -d ' ')" -ge 1 ]] \
     && DRAIN_NODE="$cand" && break
@@ -347,19 +347,20 @@ docker rm -f "klite.$DRAIN_NODE.net" "klite.$DRAIN_NODE.envoy" >/dev/null 2>&1
 pass "$DRAIN_NODE agent stopped and infra removed"
 
 # --- capacity-blocked fallback (informational: timing-sensitive) ---------------
-sed 's/maxInstances: 32/maxInstances: 10/' "examples/seed/nodes/$DRAIN_NODE.yaml" > "$TMP/$DRAIN_NODE-cap10.yaml"
-"$KLITE" apply -f "$TMP/$DRAIN_NODE-cap10.yaml" >/dev/null || die "re-declare $DRAIN_NODE with maxInstances 10"
+sed 's/maxInstances: 32/maxInstances: 8/' "examples/seed/nodes/$DRAIN_NODE.yaml" > "$TMP/$DRAIN_NODE-cap8.yaml"
+grep -q '^  maxInstances: 8$' "$TMP/$DRAIN_NODE-cap8.yaml" || die "craft $DRAIN_NODE-cap8.yaml (the maxInstances line moved?)"
+"$KLITE" apply -f "$TMP/$DRAIN_NODE-cap8.yaml" >/dev/null || die "re-declare $DRAIN_NODE with maxInstances 8"
 start_agent "$DRAIN_NODE"
-wait_for 30 nodes_ready 3 || warn "rejoined $DRAIN_NODE not Ready in 30s"
+wait_for 30 nodes_ready 4 || warn "rejoined $DRAIN_NODE not Ready in 30s"
 wait_for 60 one_infra_up "$DRAIN_NODE" || warn "rejoined $DRAIN_NODE infra not up in 60s"
-pass "$DRAIN_NODE rejoined with capacity for exactly the 10 instances"
+pass "$DRAIN_NODE rejoined with capacity for exactly the 8 instances"
 
 for n in "${NODES[@]}"; do
   [[ "$n" == "$DRAIN_NODE" ]] && continue
   run_drain "$TMP/drain-$n.log" "$n" || warn "drain $n did not complete (see $TMP/drain-$n.log)"
 done
 wait_for 30 all_on "$DRAIN_NODE" \
-  && pass "all instances consolidated on $DRAIN_NODE (10/10, no headroom)" \
+  && pass "all instances consolidated on $DRAIN_NODE (8/8, no headroom)" \
   || warn "instances did not consolidate on $DRAIN_NODE"
 
 start_probes # a moved during the consolidation drains, so rebind the loops

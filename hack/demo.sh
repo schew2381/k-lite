@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # The k-lite demo runs end to end on the canonical stack (klited :7443/:7445,
-# etcd :2379/81/83, nodes node-1..3). It gates PASS/FAIL like the verify
+# etcd :2379/81/83, nodes node-1..4). It gates PASS/FAIL like the verify
 # scripts and paces itself for watching.
 #
 # Beats, in order:
 #   wipe        fresh store, fresh CA, fresh identities
 #   boot        etcd trio plus two stateless klited replicas
-#   join        three nodes trade a token for an mTLS identity
+#   join        four nodes trade a token for an mTLS identity
 #   apps        a, b, c, d go Ready: each serves its hostname and chats
 #   discovery   a finds b by name through kdns and the VIP
-#   scale       d grows 3 -> 4 live, landing the resting shape
+#   scale       d grows 1 -> 2 live, landing the resting shape
 #   rollout     every b replaced, probe loop provably clean
 #   policy      deny a -> c on both planes (chatter included), restore
 #   drain       a node empties surge-first, stream on screen
@@ -34,7 +34,7 @@ KLITE="$BIN/klite"
 EP_A=127.0.0.1:7443
 EP_B=127.0.0.1:7445
 export KLITE_SERVER="$EP_A,$EP_B"
-NODES=(node-1 node-2 node-3)
+NODES=(node-1 node-2 node-3 node-4)
 SRV_DIR="$HOME/.klite/server"
 AGT_DIR="$HOME/.klite/agent"
 DEV_DIR="$HOME/.klite/dev"
@@ -84,7 +84,7 @@ wait_for() { # wait_for <seconds> <fn> [args...]
 # --- cluster read helpers, all through the CLI --------------------------------
 klited_a_ready() { "$KLITE" --server "$EP_A" get workloads >/dev/null 2>&1; }
 klited_b_ready() { "$KLITE" --server "$EP_B" get workloads >/dev/null 2>&1; }
-nodes_ready()   { [[ "$("$KLITE" get nodes 2>/dev/null | awk '$2=="Ready"' | wc -l | tr -d ' ')" == 3 ]]; }
+nodes_ready()   { [[ "$("$KLITE" get nodes 2>/dev/null | awk '$2=="Ready"' | wc -l | tr -d ' ')" == 4 ]]; }
 infra_up() {
   local n
   for n in "${NODES[@]}"; do
@@ -100,7 +100,7 @@ counts_ready() { # counts_ready <b> <c> <d>: a=1 plus these counts, all Ready
   [[ "$(echo "$snap" | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == "$3" ]]
 }
 # The resting shape every beat returns to, and what the board shows at the end.
-steady() { counts_ready 2 3 4; }
+steady() { counts_ready 2 3 2; }
 a_ctr() { echo "klite.$A_NODE.$A_INST"; }
 alloc_row() { "$KLITE" get ingressallocations 2>/dev/null | awk -v s="$1" -v i="$2" '$2==s && $3==i {print $4, $5}'; }
 
@@ -204,10 +204,10 @@ kill_port 5173 # a stale Vite would grab the port and serve an old bundle
 for p in 7443 7445 7080 5173; do
   lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 && die "port $p is still in use"
 done
-for p in $(seq $INGRESS_BASE $((INGRESS_BASE + 3 * INGRESS_PER_NODE - 1))); do
+for p in $(seq $INGRESS_BASE $((INGRESS_BASE + 4 * INGRESS_PER_NODE - 1))); do
   lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 && die "ingress port $p is already in use"
 done
-pass "canonical ports free (7443, 7445, 7080, 5173, ingress $INGRESS_BASE-$((INGRESS_BASE + 3 * INGRESS_PER_NODE - 1)))"
+pass "canonical ports free (7443, 7445, 7080, 5173, ingress $INGRESS_BASE-$((INGRESS_BASE + 4 * INGRESS_PER_NODE - 1)))"
 
 STEP=build
 make build >/dev/null 2>&1 && pass "built klited, klite, klite-agent" || die "make build"
@@ -240,7 +240,7 @@ show ls -l "$SRV_DIR/tls" "$SRV_DIR/token"
 pause
 
 # ============================================================
-banner "3. THREE NODES JOIN: a token in, an mTLS identity out"
+banner "3. FOUR NODES JOIN: a token in, an mTLS identity out"
 STEP=join
 
 TOKEN="$("$KLITE" node token)" || die "mint join token"
@@ -250,17 +250,17 @@ echo
 info "the K10<ca-sha256> prefix pins the CA, and ::node:<secret> is the one-time join proof"
 pause
 
-for i in 1 2 3; do
+for i in 1 2 3 4; do
   "$KLITE" apply -f "examples/seed/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
 done
-pass "declared node-1..3 (membership is YAML first, ADR 0018)"
+pass "declared node-1..4 (membership is YAML first, ADR 0018)"
 
 for n in "${NODES[@]}"; do
   "$BIN/klite-agent" --node "$n" --server "$KLITE_SERVER" --token "$TOKEN" >"$DEV_DIR/agent-$n.log" 2>&1 &
   echo $! >"$DEV_DIR/agent-$n.pid"
   disown
 done
-wait_for 30 nodes_ready && pass "3 agents joined, all nodes Ready" || die "3 nodes Ready (logs in $DEV_DIR)"
+wait_for 30 nodes_ready && pass "4 agents joined, all nodes Ready" || die "4 nodes Ready (logs in $DEV_DIR)"
 show "$KLITE" get nodes
 
 info "what the join left on node-1's disk:"
@@ -293,15 +293,16 @@ patch_drain() { # patch_drain <src> <dst>
 for app in a-client b-whoami c-whoami d-web; do
   patch_drain "examples/seed/apps/$app.yaml" "$DEV_DIR/apps/$app.yaml"
 done
-# d seeds at 3, one short of its resting 4, so the scale beat lands the
+# d seeds at 1, one short of its resting 2, so the scale beat lands the
 # final shape live. Replicas, like the drain knobs above, sit outside
 # the template and leave the hash untouched.
-awk '{sub(/^  replicas: 4$/, "  replicas: 3"); print}' "$DEV_DIR/apps/d-web.yaml" > "$DEV_DIR/apps/d-web-seed.yaml"
+awk '{sub(/^  replicas: 2$/, "  replicas: 1"); print}' "$DEV_DIR/apps/d-web.yaml" > "$DEV_DIR/apps/d-web-seed.yaml"
+grep -q '^  replicas: 1$' "$DEV_DIR/apps/d-web-seed.yaml" || die "seed d at 1 (the replicas line moved?)"
 mv "$DEV_DIR/apps/d-web-seed.yaml" "$DEV_DIR/apps/d-web.yaml"
 for app in a-client b-whoami c-whoami d-web; do
   "$KLITE" apply -f "$DEV_DIR/apps/$app.yaml" >/dev/null || die "apply $app.yaml"
 done
-wait_for 120 counts_ready 2 3 3 && pass "a, b, c, d all Ready (readiness probes gate all four)" || die "workloads Ready"
+wait_for 120 counts_ready 2 3 1 && pass "a, b, c, d all Ready (readiness probes gate all four)" || die "workloads Ready"
 show "$KLITE" get instances
 A_INST="$("$KLITE" get instances | awk '$2=="a" {print $1}' | head -1)"
 A_NODE="$("$KLITE" get instances | awk '$2=="a" {print $3}' | head -1)"
@@ -341,15 +342,15 @@ show "$KLITE" get vipallocations
 pause
 
 # ============================================================
-banner "6. SCALE d LIVE: 3 -> 4"
+banner "6. SCALE d LIVE: 1 -> 2"
 STEP=scale
 
-# This lands the cluster on its resting shape (a=1, b=2, c=3, d=4), which
+# This lands the cluster on its resting shape (a=1, b=2, c=3, d=2), which
 # every later beat returns to and the board shows at the end.
 ROLL_B_F0="$(fails_in "$PROBE_B")"; ROLL_C_F0="$(fails_in "$PROBE_C")"; ROLL_D_F0="$(fails_in "$PROBE_D")"
 ROLL_B_L0="$(lines_in "$PROBE_B")"; ROLL_C_L0="$(lines_in "$PROBE_C")"; ROLL_D_L0="$(lines_in "$PROBE_D")"
-show "$KLITE" scale workload d --replicas 4
-wait_for 90 steady && pass "d converged to 4/4 Ready" || die "scale d to 4"
+show "$KLITE" scale workload d --replicas 2
+wait_for 90 steady && pass "d converged to 2/2 Ready" || die "scale d to 2"
 show "$KLITE" get instances
 [[ "$("$KLITE" get instances | awk '$2=="d" {print $3}' | sort -u | wc -l | tr -d ' ')" -ge 2 ]] \
   && pass "d spans multiple nodes (spread-by-count scheduler, ADR 0012)" \
@@ -436,7 +437,7 @@ chaos_grew() {
      && "$(lines_in "$PROBE_D")" -gt "$CHAOS_D_L0" ]]
 }
 DRAIN_NODE=""
-for cand in node-2 node-3 node-1; do
+for cand in node-2 node-3 node-4 node-1; do
   [[ "$cand" == "$A_NODE" ]] && continue
   "$KLITE" get instances | awk -v n="$cand" '($2=="b" || $2=="c" || $2=="d") && $3==n' | grep -q . && { DRAIN_NODE="$cand"; break; }
 done
@@ -480,11 +481,11 @@ T0=$(date +%s)
 wait_for 15 survivor_leads \
   && pass "the survivor took leadership $(( $(date +%s) - T0 ))s after the kill (etcd lease election, ADR 0005)" \
   || die "survivor never logged 'controllers: leading'"
-b4() { counts_ready 4 3 4; }
+b4() { counts_ready 4 3 2; }
 wait_for 90 b4 && pass "scale to 4 converged through the survivor alone" || die "post-kill convergence"
 show "$KLITE" --server "$SURV_EP" get instances
 show "$KLITE" scale workload b --replicas 2
-wait_for 90 steady && pass "and back down: the cluster rests at a=1, b=2, c=3, d=4" || die "scale b back to 2"
+wait_for 90 steady && pass "and back down: the cluster rests at a=1, b=2, c=3, d=2" || die "scale b back to 2"
 sleep 3
 [[ "$(chaos_fails)" == 0 ]] && chaos_grew \
   && pass "ZERO failed requests across drain + leader kill + both scales (the data plane never blinked)" \
@@ -513,10 +514,10 @@ pause
 info "cross-node traffic rides per-endpoint mTLS ingress ports (ADRs 0034, 0035):"
 # The beat before this one scaled b down, and the drained instances hold
 # their ports until deletion, so give the allocator a beat to settle.
-allocs_settled() { [[ "$("$KLITE" get ingressallocations 2>/dev/null | tail -n +2 | grep -c .)" == 10 ]]; }
-wait_for 60 allocs_settled || { "$KLITE" get ingressallocations; die "want 10 ingress allocations (a=1, b=2, c=3, d=4)"; }
+allocs_settled() { [[ "$("$KLITE" get ingressallocations 2>/dev/null | tail -n +2 | grep -c .)" == 8 ]]; }
+wait_for 60 allocs_settled || { "$KLITE" get ingressallocations; die "want 8 ingress allocations (a=1, b=2, c=3, d=2)"; }
 show "$KLITE" get ingressallocations
-pass "10 allocations while traffic flows (a=1, b=2, c=3, d=4), each inside its node's slice"
+pass "8 allocations while traffic flows (a=1, b=2, c=3, d=2), each inside its node's slice"
 
 B_PORT="$("$KLITE" get ingressallocations | awk '$2=="b" {print $5; exit}')"
 [[ -n "$B_PORT" ]] || die "no ingress port to probe"

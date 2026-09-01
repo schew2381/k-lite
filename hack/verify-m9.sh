@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Checks M9 end to end on the canonical stack (klited :7443, etcd 2379/81/83,
-# nodes node-1..3). In run order:
+# nodes node-1..4). In run order:
 #   ranges      donors publish per-index ingress ranges
 #   allocations klited allocates per-endpoint ingress ports
 #   mTLS        cross-node traffic rides proxy-terminated mTLS (ADR 0034),
@@ -22,7 +22,7 @@ BIN=bin
 KLITE="$BIN/klite"
 TMP=/tmp/klite-m9
 EP=127.0.0.1:7443
-NODES=(node-1 node-2 node-3)
+NODES=(node-1 node-2 node-3 node-4)
 SRV_DIR="$HOME/.klite/server"
 AGT_DIR="$HOME/.klite/agent"
 INGRESS_BASE=20000
@@ -71,7 +71,7 @@ start_agent() { # start_agent <node> [extra flags...]
 }
 
 klited_ready() { "$KLITE" get workloads >/dev/null 2>&1; }
-nodes_ready()  { [[ "$("$KLITE" get nodes 2>/dev/null | awk '$2=="Ready"' | wc -l | tr -d ' ')" == 3 ]]; }
+nodes_ready()  { [[ "$("$KLITE" get nodes 2>/dev/null | awk '$2=="Ready"' | wc -l | tr -d ' ')" == 4 ]]; }
 
 infra_up() {
   local n
@@ -81,12 +81,12 @@ infra_up() {
   done
 }
 
-counts_ready() { # a=1, b=<$1>, c=3, d=4 all Ready
+counts_ready() { # a=1, b=<$1>, c=3, d=2 all Ready
   local snap; snap="$("$KLITE" get instances 2>/dev/null)"
   [[ "$(echo "$snap" | awk '$2=="a" && $4=="Ready"' | wc -l | tr -d ' ')" == 1 ]] || return 1
   [[ "$(echo "$snap" | awk '$2=="b" && $4=="Ready"' | wc -l | tr -d ' ')" == "$1" ]] || return 1
   [[ "$(echo "$snap" | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == 3 ]] || return 1
-  [[ "$(echo "$snap" | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == 4 ]]
+  [[ "$(echo "$snap" | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == 2 ]]
 }
 
 # idx_of <node>: the node's cluster-assigned index, read off its donor's
@@ -125,10 +125,10 @@ pkill -f 'bin/klite-agent' 2>/dev/null
 sleep 0.5
 my_docker_rm
 lsof -nP -iTCP:7443 -sTCP:LISTEN >/dev/null 2>&1 && die "port 7443 is already in use"
-for p in $(seq $INGRESS_BASE $((INGRESS_BASE + 3 * INGRESS_PER_NODE - 1))); do
+for p in $(seq $INGRESS_BASE $((INGRESS_BASE + 4 * INGRESS_PER_NODE - 1))); do
   lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 && die "ingress port $p is already in use"
 done
-pass "canonical ports free (7443, ingress $INGRESS_BASE-$((INGRESS_BASE + 3 * INGRESS_PER_NODE - 1)))"
+pass "canonical ports free (7443, ingress $INGRESS_BASE-$((INGRESS_BASE + 4 * INGRESS_PER_NODE - 1)))"
 
 # Fresh end to end: new store, new CA and admin token, new node identities,
 # so the run also proves the dual-purpose (client+server EKU) join flow.
@@ -153,11 +153,11 @@ disown
 wait_for 15 klited_ready && pass "klited serving on $EP" || die "klited serving on $EP"
 TOKEN="$("$KLITE" node token)" || die "mint join token"
 
-for i in 1 2 3; do
+for i in 1 2 3 4; do
   "$KLITE" apply -f "examples/seed/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
 done
 for n in "${NODES[@]}"; do start_agent "$n"; done
-wait_for 30 nodes_ready && pass "3 nodes joined and Ready" || die "3 nodes Ready"
+wait_for 30 nodes_ready && pass "4 nodes joined and Ready" || die "4 nodes Ready"
 wait_for 60 infra_up && pass "infra pods up on all nodes" || die "infra pods up"
 
 for n in "${NODES[@]}"; do
@@ -183,12 +183,12 @@ pass "each donor publishes exactly its 32-port slice on 0.0.0.0 (index-derived)"
 
 # Advertise addresses resolve against the donor's /etc/hosts and ride a
 # heartbeat, so they land a beat after the infra pods do.
-advertised() { [[ "$("$KLITE" get nodes -o yaml 2>/dev/null | grep -c 'advertiseAddress:')" == 3 ]]; }
-wait_for 30 advertised || die "want 3 advertise addresses in NodeStatus, got $("$KLITE" get nodes -o yaml 2>/dev/null | grep -c 'advertiseAddress:')"
+advertised() { [[ "$("$KLITE" get nodes -o yaml 2>/dev/null | grep -c 'advertiseAddress:')" == 4 ]]; }
+wait_for 30 advertised || die "want 4 advertise addresses in NodeStatus, got $("$KLITE" get nodes -o yaml 2>/dev/null | grep -c 'advertiseAddress:')"
 "$KLITE" get nodes -o yaml | awk '/advertiseAddress:/ {print $2}' | while read -r ip; do
   [[ "$ip" =~ ^[0-9.]+$ ]] || die "advertise address $ip is not a literal IPv4"
 done || exit 1
-pass "all 3 nodes advertise a resolved literal IP (default host.docker.internal path)"
+pass "all 4 nodes advertise a resolved literal IP (default host.docker.internal path)"
 
 # ============================================================
 STEP=3-apps
@@ -214,8 +214,8 @@ disown $!
 
 # ============================================================
 STEP=4-allocations
-allocs_settled() { [[ "$("$KLITE" get ingressallocations 2>/dev/null | tail -n +2 | grep -c .)" == 10 ]]; }
-wait_for 30 allocs_settled || { "$KLITE" get ingressallocations; die "want 10 ingress allocations (a=1, b=2, c=3, d=4)"; }
+allocs_settled() { [[ "$("$KLITE" get ingressallocations 2>/dev/null | tail -n +2 | grep -c .)" == 8 ]]; }
+wait_for 30 allocs_settled || { "$KLITE" get ingressallocations; die "want 8 ingress allocations (a=1, b=2, c=3, d=2)"; }
 "$KLITE" get ingressallocations | tail -n +2 | while read -r name svc inst node port; do
   i="$(idx_of "$node")"
   lo=$((INGRESS_BASE + INGRESS_PER_NODE * (i - 1)))
@@ -225,7 +225,7 @@ wait_for 30 allocs_settled || { "$KLITE" get ingressallocations; die "want 10 in
   [[ "$("$KLITE" get instances | awk -v n="$inst" '$1==n {print $3}')" == "$node" ]] \
     || die "allocation $name names node $node but the instance lives elsewhere"
 done || exit 1
-pass "klite get ingressallocations: 10 rows, each inside its owner's slice"
+pass "klite get ingressallocations: 8 rows, each inside its owner's slice"
 
 echo 'apiVersion: klite/v1
 kind: IngressAllocation

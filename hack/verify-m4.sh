@@ -55,21 +55,21 @@ start_agent() {
 }
 
 klited_ready() { "$KLITE" get workloads >/dev/null 2>&1; }
-nodes_ready()  { [[ "$("$KLITE" get nodes | awk '$2=="Ready"' | wc -l | tr -d ' ')" == 3 ]]; }
+nodes_ready()  { [[ "$("$KLITE" get nodes | awk '$2=="Ready"' | wc -l | tr -d ' ')" == 4 ]]; }
 
 infra_up() {
-  for n in 1 2 3; do
+  for n in 1 2 3 4; do
     docker ps --format '{{.Names}}' | grep -qx "klite.node-$n.net" || return 1
     docker ps --format '{{.Names}}' | grep -qx "klite.node-$n.envoy" || return 1
   done
 }
 
-# Ready instance counts per workload: a=1, b=2, c=3, d=4.
+# Ready instance counts per workload: a=1, b=2, c=3, d=2.
 all_ready() {
   [[ "$("$KLITE" get instances | awk '$2=="a" && $4=="Ready"' | wc -l | tr -d ' ')" == 1 ]] || return 1
   [[ "$("$KLITE" get instances | awk '$2=="b" && $4=="Ready"' | wc -l | tr -d ' ')" == 2 ]] || return 1
   [[ "$("$KLITE" get instances | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == 3 ]] || return 1
-  [[ "$("$KLITE" get instances | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == 4 ]]
+  [[ "$("$KLITE" get instances | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == 2 ]]
 }
 
 # The seeded apps chat at random (a 2.5% roll per second, see examples/seed/apps),
@@ -119,14 +119,14 @@ wait_for 15 klited_ready \
 TOKEN="$("$KLITE" node token)" && pass "minted join token" || die "mint join token"
 
 # --- nodes and infra pods ----------------------------------------------------
-for i in 1 2 3; do
+for i in 1 2 3 4; do
   "$KLITE" apply -f "examples/seed/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
 done
-pass "applied 3 node YAMLs"
+pass "applied 4 node YAMLs"
 
-for i in 1 2 3; do start_agent "$i"; done
+for i in 1 2 3 4; do start_agent "$i"; done
 wait_for 15 nodes_ready \
-  && pass "all 3 nodes Ready" || die "all 3 nodes Ready"
+  && pass "all 4 nodes Ready" || die "all 4 nodes Ready"
 wait_for 60 infra_up \
   && pass "infra pods up on all nodes (klite.<n>.net + klite.<n>.envoy)" \
   || die "infra pods up on all nodes"
@@ -138,7 +138,7 @@ done
 pass "applied a, b, c, d workloads and services"
 
 wait_for 90 all_ready \
-  && pass "all instances READY (a=1, b=2, c=3, d=4, probe-gated)" \
+  && pass "all instances READY (a=1, b=2, c=3, d=2, probe-gated)" \
   || { "$KLITE" get instances; die "all instances READY"; }
 
 A_INST="$("$KLITE" get instances | awk '$2=="a" {print $1}' | head -1)"
