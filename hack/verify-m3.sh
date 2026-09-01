@@ -45,7 +45,7 @@ nodes_ready()  { [[ "$("$KLITE" get nodes | awk '$2=="Ready"' | wc -l | tr -d ' 
 a_running()    { "$KLITE" get instances | awk '$2=="a" && ($4=="Running" || $4=="Ready")' | grep -q a; }
 tail3_ok() {
   "$KLITE" logs "$INST" --tail 3 >/tmp/klite-m3-tail.log 2>&1 || return 1
-  [[ "$(wc -l </tmp/klite-m3-tail.log | tr -d ' ')" == 3 ]] && grep -q "b =>" /tmp/klite-m3-tail.log
+  [[ "$(wc -l </tmp/klite-m3-tail.log | tr -d ' ')" == 3 ]] && grep -q "tick" /tmp/klite-m3-tail.log
 }
 
 # --- fresh cluster state ---
@@ -58,6 +58,7 @@ go build -o "$BIN/klited" ./cmd/klited \
   && go build -o "$BIN/klite" ./cmd/klite \
   && go build -o "$BIN/klite-agent" ./cmd/klite-agent \
   && pass "build klited, klite, klite-agent" || die "build klited, klite, klite-agent"
+docker image inspect busybox:1.36 >/dev/null 2>&1 || docker pull busybox:1.36 >/dev/null 2>&1
 
 "$BIN/klited" --listen 127.0.0.1:7443 >/tmp/klited-7443.log 2>&1 &
 KLITED_PID=$!
@@ -75,9 +76,29 @@ start_agent 2; AGENT2_PID=$!
 wait_for 10 nodes_ready \
   && pass "both nodes Ready within 10s" || die "both nodes Ready within 10s"
 
-# --- workload a: its wget loop prints a line roughly every second ---
-"$KLITE" apply -f examples/apps/a-client.yaml >/dev/null \
-  && pass "apply a-client.yaml" || die "apply a-client.yaml"
+# --- workload a: a ticker that prints one line a second ---
+# The log-plumbing checks need a steady cadence. The seeded demo apps chat
+# on a sparse 5% roll, so this stays a dedicated inline fixture.
+cat <<'EOF' | "$KLITE" apply -f - >/dev/null \
+  && pass "apply the inline ticker workload a" || die "apply the inline ticker workload a"
+apiVersion: klite/v1
+kind: Workload
+metadata:
+  name: a
+  labels:
+    app: a
+spec:
+  replicas: 1
+  template:
+    labels:
+      app: a
+    containers:
+      - name: tick
+        image: busybox:1.36
+        command: ["/bin/sh", "-c"]
+        args:
+          - 'while sleep 1; do echo "tick $(date +%T)"; done'
+EOF
 wait_for 30 a_running \
   && pass "instance of a Running" || die "instance of a Running"
 INST="$("$KLITE" get instances | awk '$2=="a" {print $1}' | head -1)"

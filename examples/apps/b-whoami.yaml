@@ -11,10 +11,28 @@ spec:
       app: b
     containers:
       - name: web
-        image: traefik/whoami:v1.10
+        image: busybox:1.36
+        command: ["/bin/sh", "-c"]
+        # Same chatty shape as a (see a-client.yaml), differing only in the
+        # served name and TARGETS.
+        args:
+          - |
+            trap "exit 0" TERM
+            mkdir -p /www
+            echo "$(hostname) is b" > /www/index.html
+            httpd -p 80 -h /www
+            while sleep 1; do
+              r=$(head -c2 /dev/urandom | od -An -tu2 | tr -d " ")
+              [ "$r" -lt 3277 ] || continue
+              n=0; for t in $TARGETS; do n=$((n+1)); done
+              [ "$n" -gt 0 ] || continue
+              k=$(( ($(head -c2 /dev/urandom | od -An -tu2 | tr -d " ") % n) + 1 ))
+              i=0; for t in $TARGETS; do i=$((i+1)); [ "$i" = "$k" ] && pick=$t; done
+              wget -q -T 2 -O- "http://$pick:8080" >/dev/null 2>&1 && echo "-> $pick ok" || echo "-> $pick FAILED"
+            done
         env:
-          - name: WHOAMI_NAME
-            value: b
+          - name: TARGETS
+            value: a c
         ports:
           - containerPort: 80
         readinessProbe:

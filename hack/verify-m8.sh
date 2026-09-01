@@ -232,8 +232,17 @@ done
 pass "every Envoy holds its ADS stream over node-cert mTLS (connected_state=1)"
 
 A_INST="$("$KLITE" --server "$BOTH" get instances | awk '$2=="a" {print $1}' | head -1)"
-b_lb() { [[ "$("$KLITE" --server "$BOTH" logs "$A_INST" --tail 30 2>/dev/null | grep -o 'b => Hostname: [0-9a-f]*' | awk '{print $4}' | sort -u | wc -l | tr -d ' ')" -ge 2 ]]; }
-wait_for 45 b_lb && pass "data plane flows: a's requests balance across b's endpoints" || die "traffic through the TLS-bootstrapped Envoy"
+A_NODE="$("$KLITE" --server "$BOTH" get instances | awk '$2=="a" {print $3}' | head -1)"
+# A burst of probes from inside a's container rides kdns -> VIP -> Envoy.
+# Bodies read "<cid> is b", so two distinct cids prove both endpoints answer.
+# The seeded apps' own 5% chatter is too sparse to gate on.
+b_lb() {
+  local i
+  [[ "$(for i in $(seq 1 10); do
+          docker exec "klite.$A_NODE.$A_INST" wget -qO- -T 2 http://b:8080 2>/dev/null
+        done | awk '$2=="is" && $3=="b" {print $1}' | sort -u | wc -l | tr -d ' ')" -ge 2 ]]
+}
+wait_for 45 b_lb && pass "data plane flows: probes from a balance across b's endpoints" || die "traffic through the TLS-bootstrapped Envoy"
 
 # ============================================================
 STEP=7-admin-lockdown

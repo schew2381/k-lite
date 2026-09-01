@@ -5,6 +5,10 @@
 #   balancing  xDS-driven load balancing across nodes
 #   policy     klite policy check
 #   churn      scale-out convergence, instance-kill recovery
+#   chatter    the seeded apps' own random calls complete
+# Traffic assertions ride a deterministic probe loop (wget once a second from
+# inside a's container). The apps' 5% random chatter is checked last, on its
+# own clock.
 # Leaves etcd, the klite0 network, and images in place.
 set -u
 
@@ -15,11 +19,14 @@ BIN=bin
 KLITE="$BIN/klite"
 KLITED_PID=""
 AGENT_PIDS=()
+PROBE_PID=""
+PROBE_FILE=/tmp/klite-m4-probe.log
 
 pass() { echo "PASS: $1"; }
 die()  { echo "FAIL: $1"; exit 1; }
 
 cleanup() {
+  [[ -n "$PROBE_PID" ]] && kill "$PROBE_PID" 2>/dev/null
   for pid in "${AGENT_PIDS[@]:-}"; do [[ -n "$pid" ]] && kill "$pid" 2>/dev/null; done
   [[ -n "$KLITED_PID" ]] && kill "$KLITED_PID" 2>/dev/null
   docker ps -aq --filter label=io.klite.role=workload | xargs docker rm -f >/dev/null 2>&1
@@ -64,14 +71,25 @@ all_ready() {
   [[ "$("$KLITE" get instances | awk '$2=="c" && $4=="Ready"' | wc -l | tr -d ' ')" == 2 ]]
 }
 
-b_hostnames_in_tail() { # b_hostnames_in_tail <lines>: distinct b hostnames in a's last <lines> log lines
-  "$KLITE" logs "$A_INST" --tail "$1" 2>/dev/null \
-    | grep -o 'b => Hostname: [0-9a-f]*' | awk '{print $4}' | sort -u
+# The seeded apps chat at random (a 5% roll per second, see examples/apps),
+# which is the wrong clock to hang assertions on. The script runs its own
+# probe loop instead: one wget per second to b's service, executed inside
+# a's container so it rides the same kdns -> VIP -> Envoy path. Each probe
+# appends one line to PROBE_FILE: the served body ("<cid> is b") or FAILED.
+probe_loop() {
+  while :; do
+    docker exec "$A_CTR" wget -qO- -T 2 http://b:8080 2>/dev/null || echo "FAILED"
+    sleep 1
+  done >>"$PROBE_FILE" 2>/dev/null
+}
+
+b_hostnames_in_tail() { # b_hostnames_in_tail <lines>: distinct b endpoints in the last <lines> probes
+  tail -n "$1" "$PROBE_FILE" 2>/dev/null | awk '$2=="is" && $3=="b" {print $1}' | sort -u
 }
 
 two_b_hostnames()   { [[ "$(b_hostnames_in_tail 30 | wc -l | tr -d ' ')" -ge 2 ]]; }
 three_b_hostnames() { [[ "$(b_hostnames_in_tail 30 | wc -l | tr -d ' ')" -ge 3 ]]; }
-b_answers_again()   { "$KLITE" logs "$A_INST" --tail 4 2>/dev/null | grep -q 'b => Hostname:'; }
+b_answers_again()   { tail -n 4 "$PROBE_FILE" 2>/dev/null | grep -q 'is b'; }
 
 victim_recovered() {
   "$KLITE" get instances | awk -v n="$VICTIM_INST" '$1==n && $4=="Ready" && $5>=1' | grep -q "$VICTIM_INST"
@@ -91,6 +109,7 @@ make build >/dev/null 2>&1 \
   && pass "make build" || die "make build"
 make net-image >/dev/null 2>&1 \
   && pass "make net-image (klite-net:dev)" || die "make net-image"
+docker image inspect busybox:1.36 >/dev/null 2>&1 || docker pull busybox:1.36 >/dev/null 2>&1
 
 "$BIN/klited" --listen 127.0.0.1:7443 >/tmp/klite-m4-klited.log 2>&1 &
 KLITED_PID=$!
@@ -124,13 +143,20 @@ wait_for 90 all_ready \
 A_INST="$("$KLITE" get instances | awk '$2=="a" {print $1}' | head -1)"
 A_NODE="$("$KLITE" get instances | awk '$2=="a" {print $3}' | head -1)"
 [[ -n "$A_INST" && -n "$A_NODE" ]] || die "resolve a's instance and node"
+A_CTR="klite.$A_NODE.$A_INST"
+
+: >"$PROBE_FILE"
+probe_loop &
+PROBE_PID=$!
+disown $!
 
 # --- load-balanced, cross-node traffic ---------------------------------------
 wait_for 45 two_b_hostnames \
-  && pass "a's logs alternate between 2 b hostnames within 30 lines" \
-  || { "$KLITE" logs "$A_INST" --tail 30; die "a's logs alternate between 2 b hostnames"; }
+  && pass "probes from a's netns reach 2 distinct b endpoints within 30 requests" \
+  || { tail -n 30 "$PROBE_FILE"; die "probes reach 2 distinct b endpoints"; }
 
-# whoami's Hostname is its container id (12 hex chars), so map ids to nodes.
+# The served page reads "<hostname> is b", and a container's default hostname
+# is its id (12 hex chars), so map ids to nodes.
 CROSS=""
 while read -r cid cnode; do
   if [[ "$cnode" != "$A_NODE" ]] && b_hostnames_in_tail 30 | grep -q "^${cid}$"; then
@@ -142,7 +168,6 @@ done < <(docker ps --filter label=io.klite.workload=b --format '{{.ID}} {{.Label
   || die "at least one b response from a node other than $A_NODE"
 
 # --- DNS: name resolves to this node's VIP, TTL 5 ----------------------------
-A_CTR="klite.$A_NODE.$A_INST"
 NSLOOKUP="$(docker exec "$A_CTR" nslookup b.svc.klite 2>&1)"
 echo "$NSLOOKUP" | grep -Eq 'Address: *10\.44\.(6[4-9]|[7-9][0-9]|1[0-1][0-9]|12[0-7])\.' \
   && pass "nslookup b.svc.klite in a's container returns a 10.44.64.0/18 VIP" \
@@ -174,8 +199,8 @@ echo "$CHECK" | grep -q 'allowed' \
 "$KLITE" scale workload b --replicas 3 >/dev/null \
   && pass "scale workload b to 3" || die "scale workload b to 3"
 wait_for 30 three_b_hostnames \
-  && pass "third b hostname appears in a's logs within 30s" \
-  || { b_hostnames_in_tail 30; die "third b hostname appears in a's logs within 30s"; }
+  && pass "third b endpoint appears in the probe stream within 30s" \
+  || { b_hostnames_in_tail 30; die "third b endpoint appears in the probe stream within 30s"; }
 
 # --- kill one b: brief blip, then recovery and restart -----------------------
 VICTIM_CTR="$(docker ps --filter label=io.klite.workload=b --format '{{.Names}}' | head -1)"
@@ -185,10 +210,24 @@ docker kill "$VICTIM_CTR" >/dev/null \
 wait_for 45 victim_recovered \
   && pass "killed instance restarted and probed back to Ready (restarts>=1)" \
   || { "$KLITE" get instances; die "killed instance restarts to Ready"; }
-sleep 2 # let a's loop run against the recovered set
+sleep 2 # let the probe loop run against the recovered set
 wait_for 30 b_answers_again \
-  && pass "a's loop recovered: fresh b => Hostname lines after the kill" \
-  || { "$KLITE" logs "$A_INST" --tail 8; die "a's loop recovers after kill"; }
+  && pass "probes recovered: fresh 'is b' responses after the kill" \
+  || { tail -n 8 "$PROBE_FILE"; die "probes recover after kill"; }
+
+# --- the seeded chatter itself ------------------------------------------------
+# The apps also call each other on their own 5% roll. By this point the run
+# is minutes old, so every workload should have landed at least one call.
+chatty_flowing() {
+  local wl
+  for wl in a b c; do
+    docker ps --filter "label=io.klite.workload=$wl" --format '{{.Names}}' \
+      | xargs -I{} docker logs {} 2>/dev/null | grep -q '^-> [abc] ok$' || return 1
+  done
+}
+wait_for 90 chatty_flowing \
+  && pass "chatty traffic flows: a, b, and c each logged a '-> <target> ok' call" \
+  || die "a workload (a, b, or c) never completed a chatty call"
 
 echo
 echo "verify-m4: all steps passed (etcd, klite0, and images left in place)"

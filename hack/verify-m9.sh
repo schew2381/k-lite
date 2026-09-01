@@ -9,7 +9,10 @@
 #   churn       scale, rollout, and drain stay hitless through the ingress hop
 #   WAN         a WAN-shaped advertise address keeps traffic flowing
 #   release     killing an instance releases its port
-# Leaves etcd, the klite0 network, images, and ~/.klite/server in place.
+# Traffic assertions ride a deterministic probe loop (wget to b once a second
+# from inside a's container). The seeded apps' 5% chatter is too sparse to
+# gate on. Leaves etcd, the klite0 network, images, and ~/.klite/server in
+# place.
 set -u
 
 cd "$(dirname "$0")/.."
@@ -27,6 +30,8 @@ INGRESS_PER_NODE=32
 
 KLITED_PID=""
 declare -A AGENT_PID=()
+PROBE_PID=""
+PROBE_FILE="$TMP/probe-b.log"
 STEP=prep
 
 pass() { echo "PASS [$STEP]: $1"; }
@@ -50,6 +55,7 @@ my_docker_rm() {
 }
 
 cleanup() {
+  [[ -n "$PROBE_PID" ]] && kill "$PROBE_PID" 2>/dev/null
   for n in "${!AGENT_PID[@]}"; do kill "${AGENT_PID[$n]}" 2>/dev/null; done
   [[ -n "$KLITED_PID" ]] && kill "$KLITED_PID" 2>/dev/null
   my_docker_rm
@@ -95,8 +101,19 @@ estat() { # estat <node> <exact stat name> -> value (0 when absent)
 # alloc_row <service> <instance>: "node port" for one ingress allocation.
 alloc_row() { "$KLITE" get ingressallocations 2>/dev/null | awk -v s="$1" -v i="$2" '$2==s && $3==i {print $4, $5}'; }
 
-a_ctr() { echo "klite.$A_NODE.$A_INST"; }
-failed_since() { docker logs "$(a_ctr)" --since "$1" 2>/dev/null | grep -c 'FAILED'; }
+# The loop fires one wget a second at b from inside a's container, riding
+# the same kdns -> VIP -> Envoy -> ingress path as real traffic. Every
+# attempt appends one line: the served body ("<cid> is b") or FAILED. Gates
+# diff the FAILED count over a window and demand growth, so a dead prober
+# cannot fake a clean window.
+probe_loop() {
+  while :; do
+    docker exec "klite.$A_NODE.$A_INST" wget -qO- -T 2 http://b:8080 2>/dev/null || echo "FAILED"
+    sleep 1
+  done >>"$PROBE_FILE" 2>/dev/null
+}
+fails_in() { awk '/FAILED/ {n++} END {print n+0}' "$1" 2>/dev/null; }
+lines_in() { awk 'END {print NR}' "$1" 2>/dev/null; }
 
 # ============================================================
 STEP=prep
@@ -124,7 +141,8 @@ make build >/dev/null 2>&1 && pass "make build" || die "make build"
 if ! docker image inspect klite-net:dev >/dev/null 2>&1; then
   make net-image >/dev/null 2>&1 || die "make net-image"
 fi
-docker image inspect alpine:3.20 >/dev/null 2>&1 || docker pull alpine:3.20 >/dev/null 2>&1
+docker image inspect busybox:1.36 >/dev/null 2>&1 || docker pull busybox:1.36 >/dev/null 2>&1
+docker image inspect traefik/whoami:v1.10 >/dev/null 2>&1 || docker pull traefik/whoami:v1.10 >/dev/null 2>&1
 
 # ============================================================
 STEP=1-boot
@@ -188,6 +206,10 @@ wait_for 90 counts_ready 2 && pass "workloads a, b, c all Ready (probe-gated)" |
 A_INST="$("$KLITE" get instances | awk '$2=="a" {print $1}' | head -1)"
 A_NODE="$("$KLITE" get instances | awk '$2=="a" {print $3}' | head -1)"
 [[ -n "$A_INST" && -n "$A_NODE" ]] || die "resolve a's instance and node"
+: >"$PROBE_FILE"
+probe_loop &
+PROBE_PID=$!
+disown $!
 
 # ============================================================
 STEP=4-allocations
@@ -214,11 +236,11 @@ spec: {}' | "$KLITE" apply -f - 2>&1 | grep -q "server-materialized" \
 
 # ============================================================
 STEP=5-mtls-dataflow
-b_lb() { [[ "$(docker logs "$(a_ctr)" --since 15s 2>/dev/null | grep -o 'b => Hostname: [0-9a-f]*' | awk '{print $4}' | sort -u | wc -l | tr -d ' ')" -ge 2 ]]; }
-wait_for 60 b_lb && pass "a's requests balance across both b endpoints" || { docker logs "$(a_ctr)" --since 30s 2>&1 | tail -5; die "a reaches both b endpoints"; }
+b_lb() { [[ "$(tail -n 15 "$PROBE_FILE" 2>/dev/null | awk '$2=="is" && $3=="b" {print $1}' | sort -u | wc -l | tr -d ' ')" -ge 2 ]]; }
+wait_for 60 b_lb && pass "probes from a's netns balance across both b endpoints" || { tail -n 15 "$PROBE_FILE"; die "a reaches both b endpoints"; }
 
 # The remote b endpoint's ingress listener must be doing real TLS work:
-# its handshake counter rises while the a-loop runs.
+# its handshake counter rises while the probe loop runs.
 REMOTE_B_INST="$("$KLITE" get instances | awk -v an="$A_NODE" '$2=="b" && $3!=an {print $1}' | head -1)"
 read -r REMOTE_B_NODE REMOTE_B_PORT <<<"$(alloc_row b "$REMOTE_B_INST")"
 [[ -n "$REMOTE_B_PORT" ]] || die "no ingress allocation for remote b instance $REMOTE_B_INST"
@@ -298,10 +320,8 @@ RX2="$(estat "$A_NODE" "$RX_STAT")"
 
 # ============================================================
 STEP=7-churn-hitless
-# Unix epoch on purpose: docker parses zone-less RFC3339 as local time,
-# which would push --since into the future and blank the log.
-MARKER="$(date +%s)"
-sleep 2
+F0="$(fails_in "$PROBE_FILE")"
+L0="$(lines_in "$PROBE_FILE")"
 
 "$KLITE" scale workload b --replicas 3 >/dev/null || die "scale b to 3"
 b3() { counts_ready 3; }
@@ -313,7 +333,7 @@ wait_for 60 b3 && pass "scale b 2->3 converged" || die "scale b to 3 converged"
 # stored one and the file's replicas: 2 would silently undo the scale step.
 B_BEFORE="$("$KLITE" get instances | awk '$2=="b" {print $1}' | sort)"
 awk '{sub(/^  replicas: 2$/, "  replicas: 3"); print}
-     /value: b$/ {print "          - name: M9_ROLLOUT"; print "            value: \"1\""}' \
+     /^            value: a c$/ {print "          - name: M9_ROLLOUT"; print "            value: \"1\""}' \
   "$TMP/b-whoami-fast.yaml" | "$KLITE" apply -f - >/dev/null || die "apply rolled b template"
 rolled() {
   [[ "$("$KLITE" get instances 2>/dev/null | awk '$2=="b" && $4=="Ready"' | wc -l | tr -d ' ')" == 3 ]] || return 1
@@ -335,10 +355,10 @@ pass "drained $DRAIN_NODE through the ingress-hop data path"
 wait_for 60 b3 && pass "cluster re-converged after uncordon" || die "post-drain reconverge"
 
 sleep 3
-FAILS="$(failed_since "$MARKER")"
-[[ "$FAILS" == 0 ]] \
-  && pass "ZERO failed requests across scale + rollout + drain (a-loop clean since $MARKER)" \
-  || { docker logs "$(a_ctr)" --since "$MARKER" 2>/dev/null | grep FAILED | head -5; die "$FAILS failed request(s) during churn"; }
+FAILS=$(( $(fails_in "$PROBE_FILE") - F0 ))
+[[ "$FAILS" == 0 && "$(lines_in "$PROBE_FILE")" -gt "$L0" ]] \
+  && pass "ZERO failed probes across scale + rollout + drain ($(( $(lines_in "$PROBE_FILE") - L0 )) requests, all answered)" \
+  || { tail -n 5 "$PROBE_FILE"; die "$FAILS failed probe(s) during churn"; }
 
 # ============================================================
 STEP=8-wan
@@ -376,20 +396,20 @@ else
   fi
   pass "consumer EDS now dials b via ${WAN_IP}:${WAN_B_PORT}"
 
-  WAN_MARK="$(date +%s)"
+  WF0="$(fails_in "$PROBE_FILE")"
   WH0="$(estat "$WAN_NODE" "listener.0.0.0.0_${WAN_B_PORT}.ssl.handshake")"
   WAN_CID="$(docker ps --filter "label=io.klite.instance=$WAN_B_INST" --format '{{.ID}}')"
   wan_flows() {
     [[ "$(estat "$WAN_NODE" "listener.0.0.0.0_${WAN_B_PORT}.ssl.handshake")" -gt "$WH0" ]] \
-      && docker logs "$(a_ctr)" --since 10s 2>/dev/null | grep -q "b => Hostname: ${WAN_CID}"
+      && tail -n 10 "$PROBE_FILE" 2>/dev/null | grep -q "^${WAN_CID} is b"
   }
   wait_for 45 wan_flows \
     && pass "cross-node traffic flows to $WAN_NODE via $WAN_IP (handshakes rising, its b answering)" \
     || die "no traffic reached $WAN_NODE through $WAN_IP:$WAN_B_PORT"
   sleep 5
-  [[ "$(failed_since "$WAN_MARK")" == 0 ]] \
-    && pass "advertise flip was hitless (zero FAILED since $WAN_MARK)" \
-    || die "requests failed after the advertise flip"
+  [[ "$(( $(fails_in "$PROBE_FILE") - WF0 ))" == 0 ]] \
+    && pass "advertise flip was hitless (zero FAILED probes since the flip)" \
+    || die "probes failed after the advertise flip"
 fi
 
 # ============================================================

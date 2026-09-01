@@ -7,15 +7,19 @@
 #   wipe        fresh store, fresh CA, fresh identities
 #   boot        etcd trio plus two stateless klited replicas
 #   join        three nodes trade a token for an mTLS identity
-#   apps        a (client loop), b and c (web) go Ready
+#   apps        a, b, c go Ready: each serves its hostname and chats
 #   discovery   a finds b by name through kdns and the VIP
 #   scale       c grows 2 -> 3 live, landing the resting shape
-#   rollout     every b replaced, request loop provably clean
-#   policy      deny a -> c on both planes, then restore
+#   rollout     every b replaced, probe loop provably clean
+#   policy      deny a -> c on both planes (chatter included), restore
 #   drain       a node empties surge-first, stream on screen
 #   leader kill SIGKILL mid-scale, the survivor converges it
 #   security    TLS 1.3 chain, ingress allocations, plaintext dies
-#   finale      facade plus Vite open the board in live mode
+#   finale      the apps' own chatter confirmed, then the live board
+#
+# Zero-failure gates ride deterministic probe loops (wget to b and to c once
+# a second from inside a's container). The apps' 5% random chatter is shown
+# and checked on its own clock, never used as a gate's denominator.
 #
 # The demo leaves everything running so the audience can poke at it. Tear
 # down with the cheat sheet it prints at the end (or hack/dev-down.sh --all).
@@ -44,6 +48,7 @@ STEP=preflight
 pass() { echo "PASS [$STEP]: $1"; }
 info() { echo "INFO [$STEP]: $1"; }
 die()  {
+  stop_probes 2>/dev/null
   echo "FAIL [$STEP]: $1"
   echo "The stack is left as-is for debugging (logs in $DEV_DIR)."
   echo "Reset with: hack/dev-down.sh --all"
@@ -96,8 +101,38 @@ counts_ready() { # counts_ready <b> <c>: a=1 plus these counts, all Ready
 # The resting shape every beat returns to, and what the board shows at the end.
 steady() { counts_ready 2 3; }
 a_ctr() { echo "klite.$A_NODE.$A_INST"; }
-failed_since() { docker logs "$(a_ctr)" --since "$1" 2>/dev/null | grep -c 'FAILED'; }
 alloc_row() { "$KLITE" get ingressallocations 2>/dev/null | awk -v s="$1" -v i="$2" '$2==s && $3==i {print $4, $5}'; }
+
+# --- deterministic probes ------------------------------------------------------
+# Each loop fires one wget a second at its service from inside a's container,
+# taking the same kdns -> VIP -> Envoy path as the apps' own chatter. Every
+# attempt appends one line: the served body ("<cid> is b") or FAILED.
+# Zero-failure gates diff the FAILED counts over a window and demand growth.
+PROBE_B="$DEV_DIR/probe-b.log"
+PROBE_C="$DEV_DIR/probe-c.log"
+PROBE_PIDS=()
+probe_loop() { # probe_loop <file> <url>
+  local file=$1 url=$2
+  while :; do
+    docker exec "$(a_ctr)" wget -qO- -T 2 "$url" 2>/dev/null || echo "FAILED"
+    sleep 1
+  done >>"$file" 2>/dev/null
+}
+start_probes() {
+  : >"$PROBE_B"
+  : >"$PROBE_C"
+  probe_loop "$PROBE_B" http://b:8080 &
+  PROBE_PIDS+=($!); disown $!
+  probe_loop "$PROBE_C" http://c:8080 &
+  PROBE_PIDS+=($!); disown $!
+}
+stop_probes() {
+  local pid
+  for pid in "${PROBE_PIDS[@]:-}"; do [[ -n "$pid" ]] && kill "$pid" 2>/dev/null; done
+  PROBE_PIDS=()
+}
+fails_in() { awk '/FAILED/ {n++} END {print n+0}' "$1" 2>/dev/null; }
+lines_in() { awk 'END {print NR}' "$1" 2>/dev/null; }
 leader_state() { # leader_state <log>: leading | standby | none
   local line
   line=$(grep -E "controllers: (leading|standing by|leadership released)" "$1" 2>/dev/null | tail -1)
@@ -120,9 +155,12 @@ STEP=preflight
 
 colima status >/dev/null 2>&1 || die "colima isn't running (run: make bootstrap)"
 docker info >/dev/null 2>&1 || die "docker daemon unreachable (run: make bootstrap)"
-for img in alpine:3.20 traefik/whoami:v1.10 quay.io/coreos/etcd:v3.5.16 envoyproxy/envoy:v1.31.5; do
+for img in quay.io/coreos/etcd:v3.5.16 envoyproxy/envoy:v1.31.5; do
   docker image inspect "$img" >/dev/null 2>&1 || die "image $img missing (run: make bootstrap)"
 done
+# The apps' image is small enough to fetch on the spot when bootstrap predates it.
+docker image inspect busybox:1.36 >/dev/null 2>&1 || docker pull busybox:1.36 >/dev/null 2>&1 \
+  || die "image busybox:1.36 missing and the pull failed (run: make bootstrap)"
 pass "colima up, docker answering, base images present"
 
 command -v bun >/dev/null 2>&1 || die "bun missing for the web board (run: make bootstrap)"
@@ -236,7 +274,7 @@ wait_for 90 infra_up && pass "infra pods running on every node (klite-net + Envo
 pause
 
 # ============================================================
-banner "4. DECLARE THE APPS: a (client loop), b and c (web)"
+banner "4. DECLARE THE APPS: a, b, c each serve their name and chat"
 STEP=apps
 
 # Demo pace lives in the YAML, never in code (ADR 0010): 4s drain knobs go
@@ -251,31 +289,34 @@ for app in a-client b-whoami c-whoami; do
   patch_drain "examples/apps/$app.yaml" "$DEV_DIR/apps/$app.yaml"
   "$KLITE" apply -f "$DEV_DIR/apps/$app.yaml" >/dev/null || die "apply $app.yaml"
 done
-wait_for 120 counts_ready 2 2 && pass "a, b, c all Ready (readiness probes gate b and c)" || die "workloads Ready"
+wait_for 120 counts_ready 2 2 && pass "a, b, c all Ready (readiness probes gate all three)" || die "workloads Ready"
 show "$KLITE" get instances
 A_INST="$("$KLITE" get instances | awk '$2=="a" {print $1}' | head -1)"
 A_NODE="$("$KLITE" get instances | awk '$2=="a" {print $3}' | head -1)"
 [[ -n "$A_INST" && -n "$A_NODE" ]] || die "resolve a's instance and node"
+info "every instance serves its hostname on :80 and rolls a 5% die each second"
+info "a hit calls one random peer from TARGETS, the chatter the board feeds on"
+start_probes
 pause
 
 # ============================================================
 banner "5. DISCOVERY: a finds b by name, through its node's DNS and VIP"
 STEP=discovery
 
-# The gate reads the same lines the audience is about to see: the last four,
-# all clean, reaching at least two distinct b endpoints. a's earliest lines
-# show FAILED (its loop starts before the mesh finishes programming), and
-# those must have scrolled away before this beat is worth watching.
+# The gate reads the same lines the audience is about to see: the last four
+# probes, all answered, reaching at least two distinct b endpoints. The
+# earliest probes can show FAILED (the loop starts before the mesh finishes
+# programming), and those must have scrolled away before this beat is worth
+# watching.
 b_lb() {
   local lines
-  lines="$("$KLITE" logs "$A_INST" --tail 4 2>/dev/null)" || return 1
-  [[ "$(grep -c 'b => Hostname' <<<"$lines")" == 4 ]] || return 1
-  grep -q 'FAILED' <<<"$lines" && return 1
-  [[ "$(grep -o 'b => Hostname: [0-9a-f]*' <<<"$lines" | awk '{print $4}' | sort -u | wc -l | tr -d ' ')" -ge 2 ]]
+  lines="$(tail -n 4 "$PROBE_B" 2>/dev/null)"
+  [[ "$(grep -c ' is b' <<<"$lines")" == 4 ]] || return 1
+  [[ "$(awk '{print $1}' <<<"$lines" | sort -u | wc -l | tr -d ' ')" -ge 2 ]]
 }
-wait_for 60 b_lb || { docker logs "$(a_ctr)" --since 30s 2>&1 | tail -5; die "a's requests reach both b endpoints"; }
-info "a's request loop, alternating across b's instances:"
-show "$KLITE" logs "$A_INST" --tail 4
+wait_for 60 b_lb || { tail -n 5 "$PROBE_B"; die "a's probes reach both b endpoints"; }
+info "the last four answers to wget http://b:8080, run once a second inside a's container:"
+show tail -n 4 "$PROBE_B"
 pass "requests balance across b's endpoints (the hostnames are container ids)"
 
 info "the name b resolves inside a's container to this node's VIP:"
@@ -293,8 +334,8 @@ STEP=scale
 
 # This lands the cluster on its resting shape (a=1, b=2, c=3), which every
 # later beat returns to and the board shows at the end.
-MARKER_ROLL="$(date +%s)"
-sleep 1
+ROLL_B_F0="$(fails_in "$PROBE_B")"; ROLL_C_F0="$(fails_in "$PROBE_C")"
+ROLL_B_L0="$(lines_in "$PROBE_B")"; ROLL_C_L0="$(lines_in "$PROBE_C")"
 show "$KLITE" scale workload c --replicas 3
 wait_for 90 steady && pass "c converged to 3/3 Ready" || die "scale c to 3"
 show "$KLITE" get instances
@@ -311,7 +352,7 @@ STEP=rollout
 # re-applied file still says replicas: 2, matching the stored count, so the
 # rollout is the only change in flight.
 B_BEFORE="$("$KLITE" get instances | awk '$2=="b" {print $1}' | sort)"
-awk '{print} /value: b$/ {print "          - name: DEMO_ROLLOUT"; print "            value: \"1\""}' \
+awk '{print} /^            value: a c$/ {print "          - name: DEMO_ROLLOUT"; print "            value: \"1\""}' \
   "$DEV_DIR/apps/b-whoami.yaml" | "$KLITE" apply -f - >/dev/null || die "apply the rolled b template"
 info "watching the surge-first replace (create one, wait Ready, drain one, repeat)"
 rolled() {
@@ -322,40 +363,45 @@ rolled() {
 }
 wait_for 180 rolled && pass "both b instances replaced with the new template, all Ready" || die "rollout converged"
 sleep 3
-FAILS="$(failed_since "$MARKER_ROLL")"
-[[ "$FAILS" == 0 ]] \
-  && pass "ZERO failed requests across the scale and the rollout (a's loop is the witness)" \
-  || { docker logs "$(a_ctr)" --since "$MARKER_ROLL" 2>/dev/null | grep FAILED | head -5; die "$FAILS failed request(s) during the rollout"; }
+FAILS=$(( $(fails_in "$PROBE_B") - ROLL_B_F0 + $(fails_in "$PROBE_C") - ROLL_C_F0 ))
+[[ "$FAILS" == 0 && "$(lines_in "$PROBE_B")" -gt "$ROLL_B_L0" && "$(lines_in "$PROBE_C")" -gt "$ROLL_C_L0" ]] \
+  && pass "ZERO failed requests across the scale and the rollout (the probe loops are the witness)" \
+  || { tail -n 3 "$PROBE_B" "$PROBE_C"; die "$FAILS failed request(s) during the rollout"; }
 pause
 
 # ============================================================
 banner "8. POLICY: deny a -> c live, both planes agree, then restore"
 STEP=policy
 
-info "right now a reaches both b and c:"
-show "$KLITE" logs "$A_INST" --tail 2
+info "right now a reaches both b and c (the last probe against each):"
+show tail -n 1 "$PROBE_B" "$PROBE_C"
+CHAT_MARK="$(date +%s)"
 show "$KLITE" apply -f examples/policies/deny-a-to-c.yaml
 c_denied() {
-  local lines
-  lines="$("$KLITE" logs "$A_INST" --tail 2 2>/dev/null)" || return 1
-  [[ "$(grep -c 'c FAILED' <<<"$lines")" == 2 && "$(grep -c 'b => Hostname' <<<"$lines")" == 2 ]]
+  [[ "$(tail -n 3 "$PROBE_C" 2>/dev/null | grep -c FAILED)" == 3 ]] \
+    && tail -n 1 "$PROBE_B" 2>/dev/null | grep -q ' is b'
 }
-wait_for 30 c_denied && pass "the data plane turned: c FAILED in a's loop while b keeps answering" || die "deny-a-to-c enforced"
-show "$KLITE" logs "$A_INST" --tail 2
+wait_for 30 c_denied && pass "the data plane turned: c probes FAILED while b keeps answering" || die "deny-a-to-c enforced"
+show tail -n 3 "$PROBE_B" "$PROBE_C"
 OUT="$("$KLITE" policy check a c 2>&1)"
 grep -q 'denied' <<<"$OUT" && grep -q 'deny-a-to-c' <<<"$OUT" \
   && pass "control plane agrees and names the policy: $OUT" \
   || die "policy check a c should deny by deny-a-to-c, got: $OUT"
 OUT="$("$KLITE" policy check a b 2>&1)"
 grep -q 'allowed' <<<"$OUT" && pass "and a -> b stays open: $OUT" || die "policy check a b should allow, got: $OUT"
+
+# The deny must bite the apps' own chatter as well as the probes. Chatter is
+# sparse (a 5% roll), so denials appear only when a roll picks c, but
+# completions must sit at zero from the moment of the apply.
+CHAT_OK="$(docker logs "$(a_ctr)" --since "$CHAT_MARK" 2>/dev/null | grep -c '^-> c ok')"
+CHAT_FAIL="$(docker logs "$(a_ctr)" --since "$CHAT_MARK" 2>/dev/null | grep -c '^-> c FAILED')"
+[[ "$CHAT_OK" == 0 ]] \
+  && pass "a's chatter to c since the deny: $CHAT_FAIL denied, 0 completed" \
+  || die "$CHAT_OK chatty a -> c call(s) slipped past the policy"
 pause
 
 show "$KLITE" delete networkpolicy deny-a-to-c
-c_back() {
-  local lines
-  lines="$("$KLITE" logs "$A_INST" --tail 2 2>/dev/null)" || return 1
-  [[ "$(grep -c 'c => Hostname' <<<"$lines")" == 2 ]]
-}
+c_back() { [[ "$(tail -n 2 "$PROBE_C" 2>/dev/null | grep -c ' is c')" == 2 ]]; }
 wait_for 30 c_back && pass "policy deleted, a -> c flows again" || die "traffic restored after the delete"
 pause
 
@@ -363,8 +409,12 @@ pause
 banner "9. DRAIN A NODE: surge first, stream the progress, drop nothing"
 STEP=drain
 
-MARKER_CHAOS="$(date +%s)"
-sleep 1
+# One failure window spans this beat and the next: the drain, the leader
+# kill, and both scales all answer to the same baseline.
+CHAOS_B_F0="$(fails_in "$PROBE_B")"; CHAOS_C_F0="$(fails_in "$PROBE_C")"
+CHAOS_B_L0="$(lines_in "$PROBE_B")"; CHAOS_C_L0="$(lines_in "$PROBE_C")"
+chaos_fails() { echo $(( $(fails_in "$PROBE_B") - CHAOS_B_F0 + $(fails_in "$PROBE_C") - CHAOS_C_F0 )); }
+chaos_grew()  { [[ "$(lines_in "$PROBE_B")" -gt "$CHAOS_B_L0" && "$(lines_in "$PROBE_C")" -gt "$CHAOS_C_L0" ]]; }
 DRAIN_NODE=""
 for cand in node-2 node-3 node-1; do
   [[ "$cand" == "$A_NODE" ]] && continue
@@ -384,10 +434,9 @@ show "$KLITE" get nodes
 show "$KLITE" uncordon "$DRAIN_NODE"
 wait_for 90 steady && pass "cluster re-converged with $DRAIN_NODE schedulable again" || die "re-converge after uncordon"
 sleep 3
-FAILS="$(failed_since "$MARKER_CHAOS")"
-[[ "$FAILS" == 0 ]] \
+[[ "$(chaos_fails)" == 0 ]] && chaos_grew \
   && pass "ZERO failed requests through the whole drain" \
-  || die "$FAILS failed request(s) during the drain"
+  || die "failed or stalled probes during the drain ($(chaos_fails) FAILED)"
 pause
 
 # ============================================================
@@ -417,10 +466,9 @@ show "$KLITE" --server "$SURV_EP" get instances
 show "$KLITE" scale workload b --replicas 2
 wait_for 90 steady && pass "and back down: the cluster rests at a=1, b=2, c=3" || die "scale b back to 2"
 sleep 3
-FAILS="$(failed_since "$MARKER_CHAOS")"
-[[ "$FAILS" == 0 ]] \
+[[ "$(chaos_fails)" == 0 ]] && chaos_grew \
   && pass "ZERO failed requests across drain + leader kill + both scales (the data plane never blinked)" \
-  || die "$FAILS failed request(s) across the chaos window"
+  || die "failed or stalled probes across the chaos window ($(chaos_fails) FAILED)"
 
 "$BIN/klited" --listen "127.0.0.1:$LEAD_PORT" >"$DEV_DIR/klited-$LEAD_PORT.log" 2>&1 &
 echo $! >"$LEAD_PIDFILE"
@@ -459,8 +507,28 @@ pass "plaintext dial to ingress port $B_PORT dies in the handshake (client certs
 pause
 
 # ============================================================
-banner "12. FINALE: the live board"
+banner "12. FINALE: the apps' own chatter, then the live board"
 STEP=finale
+
+# The probes made the gates provable. The chatter keeps the board alive
+# after this script ends. Minutes into the run, every app must have rolled
+# its way into at least one completed call.
+chatty_flowing() {
+  local wl
+  for wl in a b c; do
+    docker ps --filter "label=io.klite.workload=$wl" --format '{{.Names}}' \
+      | xargs -I{} docker logs {} 2>/dev/null | grep -q '^-> [abc] ok$' || return 1
+  done
+}
+wait_for 90 chatty_flowing \
+  && pass "every app chats on its own: a, b, and c each completed a random call" \
+  || die "an app has not completed a single chatty call"
+info "a's chatter so far:"
+echo
+echo "  \$ docker logs $(a_ctr) | grep '^->' | tail -4"
+docker logs "$(a_ctr)" 2>/dev/null | grep '^->' | tail -4 | sed 's/^/  /'
+echo
+stop_probes
 
 go run ./cmd/klite-facade >"$DEV_DIR/facade.log" 2>&1 &
 echo $! >"$DEV_DIR/facade.pid"
@@ -494,7 +562,7 @@ echo "
   poke at it:
     export KLITE_SERVER=$KLITE_SERVER
     $KLITE get instances --watch
-    $KLITE logs -f $A_INST
+    $KLITE logs -f $A_INST                              # a's chatter: '-> b ok'
     $KLITE scale workload b --replicas 3
     $KLITE apply -f examples/policies/deny-a-to-c.yaml   # watch the board turn
     $KLITE delete networkpolicy deny-a-to-c

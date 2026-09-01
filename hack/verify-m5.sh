@@ -7,6 +7,10 @@
 # Canonical stack: klited on 127.0.0.1:7443, etcd on 2379/2381/2383 (etcd-up
 # defaults), nodes node-1..3. Other stacks may share the Docker daemon, so
 # every kill and container removal is scoped to those names and labels.
+#
+# The zero-failure gates ride deterministic probe loops (wget once a second
+# to b and to c, exec'd inside a's container so they take the kdns -> VIP ->
+# Envoy path). The seeded apps' own 5% chatter is too sparse to gate on.
 set -u
 
 cd "$(dirname "$0")/.."
@@ -33,6 +37,7 @@ my_docker_rm() { # canonical nodes only, since other stacks share the daemon
 }
 
 cleanup() {
+  stop_probes
   for n in "${!AGENT_PID[@]}"; do kill "${AGENT_PID[$n]}" 2>/dev/null; done
   [[ -n "$KLITED_PID" ]] && kill "$KLITED_PID" 2>/dev/null
   my_docker_rm
@@ -90,10 +95,50 @@ counts_ready() {
 
 a_inst() { "$KLITE" get instances | awk '$2=="a" {print $1}' | head -1; }
 a_node() { "$KLITE" get instances | awk '$2=="a" {print $3}' | head -1; }
-a_fails() { "$KLITE" logs "$1" 2>/dev/null | grep -c "$2 FAILED"; }
-tail_clean() { ! "$KLITE" logs "$A_INST" --tail 12 2>/dev/null | grep -q FAILED; }
 none_on() { [[ "$("$KLITE" get instances | awk -v n="$1" 'NR>1 && $3==n' | wc -l | tr -d ' ')" == 0 ]]; }
 all_on()  { [[ "$("$KLITE" get instances | awk -v n="$1" 'NR>1 && $3!=n' | wc -l | tr -d ' ')" == 0 ]]; }
+
+# --- deterministic probes ------------------------------------------------------
+# Each loop fires one wget a second at its service from inside a's container.
+# Every attempt appends one line: the served body ("<cid> is b") or FAILED.
+# The gates then compare FAILED counts across a window, like the old
+# in-container loop, and demand growth so a dead prober cannot fake a clean
+# window.
+PROBE_B="$TMP/probe-b.log"
+PROBE_C="$TMP/probe-c.log"
+PROBE_PIDS=()
+
+probe_loop() { # probe_loop <file> <url>
+  local file=$1 url=$2
+  while :; do
+    docker exec "$A_CTR" wget -qO- -T 2 "$url" 2>/dev/null || echo "FAILED"
+    sleep 1
+  done >>"$file" 2>/dev/null
+}
+
+start_probes() { # (re)bind to the current a container and (re)start both loops
+  stop_probes
+  : >"$PROBE_B"
+  : >"$PROBE_C"
+  A_CTR="klite.$(a_node).$(a_inst)"
+  probe_loop "$PROBE_B" http://b:8080 &
+  PROBE_PIDS+=($!); disown $!
+  probe_loop "$PROBE_C" http://c:8080 &
+  PROBE_PIDS+=($!); disown $!
+}
+
+stop_probes() {
+  local pid
+  for pid in "${PROBE_PIDS[@]:-}"; do [[ -n "$pid" ]] && kill "$pid" 2>/dev/null; done
+  PROBE_PIDS=()
+}
+
+fails_in() { awk '/FAILED/ {n++} END {print n+0}' "$1" 2>/dev/null; }
+lines_in() { awk 'END {print NR}' "$1" 2>/dev/null; }
+probes_clean() { # last 6 attempts against each service all answered
+  [[ "$(lines_in "$PROBE_B")" -ge 6 && "$(lines_in "$PROBE_C")" -ge 6 ]] || return 1
+  ! { tail -n 6 "$PROBE_B"; tail -n 6 "$PROBE_C"; } | grep -q FAILED
+}
 
 # patch_drain <src> <dst>: insert fast drain knobs into the workload spec.
 # Drain sits outside the template, so this never changes the template hash.
@@ -134,6 +179,7 @@ else
   make net-image >/dev/null 2>&1 \
     && pass "make net-image (klite-net:dev)" || die "make net-image"
 fi
+docker image inspect busybox:1.36 >/dev/null 2>&1 || docker pull busybox:1.36 >/dev/null 2>&1
 
 "$BIN/klited" --listen 127.0.0.1:7443 >"$TMP/klited.log" 2>&1 &
 KLITED_PID=$!
@@ -171,21 +217,25 @@ wait_for 60 counts_ready 3 \
 
 A_INST="$(a_inst)"; A_NODE="$(a_node)"
 [[ -n "$A_INST" && -n "$A_NODE" ]] || die "resolve a's instance and node"
-wait_for 45 tail_clean \
-  && pass "a's request loop is clean (no FAILED in recent lines)" \
-  || { "$KLITE" logs "$A_INST" --tail 12; die "a's request loop is clean"; }
+start_probes
+wait_for 45 probes_clean \
+  && pass "probe loops are clean (b and c both answering, no FAILED)" \
+  || { tail -n 6 "$PROBE_B" "$PROBE_C"; die "probe loops are clean"; }
 
 # --- rolling update: one at a time, zero failed requests ----------------------
 OLD_B="$("$KLITE" get instances | awk '$2=="b" {print $1}' | sort)"
-B_FAILS0="$(a_fails "$A_INST" b)"
+B_FAILS0="$(fails_in "$PROBE_B")"
+B_LINES0="$(lines_in "$PROBE_B")"
 # Keep replicas at 3: apply replaces the whole spec, and the example file
-# says 2, which would fold a scale-down into the rollout.
-sed -e 's/value: b$/value: b2/' -e 's/replicas: 2$/replicas: 3/' \
+# says 2, which would fold a scale-down into the rollout. The marker env var
+# changes the template hash without touching the chatty behavior.
+awk '{sub(/^  replicas: 2$/, "  replicas: 3"); print}
+     /^            value: a c$/ {print "          - name: M5_ROLLOUT"; print "            value: \"1\""}' \
   "$TMP/b-whoami-fast.yaml" > "$TMP/b-v2.yaml"
-grep -q 'value: b2' "$TMP/b-v2.yaml" && grep -q 'replicas: 3' "$TMP/b-v2.yaml" \
+grep -q 'M5_ROLLOUT' "$TMP/b-v2.yaml" && grep -q '^  replicas: 3$' "$TMP/b-v2.yaml" \
   || die "craft b-v2.yaml (env change at replicas 3)"
 "$KLITE" apply -f "$TMP/b-v2.yaml" >/dev/null \
-  && pass "applied b template change (WHOAMI_NAME=b2)" || die "apply b-v2.yaml"
+  && pass "applied b template change (M5_ROLLOUT=1)" || die "apply b-v2.yaml"
 
 VIOL=""
 DEADLINE=$((SECONDS + 240))
@@ -209,35 +259,36 @@ done
   && pass "rolling update: strictly one-at-a-time, capacity never dipped" \
   || { "$KLITE" get instances; die "rolling update invariant: $VIOL"; }
 
-B_FAILS1="$(a_fails "$A_INST" b)"
-[[ "$B_FAILS1" == "$B_FAILS0" ]] \
-  && pass "zero failed b-requests through the rollout ($B_FAILS1 total, unchanged)" \
-  || die "failed b-requests during rollout (before=$B_FAILS0 after=$B_FAILS1)"
+B_FAILS1="$(fails_in "$PROBE_B")"
+[[ "$B_FAILS1" == "$B_FAILS0" && "$(lines_in "$PROBE_B")" -gt "$B_LINES0" ]] \
+  && pass "zero failed b-probes through the rollout ($B_FAILS1 total, unchanged)" \
+  || die "failed b-probes during rollout (before=$B_FAILS0 after=$B_FAILS1)"
 
 sleep 8 # let the tail window move past the last old response
 MY_B_IDS="$(for n in "${NODES[@]}"; do
   docker ps --filter "label=io.klite.node=$n" --filter label=io.klite.workload=b --format '{{.ID}}'
 done)"
 STALE=""
-for h in $("$KLITE" logs "$A_INST" --tail 12 2>/dev/null | grep -o 'b => Hostname: [0-9a-f]*' | awk '{print $4}' | sort -u); do
+for h in $(tail -n 12 "$PROBE_B" 2>/dev/null | awk '$2=="is" && $3=="b" {print $1}' | sort -u); do
   echo "$MY_B_IDS" | grep -q "^${h:0:12}" || STALE="$h"
 done
 [[ -z "$STALE" ]] \
-  && pass "a's recent b responses all come from fresh containers" \
+  && pass "recent b responses all come from fresh containers" \
   || die "stale hostname $STALE still answering after rollout"
 
 # --- scale-down with drain -----------------------------------------------------
-B_FAILS0="$(a_fails "$A_INST" b)"
+B_FAILS0="$(fails_in "$PROBE_B")"
+B_LINES0="$(lines_in "$PROBE_B")"
 "$KLITE" scale workload b --replicas 2 >/dev/null || die "scale b to 2"
 b_draining() { "$KLITE" get instances | awk '$2=="b" && $4=="Draining"' | grep -q .; }
 wait_for 15 b_draining \
   && pass "scale-down victim went DRAINING" || die "scale-down victim went DRAINING"
 wait_for 30 counts_ready 2 \
   && pass "victim drained away: b back to 2 READY" || die "b back to 2 READY after scale-down"
-B_FAILS1="$(a_fails "$A_INST" b)"
-[[ "$B_FAILS1" == "$B_FAILS0" ]] \
-  && pass "zero failed b-requests through the scale-down" \
-  || die "failed b-requests during scale-down (before=$B_FAILS0 after=$B_FAILS1)"
+B_FAILS1="$(fails_in "$PROBE_B")"
+[[ "$B_FAILS1" == "$B_FAILS0" && "$(lines_in "$PROBE_B")" -gt "$B_LINES0" ]] \
+  && pass "zero failed b-probes through the scale-down" \
+  || die "failed b-probes during scale-down (before=$B_FAILS0 after=$B_FAILS1)"
 
 # --- node drain ----------------------------------------------------------------
 # Pick a node a does not live on, so its log stays continuous for the check.
@@ -248,8 +299,10 @@ for cand in node-2 node-3 node-1; do
     && DRAIN_NODE="$cand" && break
 done
 [[ -n "$DRAIN_NODE" ]] || die "pick a drain target with instances"
-B_FAILS0="$(a_fails "$A_INST" b)"
-C_FAILS0="$(a_fails "$A_INST" c)"
+B_FAILS0="$(fails_in "$PROBE_B")"
+C_FAILS0="$(fails_in "$PROBE_C")"
+B_LINES0="$(lines_in "$PROBE_B")"
+C_LINES0="$(lines_in "$PROBE_C")"
 
 run_drain "$TMP/drain-1.log" "$DRAIN_NODE" \
   && pass "klite drain $DRAIN_NODE completed" \
@@ -267,11 +320,12 @@ wait_for 60 counts_ready 2 \
   && pass "all workloads back to full strength elsewhere" || die "workloads recover after drain"
 node_cordoned "$DRAIN_NODE" \
   && pass "$DRAIN_NODE shows cordoned (unschedulable=true)" || die "$DRAIN_NODE shows cordoned"
-B_FAILS1="$(a_fails "$A_INST" b)"
-C_FAILS1="$(a_fails "$A_INST" c)"
-[[ "$B_FAILS1" == "$B_FAILS0" && "$C_FAILS1" == "$C_FAILS0" ]] \
-  && pass "zero failed requests through the node drain" \
-  || die "failed requests during node drain (b: $B_FAILS0->$B_FAILS1, c: $C_FAILS0->$C_FAILS1)"
+B_FAILS1="$(fails_in "$PROBE_B")"
+C_FAILS1="$(fails_in "$PROBE_C")"
+[[ "$B_FAILS1" == "$B_FAILS0" && "$C_FAILS1" == "$C_FAILS0" \
+   && "$(lines_in "$PROBE_B")" -gt "$B_LINES0" && "$(lines_in "$PROBE_C")" -gt "$C_LINES0" ]] \
+  && pass "zero failed probes through the node drain" \
+  || die "failed probes during node drain (b: $B_FAILS0->$B_FAILS1, c: $C_FAILS0->$C_FAILS1)"
 
 # --- node delete via YAML ------------------------------------------------------
 "$KLITE" delete -f "examples/nodes/$DRAIN_NODE.yaml" >/dev/null \
@@ -307,10 +361,11 @@ wait_for 30 all_on "$DRAIN_NODE" \
   && pass "all instances consolidated on $DRAIN_NODE (5/5, no headroom)" \
   || warn "instances did not consolidate on $DRAIN_NODE"
 
-A_INST="$(a_inst)" # a moved during the consolidation drains
-sed 's/value: c$/value: c2/' "$TMP/c-whoami-fast.yaml" > "$TMP/c-v2.yaml"
+start_probes # a moved during the consolidation drains, so rebind the loops
+awk '{print} /^            value: a b$/ {print "          - name: M5_ROLLOUT"; print "            value: \"1\""}' \
+  "$TMP/c-whoami-fast.yaml" > "$TMP/c-v2.yaml"
 OLD_C="$("$KLITE" get instances | awk '$2=="c" {print $1}' | sort)"
-C_FAILS0="$(a_fails "$A_INST" c)"
+C_FAILS0="$(fails_in "$PROBE_C")"
 "$KLITE" apply -f "$TMP/c-v2.yaml" >/dev/null || die "apply c-v2.yaml"
 
 fallback_logged() { grep -q "falling back to drain-first" "$TMP/klited.log"; }
@@ -326,8 +381,8 @@ c_converged() {
 wait_for 180 c_converged \
   && pass "c converged on the new template despite zero headroom" \
   || warn "c did not converge in 180s"
-C_FAILS1="$(a_fails "$A_INST" c)"
-echo "INFO: c-request failures during the fallback dip: $((C_FAILS1 - C_FAILS0)) (a dip here is the documented ADR 0010 tradeoff)"
+C_FAILS1="$(fails_in "$PROBE_C")"
+echo "INFO: c-probe failures during the fallback dip: $((C_FAILS1 - C_FAILS0)) (a dip here is the documented ADR 0010 tradeoff)"
 
 echo
 if [[ "$WARNED" == 1 ]]; then
