@@ -39,8 +39,10 @@ wait_for() {
 }
 
 # disown keeps bash from announcing the SIGKILL step in the middle of the run.
+# TOKEN is minted after klited comes up (M8: agents join with it, or reuse a
+# persisted identity from an earlier run).
 start_agent() {
-  "$BIN/klite-agent" --node "node-$1" >"/tmp/klite-agent-node-$1.log" 2>&1 &
+  "$BIN/klite-agent" --node "node-$1" --token "$TOKEN" >"/tmp/klite-agent-node-$1.log" 2>&1 &
   disown $!
 }
 
@@ -74,6 +76,7 @@ go build -o "$BIN/klited" ./cmd/klited \
 KLITED_PID=$!
 wait_for 15 klited_ready \
   && pass "klited answering on 7443" || die "klited answering on 7443"
+TOKEN="$("$KLITE" node token)" && pass "minted join token" || die "mint join token"
 
 # --- nodes ---
 for i in 1 2 3; do

@@ -12,7 +12,8 @@
 #
 # Steps: boot, baseline, kill-the-leader-during-scale-churn, CLI failover,
 # restart the dead klited, etcd member down (plus an informational quorum-loss
-# probe), agent kill and reschedule, teardown, and one SKIP awaiting M5.
+# probe), agent kill and reschedule, rollout-resume-under-leader-kill (tree
+# builds only; the pinned ref predates M5 rollouts), and teardown.
 # Exits nonzero on the first gating failure. KEEP_M7=1 skips teardown on exit.
 set -u
 
@@ -37,6 +38,7 @@ LOG_B="$WORK/klited-9445.log"
 KLITED_A_PID=""
 KLITED_B_PID=""
 CHURN_PID=""
+TOKEN=""
 STEP=prep
 
 pass() { echo "PASS [$STEP]: $1"; }
@@ -136,8 +138,15 @@ leader_state() {
   esac
 }
 
+# M8 trees join with a token and fail over across both klited replicas; the
+# pinned pre-M8 ref knows neither flag nor endpoint lists, so agents pin to
+# the standby the harness never kills.
 start_agent() {
-  "$BIN/klite-agent" --node "$1" --server "$EP_B" >"$WORK/agent-$1.log" 2>&1 &
+  if [ "$TREE_BUILD" = 1 ]; then
+    "$BIN/klite-agent" --node "$1" --server "$BOTH" --token "$TOKEN" >"$WORK/agent-$1.log" 2>&1 &
+  else
+    "$BIN/klite-agent" --node "$1" --server "$EP_B" >"$WORK/agent-$1.log" 2>&1 &
+  fi
   echo $! >"$WORK/agent-$1.pid"
   disown
 }
@@ -165,8 +174,10 @@ pass "m7 ports free (9443 9445 4379 4381 4383)"
 # pre-infra stack. Override with M7_REF=HEAD (dedicated daemon only) or
 # M7_TREE=1 to build the working tree.
 M7_REF="${M7_REF:-5e09b2c}"
+TREE_BUILD=0
 build_set() { (cd "$1" && go build -o "$BIN/klited" ./cmd/klited && go build -o "$BIN/klite" ./cmd/klite && go build -o "$BIN/klite-agent" ./cmd/klite-agent); }
 if [ "${M7_TREE:-0}" = 1 ] && build_set "$REPO" >"$WORK/build.log" 2>&1; then
+  TREE_BUILD=1
   pass "built klited, klite, klite-agent from the working tree (M7_TREE=1)"
 else
   [ "${M7_TREE:-0}" = 1 ] && info "working tree build failed; using M7_REF instead"
@@ -214,6 +225,9 @@ a_leads() { [ "$(leader_state "$LOG_A")" = leading ]; }
 klited_a_serves() { "$KLITE" --server "$EP_A" get workloads >/dev/null 2>&1; }
 wait_for 15 klited_a_serves && wait_for 10 a_leads \
   && pass "klited A ($EP_A) serving and leading" || die "klited A ($EP_A) serving and leading"
+if [ "$TREE_BUILD" = 1 ]; then
+  TOKEN=$("$KLITE" --server "$EP_A" node token) && pass "minted join token (M8 tree)" || die "mint join token"
+fi
 ROWS=0
 for k in nodes workloads instances; do
   ROWS=$((ROWS + $("$KLITE" --server "$EP_A" get "$k" 2>/dev/null | tail -n +2 | grep -c .)))
@@ -505,7 +519,85 @@ wait_for 30 converged_running 4 \
   || die "orphans cleaned: containers match instance objects exactly"
 
 # ============================================================
-STEP=8-teardown
+STEP=8-rollout-resume
+# Kill the leader mid-rollout and require the new leader to RESUME it: all 4
+# instances land on exactly one new template hash, the count never leaves
+# [replicas-1, replicas+surge] = [3, 5], and capacity never dips below 3
+# serving (ADR 0010). Needs M5 rollouts, so the pinned pre-M5 ref skips.
+if [ "$TREE_BUILD" = 1 ]; then
+  wl_hashes() {
+    local n
+    for n in $NODES; do
+      docker ps --filter "label=io.klite.node=$n" --filter "label=io.klite.workload=$WL" \
+        --format '{{.Label "io.klite.template-hash"}}'
+    done | sort -u
+  }
+  OLD_HASH="$(wl_hashes)"
+  [ "$(printf '%s\n' "$OLD_HASH" | grep -c .)" = 1 ] || die "expected one template hash before the rollout"
+  "$KLITE" --server "$BOTH" apply -f - >/dev/null <<'EOF' || die "apply m7-web v2 template"
+apiVersion: klite/v1
+kind: Workload
+metadata:
+  name: m7-web
+  labels:
+    app: m7-web
+spec:
+  replicas: 4
+  template:
+    labels:
+      app: m7-web
+    containers:
+      - name: web
+        image: traefik/whoami:v1.10
+        env:
+          - name: WHOAMI_NAME
+            value: m7-v2
+        ports:
+          - containerPort: 80
+EOF
+  sleep 2 # old and new template hashes both live now
+
+  if [ "$(leader_state "$LOG_A")" = leading ]; then
+    LEAD_PID=$KLITED_A_PID; LEAD=A; SURV_LOG=$LOG_B
+  else
+    LEAD_PID=$KLITED_B_PID; LEAD=B; SURV_LOG=$LOG_A
+  fi
+  S_OFF=$(wc -c <"$SURV_LOG" | tr -d ' ')
+  kill -9 "$LEAD_PID" || die "SIGKILL leader klited $LEAD mid-rollout"
+  info "SIGKILLed leader klited $LEAD mid-rollout"
+  [ "$LEAD" = A ] && KLITED_A_PID="" || KLITED_B_PID=""
+  survivor_leads() { tail -c +"$((S_OFF + 1))" "$SURV_LOG" | grep -qF "controllers: leading"; }
+  wait_for 10 survivor_leads \
+    && pass "survivor took leadership mid-rollout (budget 10s)" \
+    || die "survivor did not take leadership within 10s"
+
+  VIOL=""
+  DONE=""
+  T0=$(date +%s)
+  while :; do
+    SNAP="$("$KLITE" --server "$BOTH" get instances 2>/dev/null | awk -v wl="$WL" '$2==wl {print $4}')"
+    TOTAL=$(printf '%s\n' "$SNAP" | grep -c '[^ ]')
+    SERVING=$(printf '%s\n' "$SNAP" | grep -Ec '^(Running|Ready|Draining)$')
+    [ "$TOTAL" -le 5 ] || { VIOL="total $TOTAL > 5: surge exceeded 1"; break; }
+    [ "$TOTAL" -ge 3 ] || { VIOL="total $TOTAL < 3: dipped below replicas-1"; break; }
+    [ "$SERVING" -ge 3 ] || { VIOL="serving $SERVING < 3: capacity dipped"; break; }
+    NEW_HASHES="$(wl_hashes)"
+    if converged 4 && [ "$(printf '%s\n' "$NEW_HASHES" | grep -c .)" = 1 ] && [ "$NEW_HASHES" != "$OLD_HASH" ]; then
+      DONE=1
+      break
+    fi
+    [ $(( $(date +%s) - T0 )) -ge 120 ] && { VIOL="timeout: rollout did not finish under the new leader"; break; }
+    sleep 0.5
+  done
+  [ -n "$DONE" ] \
+    && pass "new leader resumed the rollout: 4/4 on one new hash in $(( $(date +%s) - T0 ))s, count stayed in [3,5]" \
+    || die "rollout-resume invariant: $VIOL"
+else
+  echo "SKIP [$STEP]: rollout-resume-under-leader-kill — $M7_REF predates M5 rollouts (run with M7_TREE=1)"
+fi
+
+# ============================================================
+STEP=9-teardown
 teardown
 LEFT=$(docker ps -aq --filter name=etcd-m7 | wc -l | tr -d ' ')
 LEFT=$((LEFT + $(docker ps -aq --filter "name=klite.m7-" | wc -l | tr -d ' ')))
@@ -516,22 +608,6 @@ pgrep -f "$BIN/" >/dev/null 2>&1 && LEFT=$((LEFT + 1))
 docker network inspect "$ETCD_NET" >/dev/null 2>&1 && LEFT=$((LEFT + 1))
 [ "$LEFT" = 0 ] && pass "everything m7-scoped torn down (processes, containers, network)" \
   || die "teardown left $LEFT m7 artifact(s) behind"
-
-# ============================================================
-STEP=9-skip
-echo "SKIP [$STEP]: rollout-resume-under-leader-kill — enable after M5 lands"
-# TODO(M5): once surge-first rollouts (ADR 0010) exist, kill the leader
-# mid-rollout and assert the new leader resumes instead of restarting:
-#   "$KLITE" --server "$BOTH" apply -f - <<EOF   # bump the template (WHOAMI_NAME=m7-v2)
-#   ...same m7-web YAML with a changed env value...
-#   EOF
-#   sleep 2                                      # old and new template hashes both live
-#   kill -9 "$LEADER_PID"                        # whichever klited logged "controllers: leading"
-#   wait_for 10 standby_leads                    # new leader within TTL 5s + margin
-#   wait_for 90 rollout_done                     # all 4 Running with the NEW hash:
-#     # docker ps --filter label=io.klite.workload=m7-web --format '{{.Label "io.klite.template-hash"}}'
-#     # prints exactly one distinct hash, equal to the new template's hash
-#   assert instance count stayed within [replicas-1, replicas+surge] for the whole window
 
 echo
 echo "verify-m7: all gating steps passed"

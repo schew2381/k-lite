@@ -51,8 +51,9 @@ wait_for() {
   return 1
 }
 
+# TOKEN is minted after klited comes up (M8 join).
 start_agent() {
-  "$BIN/klite-agent" --node "$1" >"$TMP/agent-$1.log" 2>&1 &
+  "$BIN/klite-agent" --node "$1" --token "$TOKEN" >"$TMP/agent-$1.log" 2>&1 &
   AGENT_PID[$1]=$!
   disown $!
 }
@@ -138,6 +139,7 @@ fi
 KLITED_PID=$!
 wait_for 15 klited_ready \
   && pass "klited answering on 7443" || die "klited answering on 7443"
+TOKEN="$("$KLITE" node token)" && pass "minted join token" || die "mint join token"
 
 # --- nodes, agents, infra (the m4 recipe) ------------------------------------
 for i in 1 2 3; do

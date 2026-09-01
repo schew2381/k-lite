@@ -86,6 +86,7 @@ say "starting klited on 127.0.0.1:$KLITED_PORT (log: $KLITED_LOG)"
 echo $! >"$KLITED_PIDFILE"
 disown $! 2>/dev/null || true
 wait_for 15 klited_ready || die "klited not answering on $KLITED_PORT (see $KLITED_LOG)"
+TOKEN="$("$KLITE" node token)" || die "mint join token"
 
 # --- nodes + agents ---
 say "registering nodes: ${NODES[*]}"
@@ -101,7 +102,7 @@ done
 for n in "${NODES[@]}"; do
   say "starting agent for $n (log: $DEV_DIR/agent-$n.log)"
   "$BIN/klite-agent" --node "$n" --server "127.0.0.1:$KLITED_PORT" \
-    --cluster-token "$KLITE_CLUSTER_TOKEN" >"$DEV_DIR/agent-$n.log" 2>&1 &
+    --token "$TOKEN" >"$DEV_DIR/agent-$n.log" 2>&1 &
   echo $! >"$DEV_DIR/agent-$n.pid"
   disown $! 2>/dev/null || true
 done
