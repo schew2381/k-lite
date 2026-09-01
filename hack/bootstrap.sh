@@ -14,8 +14,8 @@ if ! command -v brew >/dev/null 2>&1; then
 fi
 
 # --- brew packages ---
-for pkg in go colima docker golangci-lint gofumpt prek; do
-  if brew list --formula "$pkg" >/dev/null 2>&1; then
+for pkg in go colima docker golangci-lint gofumpt prek bun; do
+  if command -v "$pkg" >/dev/null 2>&1 || brew list --formula "$pkg" >/dev/null 2>&1; then
     skip "brew install $pkg (already installed)"
   else
     say "brew install $pkg"
@@ -66,4 +66,4 @@ if [[ "$fail" == 1 ]]; then
   echo "bootstrap: finished with errors (see above)" >&2
   exit 1
 fi
-echo "bootstrap: ready. next: hack/dev-up.sh"
+echo "bootstrap: ready. next: make demo (the full show) or hack/dev-up.sh (just a playground)"

@@ -4,7 +4,7 @@ export PATH := $(GOBIN):$(PATH)
 BIN := bin
 MODULE := github.com/schew2381/k-lite
 
-.PHONY: build proto test lint ui net-image etcd-up etcd-down spike-net spike-envoy clean-docker
+.PHONY: build proto test lint ui net-image etcd-up etcd-down spike-net spike-envoy clean-docker bootstrap demo
 
 build:
 	go build -o $(BIN)/klited ./cmd/klited
@@ -39,6 +39,14 @@ precommit:
 
 ui:
 	cd frontend && bun install --frozen-lockfile && VITE_KLITE_MODE=http bun run build
+
+# Fresh-machine setup: brew tools, colima, base images. Safe to re-run.
+bootstrap:
+	hack/bootstrap.sh
+
+# The presentation run: fresh cluster, every headline feature, live board.
+demo:
+	hack/demo.sh
 
 # make node-1 runs an agent for node-1. Any suffix works.
 node-%:
