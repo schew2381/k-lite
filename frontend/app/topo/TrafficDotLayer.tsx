@@ -67,10 +67,26 @@ function easeTravel(k: number): number {
   return (1 - RAMP - ((1 - k) * (1 - k)) / (2 * RAMP)) * s
 }
 
-// dots travel straight lines, always: anchors move mid-flight anyway, so the
-// path bends only when the endpoints do
-function lerp(a: Point, b: Point, t: number): Point {
-  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t }
+// The bow grows with distance: a cross-board flight arcs visibly, while a
+// hop between neighboring sub-boxes stays flat enough to read as straight.
+const BOW_PER_PX = 0.06
+const BOW_MAX = 36
+
+function bowFor(a: Point, b: Point): number {
+  return Math.min(Math.hypot(b.x - a.x, b.y - a.y) * BOW_PER_PX, BOW_MAX)
+}
+
+function arc(a: Point, b: Point, t: number, bow: number): Point {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const len = Math.hypot(dx, dy) || 1
+  const cx = (a.x + b.x) / 2 - (dy / len) * bow
+  const cy = (a.y + b.y) / 2 + (dx / len) * bow
+  const u = 1 - t
+  return {
+    x: u * u * a.x + 2 * u * t * cx + t * t * b.x,
+    y: u * u * a.y + 2 * u * t * cy + t * t * b.y,
+  }
 }
 
 function anchorIdFor(at: TraceStep['at'], trace: Trace): string {
@@ -243,7 +259,7 @@ export function TrafficDotLayer({
       } else {
         const from = anchors[phase.fromId]
         const to = anchors[phase.toId]
-        if (from && to) p = lerp(from, to, easeTravel(k))
+        if (from && to) p = arc(from, to, easeTravel(k), bowFor(from, to))
       }
       if (!p) {
         // an endpoint of this trace left the board, so let it go quietly
