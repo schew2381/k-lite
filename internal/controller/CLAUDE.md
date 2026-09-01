@@ -8,3 +8,5 @@ Invariants:
 - The scheduler filters (pin, Ready, not cordoned, capacity) then picks fewest-instances with a name tie-break (ADR 0012). Placement stays explainable in one sentence.
 - Scale-down removes newest-first. Rollouts and drains follow the surge-first choreography with the DRAINING endpoint state (ADR 0010).
 - Node death is two timers: NotReady after 15s of heartbeat silence, instances deleted for rescheduling 30s after that.
+- Allocators (VIP, M9 ingress ports) share one shape: create-only writes, every seen value reserved before any release lands, repair of duplicates and out-of-range holders, lexically-first holder keeps a contested value. Ingress ports are fixed at instance birth — phase flips never churn them — and each node's slice is 32 ports at base + 32*(index-1).
+- The endpoints engine runs on every replica and now also carries ADR 0024's riders: per-endpoint ingress ports and advertise addresses on groups, plus the per-node allocation-driven ingress_listeners list.

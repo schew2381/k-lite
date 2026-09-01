@@ -261,17 +261,27 @@ for p in 6443 5379 5381 5383; do
 done
 pass "m6 control-plane ports free (6443 5379 5381 5383)"
 
-# Pick two node indexes whose donor host ports (19000+i, 19500+i) and donor
-# IPs (10.44.0.<10+i>) are unclaimed. Other stacks hold 1..3; start at 8.
+# Pick two node indexes whose donor host ports (19000+i, 19500+i), donor IPs
+# (10.44.0.<10+i>), and M9 ingress slices (20000+32*(i-1) .. +31, ADR 0024 —
+# donors publish the whole slice at creation) are unclaimed. Other stacks
+# hold 1..3; start at 8.
+ingress_slice_busy() { # ingress_slice_busy <index>
+  local lo=$((20000 + 32 * ($1 - 1))) p
+  for p in $(seq "$lo" $((lo + 31))); do
+    lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
 IDX1="" IDX2=""
 for i in $(seq 8 40); do
   lsof -nP -iTCP:$((19000 + i)) -sTCP:LISTEN >/dev/null 2>&1 && continue
   lsof -nP -iTCP:$((19500 + i)) -sTCP:LISTEN >/dev/null 2>&1 && continue
   docker network inspect klite0 2>/dev/null | grep -q "\"10\.44\.0\.$((10 + i))/" && continue
+  ingress_slice_busy "$i" && continue
   if [ -z "$IDX1" ]; then IDX1=$i; elif [ -z "$IDX2" ]; then IDX2=$i; break; fi
 done
 [ -n "$IDX1" ] && [ -n "$IDX2" ] || die "no free node-index slots in 8..40"
-pass "node indexes picked: m6-1=$IDX1 m6-2=$IDX2 (admin ports $((19000 + IDX1))/$((19000 + IDX2)), donor IPs 10.44.0.$((10 + IDX1))/10.44.0.$((10 + IDX2)))"
+pass "node indexes picked: m6-1=$IDX1 m6-2=$IDX2 (admin ports $((19000 + IDX1))/$((19000 + IDX2)), donor IPs 10.44.0.$((10 + IDX1))/10.44.0.$((10 + IDX2)), ingress slices $((20000 + 32 * (IDX1 - 1)))+/$((20000 + 32 * (IDX2 - 1)))+)"
 
 # Build from committed HEAD into a private bin dir: the working tree may hold
 # another milestone's in-flight edits, and the shared bin/ belongs to whoever
