@@ -1,58 +1,31 @@
+# prek runs these commit-time checks (https://github.com/j178/prek). See docs/adr/0031.
+# Hooks receive staged file paths only and must stay fast. Nothing in this file
+# rewrites Go code. The heavy gates keep their make targets and run in CI.
+exclude = '^(internal/gen/|frontend/node_modules/|frontend/dist/|frontend/bun\.lock$|\.claude/)'
+
 [[repos]]
-repo = "builtin"
+repo = "https://github.com/pre-commit/pre-commit-hooks"
+rev = "v6.0.0"
 hooks = [
-    { id = "trailing-whitespace" },
-    { id = "end-of-file-fixer" },
     { id = "check-merge-conflict" },
+    { id = "check-yaml", args = ["--allow-multiple-documents"] },
+    { id = "check-added-large-files" },
 ]
 
 [[repos]]
 repo = "local"
 
 [[repos.hooks]]
-id = "gofmt"
-name = "gofmt"
+id = "biome-check"
+name = "biome check --write (frontend)"
 language = "system"
-entry = "gofmt"
-args = ["-l", "-w"]
+entry = '''bash -c 'cd frontend && exec bunx @biomejs/biome check --write --no-errors-on-unmatched --files-ignore-unknown=true "${@#frontend/}"' --'''
+files = '^frontend/.*\.(ts|tsx|js|jsx|json|css)$'
+
+[[repos.hooks]]
+id = "gofmt-check"
+name = "gofmt (check only, never rewrites)"
+language = "system"
+entry = '''bash -c 'out="$(gofmt -l "$@")"; rc=$?; if [ -n "$out" ] || [ "$rc" -ne 0 ]; then printf "gofmt wants to reformat:\n%s\n" "$out"; exit 1; fi' --'''
 types = ["go"]
-
-[[repos.hooks]]
-id = "buf"
-name = "buf lint + format + breaking"
-language = "system"
-entry = "go"
-args = ["tool", "buf", "lint"]
-pass_filenames = false
-
-[[repos.hooks]]
-id = "golangci-lint"
-name = "golangci-lint"
-language = "system"
-entry = "golangci-lint"
-args = ["run", "./..."]
-pass_filenames = false
-
-[[repos.hooks]]
-id = "go-test"
-name = "go test"
-language = "system"
-entry = "go"
-args = ["test", "-race", "-count=1", "-timeout", "5m", "-shuffle=on", "./..."]
-pass_filenames = false
-
-[[repos.hooks]]
-id = "go-test-integration"
-name = "go test (integration)"
-language = "system"
-entry = "go"
-args = ["test", "-tags", "integration", "-race", "-count=1", "-timeout", "5m", "./internal/store/..."]
-pass_filenames = false
-
-[[repos.hooks]]
-id = "go-mod-tidy"
-name = "go mod tidy"
-language = "system"
-entry = "go"
-args = ["mod", "tidy"]
-pass_filenames = false
+exclude = '^internal/gen/'
