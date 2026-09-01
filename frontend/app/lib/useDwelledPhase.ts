@@ -6,7 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-const DWELL_MS = 400
+const DWELL_MS = 1000 // a full second per phase, so a live birth reads as three deliberate beats
 
 export function useDwelledPhase<T>(actual: T): T {
   const [shown, setShown] = useState(actual)
