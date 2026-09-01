@@ -536,10 +536,8 @@ klite-agent --node node-5 --token K10…</div>
       result lives on the machine's disk (<code>~/.klite/agent/&lt;node&gt;/tls</code>).
     </p>
     <ul class="plain">
-      <li>no list of valid certs is stored anywhere — not on disk, not in etcd</li>
       <li>"valid" means the cert chains to the cluster CA, checked at every handshake</li>
       <li>peer-to-peer ingress needs only the <code>ca.crt</code> file each Envoy already holds — any node cert the CA signed passes</li>
-      <li>the recorded costs: no revocation short of rotating the CA, and the dialer verifies the chain, not the specific node's name</li>
     </ul>
     <div class="boardbox">
       <svg id="board-mtls" role="img" aria-label="Two mTLS handshake ladders. Left: node to node — Envoy A dials Envoy B, B presents its certificate, A verifies it against its local CA file, B demands and verifies A's certificate the same way, then both sides agree on session keys. Right: node to control plane — the same exchange against klited, ending with the xDS streams flowing."></svg>
