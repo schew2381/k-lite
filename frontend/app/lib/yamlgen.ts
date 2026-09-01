@@ -41,7 +41,10 @@ function chattyContainer(name: string, targets: string[]) {
     name: 'web',
     image: 'busybox:1.36',
     command: ['/bin/sh', '-c'],
-    args: [`mkdir -p /www; ${script}`],
+    // busybox sh is PID 1 and drops SIGTERM without a handler, so the trap
+    // comes first: without it every drain and scale-down waits the full
+    // termination grace before the SIGKILL lands
+    args: [`trap "exit 0" TERM; mkdir -p /www; ${script}`],
     env: [{ name: 'TARGETS', value: targets.join(' ') }],
     ports: [{ containerPort: 80 }],
     readinessProbe: { tcpPort: 80 },
