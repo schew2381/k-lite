@@ -45,7 +45,9 @@ nodes_ready() {
 instances_running() {
   local rows
   rows="$("$KLITE" get instances 2>/dev/null | awk 'NR>1 && NF>0')"
-  [[ -n "$rows" ]] && [[ -z "$(awk '$4!="Running"' <<<"$rows")" ]]
+  # Ready is the steady phase once probes confirm (M4); Running covers apps
+  # without probe targets.
+  [[ -n "$rows" ]] && [[ -z "$(awk '$4!="Running" && $4!="Ready"' <<<"$rows")" ]]
 }
 
 # --- idempotency: tear down this profile's prior processes and containers ---
@@ -108,6 +110,9 @@ for n in "${NODES[@]}"; do
 done
 wait_for 30 nodes_ready || die "not all $KLITE_NODE_COUNT nodes Ready (try: $KLITE get nodes; logs in $DEV_DIR)"
 say "all $KLITE_NODE_COUNT nodes Ready"
+# A reused etcd store can carry cordons from a prior drain run; the
+# playground wants every declared node schedulable.
+for n in "${NODES[@]}"; do "$KLITE" uncordon "$n" >/dev/null 2>&1 || true; done
 
 # --- example apps ---
 say "applying examples/apps"
