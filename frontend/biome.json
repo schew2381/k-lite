@@ -1,5 +1,5 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.0.0/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.11/schema.json",
   "files": {
     "includes": ["app/**", "e2e/**", "!app/components/ui/**", "!app/**/*.css"]
   },
@@ -18,10 +18,8 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
-      "suspicious": {
-
-      }
+      "preset": "recommended",
+      "suspicious": {}
     }
   }
 }
