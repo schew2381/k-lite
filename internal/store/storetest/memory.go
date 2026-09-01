@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,11 +48,24 @@ func (m *Memory) bucket(kind string) (map[string]*entry, error) {
 	return m.objs[canonical], nil
 }
 
+// checkName mirrors the etcd store's key building, which refuses names that
+// would break the key scheme. Without it a test could store objects the real
+// store rejects.
+func checkName(name string) error {
+	if name == "" || strings.Contains(name, "/") {
+		return fmt.Errorf("invalid object name %q", name)
+	}
+	return nil
+}
+
 func (m *Memory) Get(_ context.Context, kind, name string) (*klitev1.Object, int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	b, err := m.bucket(kind)
 	if err != nil {
+		return nil, 0, err
+	}
+	if err := checkName(name); err != nil {
 		return nil, 0, err
 	}
 	e, ok := b[name]
@@ -91,6 +105,9 @@ func (m *Memory) Put(_ context.Context, obj *klitev1.Object, expectedRev int64) 
 	stored := proto.CloneOf(obj)
 	meta := object.MetaOf(stored)
 	name := meta.GetName()
+	if err := checkName(name); err != nil {
+		return 0, err
+	}
 	meta.ResourceVersion = 0
 	cur := b[name]
 
@@ -144,6 +161,9 @@ func (m *Memory) Delete(_ context.Context, kind, name string) error {
 	defer m.mu.Unlock()
 	b, err := m.bucket(kind)
 	if err != nil {
+		return err
+	}
+	if err := checkName(name); err != nil {
 		return err
 	}
 	if _, ok := b[name]; !ok {
