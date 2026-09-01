@@ -14,7 +14,7 @@ import { useClient } from '@/lib/client-context'
 import { clusterStore } from '@/store/store'
 import { traceStore } from '@/store/traceStore'
 import type { FlowMode } from '@/topo/flow'
-import { anchorIdFor, buildTrace, type Trace, type TraceStep } from '@/topo/trace'
+import { anchorIdFor, buildTrace, type Trace } from '@/topo/trace'
 
 // Per-flow pacing in ms. Traced is readable and live is honest about speed.
 interface Pace {
