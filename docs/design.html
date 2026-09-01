@@ -274,12 +274,6 @@ footer .mono{font-family:var(--mono);font-size:12px}
 <section id="rounds">
   <div class="wrap">
     <p class="eyebrow"><b>02</b>the first decisions</p>
-    <h2>The first sketch didn't survive the review</h2>
-    <p class="lede">
-      Round one was one server writing a bbolt file, HTTP long-polling agents, and a hand-rolled proxy.
-      Four decisions replaced it before any code existed.
-    </p>
-
     <h3 class="sub">One agent process per node — not Docker-in-Docker <span class="adrchip">ADR 0003</span></h3>
     <p>
       Locally a node is one <code>klite-agent</code> process, and all of them share the Mac's single
@@ -685,19 +679,6 @@ curl -sfL https://…/join.sh | \
   </div>
 </section>
 
-<!-- ============ 15 · THE RECORD ============ -->
-<section id="record">
-  <div class="wrap">
-    <p class="eyebrow"><b>14</b>the record</p>
-    <h2>Forty-two decisions, kept honest</h2>
-    <p class="lede">
-      Reversals stay visible — superseded records are dimmed, not deleted, and the index keeps its
-      scars (two tracks once claimed the same numbers).
-    </p>
-    <table class="rec" id="rectable"></table>
-  </div>
-</section>
-
 <footer>
   <div class="wrap">
     <span>k-lite — drawn from the ADRs, CONTEXT.md, and the code at the time of writing. When this page and an ADR disagree, the ADR wins. When code and an ADR disagree, the code is wrong.</span>
@@ -1060,68 +1041,13 @@ function makeScene(svgId, vw, vh){
 
 })();
 
-/* ---------- 15 · the record ---------- */
-(function record(){
-  const R = [
-    ["0001","Speak k-lite, not Kubernetes: Workload and Instance","design",""],
-    ["0002","Go, one module, four binaries","design",""],
-    ["0003","A local node is an agent process, not a VM","design",""],
-    ["0004","gRPC everywhere, and agents always dial out","design",""],
-    ["0005","etcd for state, klited stateless","design",""],
-    ["0006","Discovery: own DNS, and a VIP per (Service, Node)","design",""],
-    ["0007","Envoy is the data plane from day one, speaking real xDS","design",""],
-    ["0008","Everything instances must reach runs in the infra pod","design",""],
-    ["0009","NetworkPolicy speaks Istio's model, scaled down","design",""],
-    ["0010","Draining is surge-first: capacity never dips","design",""],
-    ["0011","The agent owns restarts, Docker told --restart=no","design",""],
-    ["0012","Scheduling spreads by count, resources are limits","design",""],
-    ["0013","Nodes join with a token, then hold an mTLS certificate","design",""],
-    ["0014","One container per Instance, for now","design",""],
-    ["0015","The UI is four pages and a policy simulator","design","amended by 0024–0025"],
-    ["0016","Cross-host traffic is designed for, not built","design","superseded by 0034"],
-    ["0017","Names live under svc.klite, TTL 5s, never deny existing","design",""],
-    ["0018","A node registers only if its YAML already exists","build",""],
-    ["0019","Docker SDK: moby/moby/client","build",""],
-    ["0020","Codegen runs on protoc","build","superseded by 0021"],
-    ["0021","Proto tooling moves to buf","build",""],
-    ["0022","VIP allocations are a first-class stored kind","build",""],
-    ["0023","The frontend ships before the backend, behind a client seam","ui",""],
-    ["0024","A live traffic feed reopens 0015's frozen facade","ui",""],
-    ["0025","The UI gains an etcd browser and step-traced requests","ui",""],
-    ["0026","The frontend adopts the facade's real dialect","ui",""],
-    ["0027","Two traffic flows: traced teaches, live reflects","ui",""],
-    ["0028","One TLS listener, every RPC passes a deny-by-default gate","build",""],
-    ["0029","Admin ports get iptables in the donor netns","build",""],
-    ["0030","Infra containers carry a cluster identity","build",""],
-    ["0031","prek runs staged-only commit hooks","ui",""],
-    ["0032","The UI shows the internet leg before M9 serves it","ui","amended by 0035"],
-    ["0033","Node deletion is a label; re-applying cancels it","build",""],
-    ["0034","Cross-machine traffic rides published ports behind proxy mTLS","build",""],
-    ["0035","Ingress ports are allocations, listeners follow allocations","build",""],
-    ["0036","Node certificates carry both TLS purposes","build",""],
-    ["0037","Deletes carry the revision they acted on","build",""],
-    ["0038","Real machines join from GitHub Releases","build",""],
-    ["0039","Demo apps chatter, verify gates run their own probers","build",""],
-    ["0040","The facade starts local agents for one-click joins","build",""],
-    ["0041","The traffic feed streams Envoy counter deltas","build",""],
-    ["0042","Apply can't write status, heartbeats restore a lost node index","build",""],
-  ];
-  const t = document.getElementById("rectable");
-  for (const [no, title, track, status] of R){
-    const tr = document.createElement("tr");
-    if (status.startsWith("superseded")) tr.className = "dim";
-    tr.innerHTML = `<td>${no}</td><td>${title}</td><td>${track}${status ? " · " + status : ""}</td>`;
-    t.appendChild(tr);
-  }
-})();
-
 /* ---------- left TOC rail ---------- */
 (function toc(){
   const NAMES = [
     ["top","title"],["rounds","first decisions"],["xdsintro","xDS"],["yaml","the YAML"],
     ["loop","converge"],["discovery","discovery"],["node","a node joins"],["identity","identity"],
     ["wan","machines"],["reach","reachability"],["ui","the UI"],
-    ["cli","the CLI"],["k8s","vs k8s"],["record","the record"],
+    ["cli","the CLI"],["k8s","vs k8s"],
   ];
   const rail = document.createElement("nav");
   rail.className = "toc";
