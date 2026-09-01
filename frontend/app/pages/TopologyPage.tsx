@@ -205,9 +205,7 @@ export default function TopologyPage() {
         <TracePanel reduced={reduced} flow={flow} />
         <PolicyBuilder />
         <PolicySimPanel onHighlight={setHighlight} />
-        <div className="min-h-0 flex-1">
-          <TrafficRail />
-        </div>
+        <TrafficRail />
       </div>
     </div>
   )
