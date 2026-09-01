@@ -473,11 +473,15 @@ spec:
 
     <h3 class="sub">Who creates a VIP</h3>
     <ul class="plain">
-      <li>only Services have VIPs — one per (Service, Node) pair, so every node owns its own address for every service</li>
-      <li>klited's vip controller allocates it the moment the Service and the Node both exist: first free address in 10.44.64.0/18, stored as a <code>VIPAllocation</code> object (<code>b.node-1 → 10.44.64.5</code>)</li>
-      <li>the node's klite-net binds it as a /32 on the infra pod's interface, and the node's Envoy opens the listener on VIP:port</li>
-      <li>kdns hands it out — the same name resolves to a different VIP on every node, and the address never moves for the Service's lifetime</li>
-      <li>nothing else gets a VIP: instances have real bridge IPs Docker assigns, the infra pod has a formula-assigned static (10.44.0.10+n), and the machine itself has an advertise address</li>
+      <li>Each (Service, Node) pair gets a VIP
+        <ul class="plain">
+          <li>a VIP is created by klited once a Node + Service exist and uses the first free address in 10.44.64.0/18</li>
+          <li>It stores it as a <code>VIPAllocation</code> (<code>b.node-1 → 10.44.64.5</code>)</li>
+        </ul>
+      </li>
+      <li>a node's klite-net binds it on the infra pod's interface, and the node's Envoy opens the listener on VIP:port</li>
+      <li>kdns maps svc endpoints to service IPs</li>
+      <li>nothing else gets a VIP, instance containers use real bridge IPs colima assigns</li>
     </ul>
   </div>
 </section>
