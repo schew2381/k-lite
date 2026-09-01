@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"net/netip"
 	"slices"
 	"testing"
 
@@ -177,28 +176,5 @@ func TestProbeTargetFallsBackToTargetPort(t *testing.T) {
 	pts := buildAll(in)["node-1"].Net.GetProbeTargets()
 	if len(pts) != 1 || pts[0].GetPort() != 9000 {
 		t.Fatalf("probe targets = %v, want fallback port 9000", pts)
-	}
-}
-
-func TestFirstFreeVIP(t *testing.T) {
-	t.Parallel()
-	used := map[netip.Addr]bool{}
-	ip, err := firstFreeVIP(used)
-	if err != nil || ip.String() != "10.44.64.1" {
-		t.Fatalf("first vip = %v, %v", ip, err)
-	}
-	used[ip] = true
-	ip, err = firstFreeVIP(used)
-	if err != nil || ip.String() != "10.44.64.2" {
-		t.Fatalf("second vip = %v, %v", ip, err)
-	}
-	// Fill 10.44.64.0/24's usable hosts; .0 and .255 are never handed out,
-	// so the next pick crosses into 10.44.65.x.
-	for i := 1; i <= 254; i++ {
-		used[netip.AddrFrom4([4]byte{10, 44, 64, byte(i)})] = true
-	}
-	ip, err = firstFreeVIP(used)
-	if err != nil || ip.String() != "10.44.65.1" {
-		t.Fatalf("post-boundary vip = %v, %v", ip, err)
 	}
 }

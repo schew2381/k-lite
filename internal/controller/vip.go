@@ -19,8 +19,10 @@ import (
 var vipPool = netip.MustParsePrefix("10.44.64.0/18")
 
 // vipController materializes one VIPAllocation per (Service, Node) pair and
-// releases allocations whose service or node is gone. It runs leader-only, so
-// CAS creates are only defending against its own retries.
+// releases allocations whose service or node is gone. Create-only writes
+// can't stop a double-leadership window from handing one VIP to two
+// differently named pairs, so reconcile also repairs duplicate and
+// out-of-pool VIPs instead of trusting them never to happen.
 type vipController struct {
 	st store.Store
 }
@@ -57,16 +59,7 @@ func (c *vipController) reconcile(ctx context.Context) error {
 	used := map[netip.Addr]bool{}
 	var errs []error
 	for _, ao := range allocObjs {
-		alloc := ao.GetVipAllocation()
-		name := alloc.GetMeta().GetName()
-		if _, ok := want[name]; !ok {
-			errs = append(errs, c.release(ctx, name))
-			continue
-		}
-		delete(want, name)
-		if ip, err := netip.ParseAddr(alloc.GetSpec().GetVip()); err == nil {
-			used[ip] = true
-		}
+		errs = append(errs, c.reconcileAllocation(ctx, ao.GetVipAllocation(), want, used))
 	}
 	for _, name := range slices.Sorted(maps.Keys(want)) {
 		errs = append(errs, c.allocate(ctx, want[name], used))
@@ -74,11 +67,45 @@ func (c *vipController) reconcile(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (c *vipController) release(ctx context.Context, name string) error {
-	if err := c.st.Delete(ctx, object.KindVIPAllocation, name); err != nil && !errors.Is(err, store.ErrNotFound) {
+// reconcileAllocation keeps, releases, or queues one existing allocation for
+// reallocation. It reserves every VIP it sees, even a doomed one, because the
+// release may not land this pass and handing the address out again while the
+// old object lingers would mint the very duplicate this loop repairs.
+func (c *vipController) reconcileAllocation(ctx context.Context, alloc *klitev1.VIPAllocation, want map[string]*klitev1.VIPAllocationSpec, used map[netip.Addr]bool) error {
+	name := alloc.GetMeta().GetName()
+	ip, parseErr := netip.ParseAddr(alloc.GetSpec().GetVip())
+	valid := parseErr == nil && vipPool.Contains(ip)
+	duplicate := valid && used[ip]
+	if parseErr == nil {
+		used[ip] = true
+	}
+	spec, wanted := want[name]
+	delete(want, name)
+	switch {
+	case !wanted:
+		return c.release(ctx, name, "service or node gone")
+	case !valid:
+		want[name] = spec // reallocated below
+		return c.release(ctx, name, "vip outside the pool")
+	case duplicate:
+		// Two leader lives can each create-only their own name with the same
+		// address. List walks names in order, so the lexically-first holder
+		// keeps a contested VIP and the repair converges on every pass.
+		want[name] = spec // reallocated below
+		return c.release(ctx, name, "duplicate vip")
+	}
+	return nil
+}
+
+func (c *vipController) release(ctx context.Context, name, reason string) error {
+	err := c.st.Delete(ctx, object.KindVIPAllocation, name)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return nil
+	case err != nil:
 		return err
 	}
-	slog.Info("vip released", "allocation", name)
+	slog.Info("vip released", "allocation", name, "reason", reason)
 	return nil
 }
 
@@ -87,6 +114,10 @@ func (c *vipController) allocate(ctx context.Context, spec *klitev1.VIPAllocatio
 	if err != nil {
 		return err
 	}
+	// Reserve the pick before the write settles. When the create loses to a
+	// concurrent leader, the name exists with some other VIP, and reusing
+	// this candidate for the next pair could mint a duplicate.
+	used[ip] = true
 	spec.Vip = ip.String()
 	alloc := &klitev1.VIPAllocation{
 		Meta: &klitev1.Meta{Name: AllocationName(spec.GetService(), spec.GetNode())},
@@ -94,14 +125,13 @@ func (c *vipController) allocate(ctx context.Context, spec *klitev1.VIPAllocatio
 	}
 	obj := &klitev1.Object{Kind: &klitev1.Object_VipAllocation{VipAllocation: alloc}}
 	if _, err := c.st.Put(ctx, obj, store.RevCreate); err != nil {
-		// Someone (an earlier leader life) beat us to the name; the next
-		// pass reads their allocation.
+		// An earlier leader life beat us to the name, and the next pass
+		// reads their allocation.
 		if errors.Is(err, store.ErrAlreadyExists) {
 			return nil
 		}
 		return err
 	}
-	used[ip] = true
 	slog.Info("vip allocated", "service", spec.GetService(), "node", spec.GetNode(), "vip", spec.GetVip())
 	return nil
 }
