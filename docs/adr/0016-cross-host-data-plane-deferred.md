@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0024
+---
+
 # Cross-host traffic is designed for, not built
 
 Locally every instance shares one bridge, so a proxy on node-1 dials an endpoint on node-2 directly. Once nodes run on separate machines, that dial breaks, and we're deliberately not building the fix yet. The seams already fit it: EDS endpoints carry their node, so the change is confined to the proxy's cross-node endpoint dialer and to IPAM growing per-node subnets. DNS, VIPs, policy evaluation, and the agent protocol wouldn't move.
