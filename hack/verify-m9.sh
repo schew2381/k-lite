@@ -170,8 +170,16 @@ pass "all 3 nodes advertise a resolved literal IP (default host.docker.internal 
 
 # ============================================================
 STEP=3-apps
+# Fast drain knobs (m5's move): demo pace lives in YAML, outside the
+# template, so the hash and the choreography stay untouched.
+patch_drain() { # patch_drain <src> <dst>
+  awk 'BEGIN{done=0} {print} /^spec:$/ && !done {
+    print "  drain:"; print "    drainTimeoutSeconds: 4"; print "    terminationGraceSeconds: 4"; done=1
+  }' "$1" > "$2"
+}
 for app in a-client b-whoami c-whoami; do
-  "$KLITE" apply -f "examples/apps/$app.yaml" >/dev/null || die "apply $app.yaml"
+  patch_drain "examples/apps/$app.yaml" "$TMP/$app-fast.yaml"
+  "$KLITE" apply -f "$TMP/$app-fast.yaml" >/dev/null || die "apply $app.yaml (fast drains)"
 done
 wait_for 90 counts_ready 2 && pass "workloads a, b, c all Ready (probe-gated)" || die "workloads Ready"
 A_INST="$("$KLITE" get instances | awk '$2=="a" {print $1}' | head -1)"
@@ -229,12 +237,19 @@ pass "consumer EDS dials remote endpoints via ingress ports, never raw pod IPs"
 
 # ============================================================
 STEP=6-rejections
-# The probes target the ingress port of the b instance on a's OWN node: a
-# dials that one over the raw local path, so its ingress listener carries no
-# legitimate traffic and every counter delta below belongs to the probes.
-QUIET_B_INST="$("$KLITE" get instances | awk -v an="$A_NODE" '$2=="b" && $3==an {print $1}' | head -1)"
-read -r _ QUIET_PORT <<<"$(alloc_row b "$QUIET_B_INST")"
-[[ -n "$QUIET_PORT" ]] || die "no ingress allocation for a-local b instance $QUIET_B_INST"
+# The probes need a listener that is quiet (no legitimate traffic, so every
+# counter delta belongs to them) but alive upstream (a dead pod would reset
+# mid-handshake from the other side). Neither b nor c guarantees an instance
+# on any particular node, so pin one: a one-off whoami on a's node that
+# nothing ever dials.
+{ printf 'apiVersion: klite/v1\nkind: Workload\nmetadata:\n  name: m9q\n  labels: {app: m9q}\nspec:\n  replicas: 1\n  nodeName: %s\n  template:\n    labels: {app: m9q}\n    containers:\n      - name: web\n        image: traefik/whoami:v1.10\n        readinessProbe: {tcpPort: 80}\n---\napiVersion: klite/v1\nkind: Service\nmetadata:\n  name: m9q\nspec:\n  selector: {app: m9q}\n  port: 8080\n  targetPort: 80\n' "$A_NODE"; } \
+  | "$KLITE" apply -f - >/dev/null || die "apply the quiet m9q workload"
+quiet_ready() {
+  Q_INST="$("$KLITE" get instances 2>/dev/null | awk '$2=="m9q" && $4=="Ready" {print $1}' | head -1)"
+  [[ -n "$Q_INST" ]] && [[ -n "$(alloc_row m9q "$Q_INST")" ]]
+}
+wait_for 60 quiet_ready || die "m9q never became Ready with an allocation"
+read -r _ QUIET_PORT <<<"$(alloc_row m9q "$Q_INST")"
 RX_STAT="tcp.ingress_${QUIET_PORT}.downstream_cx_rx_bytes_total"
 RX0="$(estat "$A_NODE" "$RX_STAT")"
 
@@ -259,30 +274,30 @@ printf 'GET / HTTP/1.1\r\n\r\n' | openssl s_client -connect "127.0.0.1:${QUIET_P
 grep -q "HTTP/1.1" "$TMP/nocert.out" && die "certless TLS client reached the pod"
 pass "certless TLS dial gets nothing back (client certificate required)"
 
-# Positive control, then the proof: a proper node-cert handshake succeeds on
-# the same listener, while the three rejected dials moved zero decrypted
-# bytes — nothing they sent ever crossed the proxy toward the pod.
-{ printf 'GET / HTTP/1.1\r\nHost: b\r\nConnection: close\r\n\r\n'; sleep 2; } \
+# The proof: across every rejected dial, zero decrypted bytes crossed the
+# proxy toward the pod.
+RX1="$(estat "$A_NODE" "$RX_STAT")"
+[[ "$((RX1 - RX0))" == 0 ]] \
+  && pass "rejected dials moved zero decrypted bytes toward the pod (rx delta 0)" \
+  || die "a rejected dial moved $((RX1 - RX0)) bytes through the proxy"
+
+# Positive control on the very same listener: a node cert completes the
+# handshake, the pod answers, and the byte counter finally moves.
+{ printf 'GET / HTTP/1.1\r\nHost: m9q\r\nConnection: close\r\n\r\n'; sleep 2; } \
   | openssl s_client -quiet -connect "127.0.0.1:${QUIET_PORT}" \
       -cert "$AGT_DIR/node-1/tls/node.crt" -key "$AGT_DIR/node-1/tls/node.key" \
       -CAfile "$AGT_DIR/node-1/tls/ca.crt" >"$TMP/nodecert.out" 2>&1
 grep -q "Hostname:" "$TMP/nodecert.out" \
   && pass "node-cert client reached the pod through the same listener (positive control)" \
   || die "node-cert handshake did not reach the pod (see $TMP/nodecert.out)"
-RX1="$(estat "$A_NODE" "$RX_STAT")"
-CONTROL_BYTES=$((RX1 - RX0))
-[[ "$CONTROL_BYTES" -gt 0 ]] || die "positive control moved no bytes; the rx counter is not measuring"
-RX2_BASE="$RX1"
-curl -s --max-time 3 "http://127.0.0.1:${QUIET_PORT}/" >/dev/null 2>&1
-printf 'x' | openssl s_client -connect "127.0.0.1:${QUIET_PORT}" -cert "$TMP/foreign.crt" -key "$TMP/foreign.key" >/dev/null 2>&1
-RX3="$(estat "$A_NODE" "$RX_STAT")"
-[[ "$((RX3 - RX2_BASE))" == 0 ]] \
-  && pass "rejected dials moved zero decrypted bytes toward the pod (rx delta 0; control moved $CONTROL_BYTES)" \
-  || die "a rejected dial moved $((RX3 - RX2_BASE)) bytes through the proxy"
+RX2="$(estat "$A_NODE" "$RX_STAT")"
+[[ "$RX2" -gt "$RX1" ]] || die "positive control moved no bytes; the rx counter is not measuring"
 
 # ============================================================
 STEP=7-churn-hitless
-MARKER="$(date -u +%Y-%m-%dT%H:%M:%S)"
+# Unix epoch on purpose: docker parses zone-less RFC3339 as local time,
+# which would push --since into the future and blank the log.
+MARKER="$(date +%s)"
 sleep 2
 
 "$KLITE" scale workload b --replicas 3 >/dev/null || die "scale b to 3"
@@ -290,9 +305,13 @@ b3() { counts_ready 3; }
 wait_for 60 b3 && pass "scale b 2->3 converged" || die "scale b to 3 converged"
 
 # Rollout: template change (extra env var) drives the surge-first replace.
+# Applied over the fast-drain copy so the knobs survive, with the replica
+# count rewritten to 3 — apply lays the whole spec over the stored one, and
+# the file's replicas: 2 would silently undo the scale step.
 B_BEFORE="$("$KLITE" get instances | awk '$2=="b" {print $1}' | sort)"
-awk '1; /value: b$/ {print "          - name: M9_ROLLOUT"; print "            value: \"1\""}' \
-  examples/apps/b-whoami.yaml | "$KLITE" apply -f - >/dev/null || die "apply rolled b template"
+awk '{sub(/^  replicas: 2$/, "  replicas: 3"); print}
+     /value: b$/ {print "          - name: M9_ROLLOUT"; print "            value: \"1\""}' \
+  "$TMP/b-whoami-fast.yaml" | "$KLITE" apply -f - >/dev/null || die "apply rolled b template"
 rolled() {
   [[ "$("$KLITE" get instances 2>/dev/null | awk '$2=="b" && $4=="Ready"' | wc -l | tr -d ' ')" == 3 ]] || return 1
   [[ "$("$KLITE" get instances 2>/dev/null | awk '$2=="b" {print $1}' | sort)" != "$B_BEFORE" ]] || return 1
@@ -333,13 +352,28 @@ else
   wait_for 30 wan_advertised && pass "$WAN_NODE re-advertised as $WAN_IP (agent re-run, containers adopted)" \
     || die "WAN advertise address never reached NodeStatus"
 
-  WAN_B_INST="$("$KLITE" get instances | awk -v n="$WAN_NODE" '$2=="b" && $3==n && $4=="Ready" {print $1}' | head -1)"
-  read -r _ WAN_B_PORT <<<"$(alloc_row b "$WAN_B_INST")"
+  # The restarted agent's probe verdicts arrive a beat later and instances
+  # flap to Running meanwhile, so the target pick retries until a Ready b
+  # with an allocation shows up.
+  wan_target() {
+    WAN_B_INST="$("$KLITE" get instances 2>/dev/null | awk -v n="$WAN_NODE" '$2=="b" && $3==n && $4=="Ready" {print $1}' | head -1)"
+    [[ -n "$WAN_B_INST" ]] || return 1
+    read -r _ WAN_B_PORT <<<"$(alloc_row b "$WAN_B_INST")"
+    [[ -n "$WAN_B_PORT" ]]
+  }
+  wait_for 30 wan_target || die "no Ready b instance with an allocation on $WAN_NODE after the re-run"
+  info "WAN target: $WAN_B_INST on $WAN_NODE, ingress port $WAN_B_PORT"
   wan_in_eds() { curl -s --max-time 3 "127.0.0.1:$(envoy_admin "$A_NODE")/clusters" | grep -q "b::${WAN_IP}:${WAN_B_PORT}::"; }
-  wait_for 30 wan_in_eds && pass "consumer EDS now dials b via ${WAN_IP}:${WAN_B_PORT}" \
-    || die "consumer EDS never picked up the WAN address"
+  if ! wait_for 30 wan_in_eds; then
+    echo "--- consumer /clusters b lines:"
+    curl -s --max-time 3 "127.0.0.1:$(envoy_admin "$A_NODE")/clusters" | grep "^b::" | sort -u | head -20
+    echo "--- allocations:"; "$KLITE" get ingressallocations
+    echo "--- node advertise:"; "$KLITE" get nodes -o yaml | grep -E "name:|advertiseAddress:"
+    die "consumer EDS never picked up the WAN address"
+  fi
+  pass "consumer EDS now dials b via ${WAN_IP}:${WAN_B_PORT}"
 
-  WAN_MARK="$(date -u +%Y-%m-%dT%H:%M:%S)"
+  WAN_MARK="$(date +%s)"
   WH0="$(estat "$WAN_NODE" "listener.0.0.0.0_${WAN_B_PORT}.ssl.handshake")"
   WAN_CID="$(docker ps --filter "label=io.klite.instance=$WAN_B_INST" --format '{{.ID}}')"
   wan_flows() {
