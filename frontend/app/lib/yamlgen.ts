@@ -29,7 +29,7 @@ export function newNodeYaml(name: string): string {
 export function chattyContainer(name: string, targets: string[]) {
   const script = [
     `echo "$(hostname) is ${name}" > /www/index.html`,
-    'httpd -p 80 -h /www',
+    '(httpd -f -vv -p 80 -h /www &)',
     // the sleep rides the do-line: a '; ' join would otherwise render 'do;',
     // which busybox ash rejects. sleep runs backgrounded under wait, since a
     // trap only fires between foreground commands and a drain shouldn't
@@ -41,7 +41,7 @@ export function chattyContainer(name: string, targets: string[]) {
     '[ "$n" -gt 0 ] || continue',
     'k=$(( ($(head -c2 /dev/urandom | od -An -tu2 | tr -d " ") % n) + 1 ))',
     'i=0; for t in $TARGETS; do i=$((i+1)); [ "$i" = "$k" ] && pick=$t; done',
-    'wget -q -T 2 -O- "http://$pick:8080" >/dev/null 2>&1 && echo "-> $pick ok" || echo "-> $pick FAILED"',
+    'wget -q -T 2 -O- "http://$pick:8080" >/dev/null 2>&1 && echo "send -> $pick ok" || echo "send -> $pick FAILED"',
     'done',
   ].join('; ')
   return {
