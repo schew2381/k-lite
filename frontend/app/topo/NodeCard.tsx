@@ -67,6 +67,8 @@ export function NodeCard({ node, layout, count }: { node: NodeObj; layout: NodeL
   const [inspecting, setInspecting] = useState(false)
   const services = sortedServices(snapshot)
   const rbac = rbacView(snapshot)
+  // the drain legend earns its line only while something is draining
+  const anyDraining = services.some((svc) => endpointsOf(snapshot, svc).draining.length > 0)
   const ruleLine = (rules: { from: string; to: string }[]) =>
     rules.map((r) => `${r.from}→${r.to}`).join(', ')
   const name = node.metadata.name
@@ -223,19 +225,33 @@ export function NodeCard({ node, layout, count }: { node: NodeObj; layout: NodeL
         <SubBox rect={layout.infra.eds} within={layout.infra.box} title="endpoints (EDS)">
           {services.map((svc) => {
             const eps = endpointsOf(snapshot, svc)
-            const row = [
-              ...eps.ready.map((i) => `${i.metadata.name} READY`),
-              ...eps.draining.map((i) => `${i.metadata.name} DRAINING`),
+            const entries = [
+              ...eps.ready.map((i) => ({ name: i.metadata.name, draining: false })),
+              ...eps.draining.map((i) => ({ name: i.metadata.name, draining: true })),
             ]
             return (
               <div key={svc.metadata.name} className="truncate">
-                {svc.metadata.name}: {row.length > 0 ? row.join(' · ') : '(none)'}
+                {svc.metadata.name}:{' '}
+                {entries.length === 0
+                  ? '(none)'
+                  : entries.map((e, i) => (
+                      <span key={e.name}>
+                        {i > 0 && ' · '}
+                        {e.draining ? (
+                          <span className="font-bold text-deny">{e.name} DRAINING</span>
+                        ) : (
+                          `${e.name} READY`
+                        )}
+                      </span>
+                    ))}
               </div>
             )
           })}
-          <div className="truncate text-[9.5px] text-muted-foreground">
-            DRAINING = no new connections
-          </div>
+          {anyDraining && (
+            <div className="truncate text-[9.5px] font-semibold text-deny/80">
+              DRAINING = no new connections
+            </div>
+          )}
         </SubBox>
       </button>
       {inspecting && <InfraPodSheet node={node} open onOpenChange={setInspecting} />}

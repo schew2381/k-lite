@@ -136,7 +136,7 @@ export function InfraPodSheet({
                   ))}
                   {draining.map((i) => (
                     <span key={i.metadata.name}>
-                      {i.metadata.name} <span className="text-draining">DRAINING</span>{' '}
+                      {i.metadata.name} <span className="font-bold text-deny">DRAINING</span>{' '}
                     </span>
                   ))}
                 </Row>
