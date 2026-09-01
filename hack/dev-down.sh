@@ -13,10 +13,15 @@ ALL=0
 [[ "${1:-}" == "--all" ]] && ALL=1
 
 # --- kill playground processes (pidfiles only, never by name) ---
-for pidfile in "$DEV_DIR"/klited-*.pid "$DEV_DIR"/agent-*.pid; do
+# Covers the cluster (klited, agents) and the demo finale's UI pair
+# (facade, vite), each verified against its expected command line.
+UI_PORTS_TO_FREE=()
+[[ -f "$DEV_DIR/facade.pid" ]] && UI_PORTS_TO_FREE+=(7080)
+[[ -f "$DEV_DIR/vite.pid" ]] && UI_PORTS_TO_FREE+=(5173)
+for pidfile in "$DEV_DIR"/klited-*.pid "$DEV_DIR"/agent-*.pid "$DEV_DIR"/facade.pid "$DEV_DIR"/vite.pid; do
   [[ -f "$pidfile" ]] || continue
   pid="$(cat "$pidfile" 2>/dev/null)"
-  if [[ -n "$pid" ]] && ps -p "$pid" -o command= 2>/dev/null | grep -Eq 'klited|klite-agent'; then
+  if [[ -n "$pid" ]] && ps -p "$pid" -o command= 2>/dev/null | grep -Eq 'klited|klite-agent|klite-facade|vite|bun'; then
     echo "stopping pid $pid ($(basename "$pidfile" .pid))"
     kill "$pid" 2>/dev/null
     for _ in $(seq 1 10); do
@@ -26,6 +31,21 @@ for pidfile in "$DEV_DIR"/klited-*.pid "$DEV_DIR"/agent-*.pid; do
     kill -9 "$pid" 2>/dev/null
   fi
   rm -f "$pidfile"
+done
+
+# --- free the UI ports the demo owned (go run and bun can leave children) ---
+# Gated on the pidfiles having existed, so a Vite the user started
+# independently is never touched.
+for port in "${UI_PORTS_TO_FREE[@]-}"; do
+  [[ -n "$port" ]] || continue
+  pids="$(lsof -ti tcp:"$port" 2>/dev/null)"
+  if [[ -n "$pids" ]]; then
+    echo "freeing port $port"
+    kill $pids 2>/dev/null
+    sleep 1
+    pids="$(lsof -ti tcp:"$port" 2>/dev/null)"
+    [[ -n "$pids" ]] && kill -9 $pids 2>/dev/null
+  fi
 done
 
 # --- remove this profile's containers by io.klite labels ---

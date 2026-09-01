@@ -502,8 +502,7 @@ echo "
     $KLITE get ingressallocations
     $KLITE describe workload b
 
-  tear down:
-    kill \$(cat $DEV_DIR/facade.pid) \$(cat $DEV_DIR/vite.pid)
-    hack/dev-down.sh --all
+  tear down (everything, frontend included):
+    make down
 "
 echo "demo: all beats passed"

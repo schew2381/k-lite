@@ -58,6 +58,9 @@ etcd-up:
 etcd-down:
 	hack/etcd-up.sh down
 
+down:
+	hack/dev-down.sh --all
+
 spike-net:
 	hack/spike-net.sh
 
