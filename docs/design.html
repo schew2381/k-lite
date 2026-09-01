@@ -617,7 +617,7 @@ spec:
             <tr><th>NATed node</th><td class="ok">✓</td><td class="ok">✓ same machine</td></tr>
           </tbody>
         </table>
-        <p class="takeaway">on one LAN this never bites: every node advertises the Mac's LAN IP by default, so traffic flows both ways out of the box (<code>host.docker.internal</code> is the offline fallback, <code>KLITE_LAN=0</code> forces it). the blackhole is the open-internet case — a NATed node registers and looks healthy while traffic toward it dies</p>
+        <p class="takeaway">on one network this never bites: every node advertises the best address it has — tailnet IP first when one exists, else the Mac's LAN IP (<code>host.docker.internal</code> is the offline fallback, <code>KLITE_LAN=0</code> forces it). the blackhole is the raw open-internet case — a NATed node registers and looks healthy while traffic toward it dies</p>
       </div>
       <div>
         <p class="filetag">joining a real machine — printed by <code>klite node add</code></p>
@@ -663,7 +663,7 @@ curl -sfL https://…/join.sh | \
           <li><b>Install order matters once</b>: tailscale first, then restart klited — the serving cert walks interface addresses at boot, and skipping the restart is the documented x509-mismatch loop.</li>
           <li><b>join.sh treats 100.64.0.0/10 three ways</b> on purpose: detection refuses it, explicit values pass, and <code>KLITE_VPN=tailscale</code> derives one deliberately.</li>
           <li><b>Disable key expiry</b> for cluster machines — an expired tailnet node key (180-day default) looks exactly like a dead network.</li>
-          <li><b>Mixed clusters inherit a rule</b>: every node advertises its tailnet IP, the Mac's local agents included. Tailscale keeps same-LAN peers on the direct local path, which is what makes the rule universal.</li>
+          <li><b>Mixed clusters need no rule anymore</b>: when a tailnet exists, every node advertises its tailnet IP automatically — the Mac's local agents included. Tailscale keeps same-LAN peers on the direct local path, which is what makes tailnet-first safe.</li>
         </ul>
       </div>
       <div>
