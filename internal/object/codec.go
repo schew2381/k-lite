@@ -160,6 +160,8 @@ func message(o *klitev1.Object) proto.Message {
 		return k.Instance
 	case *klitev1.Object_VipAllocation:
 		return k.VipAllocation
+	case *klitev1.Object_IngressAllocation:
+		return k.IngressAllocation
 	}
 	return nil
 }

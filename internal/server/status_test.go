@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
@@ -67,6 +68,31 @@ func TestStampNodePreservesDraining(t *testing.T) {
 	}
 	if s.GetLastHeartbeatUnix() == 0 {
 		t.Error("heartbeat must still be stamped")
+	}
+}
+
+// Every server-materialized kind must decode cleanly and bounce off Apply
+// with the pointed error — never reach the store, never panic the codec.
+func TestApplyRejectsServerMaterializedKinds(t *testing.T) {
+	t.Parallel()
+	s := NewCluster(storetest.New(), NewCommandHub(), nil)
+	docs := map[string]string{
+		"Instance":          "apiVersion: klite/v1\nkind: Instance\nmetadata:\n  name: forged\n",
+		"VIPAllocation":     "apiVersion: klite/v1\nkind: VIPAllocation\nmetadata:\n  name: forged.node-1\n",
+		"IngressAllocation": "apiVersion: klite/v1\nkind: IngressAllocation\nmetadata:\n  name: forged.b-aa\n",
+	}
+	for kind, yaml := range docs {
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			resp, err := s.Apply(context.Background(), &klitev1.ApplyRequest{Yaml: []byte(yaml)})
+			if err != nil {
+				t.Fatalf("Apply must answer per-object, got rpc error: %v", err)
+			}
+			got := resp.GetResults()[0].GetError()
+			if !strings.Contains(got, "server-materialized") {
+				t.Fatalf("result error = %q, want the server-materialized rejection", got)
+			}
+		})
 	}
 }
 

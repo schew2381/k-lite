@@ -223,6 +223,10 @@ func TestEncodeRoundTrip(t *testing.T) {
 		{"service", serviceYAML},
 		{"node", nodeYAML},
 		{"network policy", policyYAML},
+		// Server-materialized kinds still cross the codec: Apply rejects
+		// them later by kind, so a client-sent document must decode (never
+		// panic) and a stored one must encode for `get -o yaml`.
+		{"ingress allocation", "apiVersion: klite/v1\nkind: IngressAllocation\nmetadata:\n  name: b.b-aa\nspec:\n  service: b\n  instance: b-aa\n  node: node-1\n  port: 20000\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
