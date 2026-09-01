@@ -17,7 +17,15 @@ import type { NodeLayout, Rect } from '@/layout/layout'
 import { act } from '@/lib/act'
 import { useClient } from '@/lib/client-context'
 import { cn } from '@/lib/utils'
-import { endpointsOf, infraIpOf, rbacView, sortedServices, vipFor } from '@/store/selectors'
+import {
+  dialTargetOf,
+  endpointsOf,
+  infraIpOf,
+  ingressRowsOf,
+  rbacView,
+  sortedServices,
+  vipFor,
+} from '@/store/selectors'
 import { useSnapshot } from '@/store/store'
 import { InfraPodSheet } from '@/topo/InfraPodSheet'
 
@@ -223,39 +231,62 @@ export function NodeCard({ node, layout, count }: { node: NodeObj; layout: NodeL
           </div>
         </SubBox>
         <SubBox rect={layout.infra.eds} within={layout.infra.box} title="endpoints (EDS)">
-          {services.map((svc) => {
+          {services.flatMap((svc) => {
             const eps = endpointsOf(snapshot, svc)
             const entries = [
-              ...eps.ready.map((i) => ({ name: i.metadata.name, draining: false, node: i.spec.node })),
-              ...eps.draining.map((i) => ({ name: i.metadata.name, draining: true, node: i.spec.node })),
+              ...eps.ready.map((i) => ({ inst: i, draining: false })),
+              ...eps.draining.map((i) => ({ inst: i, draining: true })),
             ]
-            return (
-              <div key={svc.metadata.name} className="truncate">
-                {svc.metadata.name}:{' '}
-                {entries.length === 0
-                  ? '(none)'
-                  : entries.map((e, i) => (
-                      <span key={e.name}>
-                        {i > 0 && ' · '}
-                        {e.draining ? (
-                          <span className="font-bold text-deny">{e.name} DRAINING</span>
-                        ) : (
-                          `${e.name} READY`
-                        )}{' '}
-                        {e.node === name ? (
-                          <span className="text-muted-foreground">local</span>
-                        ) : (
-                          <span className="font-semibold text-ctrl">internet</span>
-                        )}
-                      </span>
-                    ))}
-              </div>
-            )
+            const label = `${svc.metadata.name}: `
+            if (entries.length === 0) {
+              return (
+                <div key={svc.metadata.name} className="truncate">
+                  {label}(none)
+                </div>
+              )
+            }
+            return entries.map((e, i) => {
+              const dial = dialTargetOf(snapshot, svc, e.inst, name)
+              return (
+                <div key={e.inst.metadata.name} className="truncate">
+                  {i === 0 ? label : <span className="invisible">{label}</span>}
+                  {e.draining ? (
+                    <span className="font-bold text-deny">{e.inst.metadata.name} DRAINING</span>
+                  ) : (
+                    `${e.inst.metadata.name} READY`
+                  )}{' '}
+                  {dial.local ? (
+                    <span className="text-muted-foreground">local ({dial.address})</span>
+                  ) : (
+                    <span className="font-semibold text-ctrl">internet ({dial.address})</span>
+                  )}
+                </div>
+              )
+            })
           })}
           {anyDraining && (
             <div className="truncate text-[9.5px] font-semibold text-deny/80">
               DRAINING = no new connections
             </div>
+          )}
+        </SubBox>
+        {/* The ingress table is the reverse mapping: what this node publishes
+            and where each published port forwards. Remote proxies dial these. */}
+        <SubBox
+          rect={layout.infra.ingress}
+          within={layout.infra.box}
+          title="ingress (mTLS)"
+          note={node.status?.advertiseAddress ?? 'no address yet'}
+        >
+          {ingressRowsOf(snapshot, name).length === 0 ? (
+            <div className="truncate text-muted-foreground">(nothing published yet)</div>
+          ) : (
+            ingressRowsOf(snapshot, name).map((r) => (
+              <div key={r.port} className="truncate">
+                :{r.port} <span className="text-muted-foreground">→</span> {r.instance}{' '}
+                <span className="text-muted-foreground">{r.forward}</span>
+              </div>
+            ))
           )}
         </SubBox>
       </button>

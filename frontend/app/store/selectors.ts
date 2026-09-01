@@ -155,6 +155,50 @@ export function infraIpOf(node: NodeObj): string | undefined {
   return idx ? `10.44.0.${10 + idx}` : undefined
 }
 
+// dialTargetOf answers what `fromNode`'s Envoy would actually dial for one
+// endpoint: the raw instance ip:targetPort when it's local, or the owning
+// node's advertised machine address and mTLS ingress port when it's remote
+// (M9).
+export function dialTargetOf(
+  s: Snapshot,
+  svc: Service,
+  inst: Instance,
+  fromNode: string,
+): { local: boolean; address: string } {
+  const local = inst.spec.node === fromNode
+  if (local) {
+    return { local, address: `${inst.status.instanceIp ?? '?'}:${svc.spec.targetPort}` }
+  }
+  const machine = (inst.spec.node && s.nodes[inst.spec.node]?.status?.advertiseAddress) ?? '?'
+  const port = inst.status.ingressPort
+  return { local, address: port ? `${machine}:${port}` : `${machine}` }
+}
+
+// ingressRowsOf lists what one node publishes: each local endpoint's mTLS
+// ingress port and the raw instance address it forwards to, which is the
+// DNAT table remote proxies depend on.
+export interface IngressRow {
+  port: number
+  instance: string
+  forward: string
+}
+
+export function ingressRowsOf(s: Snapshot, node: string): IngressRow[] {
+  const rows: IngressRow[] = []
+  for (const svc of sortedServices(s)) {
+    const eps = endpointsOf(s, svc)
+    for (const inst of [...eps.ready, ...eps.draining]) {
+      if (inst.spec.node !== node || !inst.status.ingressPort) continue
+      rows.push({
+        port: inst.status.ingressPort,
+        instance: inst.metadata.name,
+        forward: `${inst.status.instanceIp ?? '?'}:${svc.spec.targetPort}`,
+      })
+    }
+  }
+  return rows.sort((a, b) => a.port - b.port)
+}
+
 // The compiled RBAC view every node's Envoy enforces: DENY rules first, then
 // ALLOW rules, then the default line.
 export interface RbacView {

@@ -1,6 +1,10 @@
-# prek runs these commit-time checks (https://github.com/j178/prek). See docs/adr/0031.
+# prek runs these checks (https://github.com/j178/prek). See docs/adr/0031.
 # Hooks receive staged file paths only and must stay fast. Nothing in this file
 # rewrites Go code. The heavy gates keep their make targets and run in CI.
+# Install the commit hook in single-session clones only: a commit-time run
+# stashes unstaged edits, and in a shared checkout the stash opens a data-loss
+# window for every other session. In a shared checkout, run the set through
+# `make precommit` instead.
 exclude = '^(internal/gen/|frontend/node_modules/|frontend/dist/|frontend/bun\.lock$|\.claude/)'
 
 [[repos]]

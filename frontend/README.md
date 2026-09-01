@@ -32,15 +32,23 @@ Set `VITE_KLITE_MODE=http` and `VITE_KLITE_API` to klited's address. `HttpClient
 
 ## Developing
 
-Set up the hooks once, from the repo root:
+Set up once, from the repo root:
 
 ```sh
 brew install prek        # hook runner, https://github.com/j178/prek
 cd frontend && bun install
-prek install             # registers the pre-commit hook for this clone
+prek install             # ONLY in a clone that's yours alone (see below)
 ```
 
-Every commit then runs fast checks against your staged files only:
+Install the commit hook only in a single-session clone. A commit-time run
+stashes unstaged edits while hooks run, so in a checkout shared by parallel
+sessions every commit opens a window where the restore reverts another
+session's concurrent write (ADR 0031 records the mechanics). In a shared
+checkout, skip `prek install` and run the same set by hand with
+`make precommit`, which never stashes.
+
+With the hook installed, every commit runs fast checks against your staged
+files only:
 
 - Biome checks and fixes the frontend sources
 - gofmt lists unformatted Go files without rewriting them

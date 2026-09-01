@@ -2,19 +2,21 @@
 // the compiled RBAC table, the EDS endpoint sets, and the identity map. Every
 // row derives live from the store.
 
-import type { Instance, NodeObj } from '@/api/types'
+import type { NodeObj } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 import {
+  dialTargetOf,
   endpointsOf,
   identityRows,
   infraIpOf,
+  ingressRowsOf,
   rbacView,
   sortedServices,
   vipFor,
 } from '@/store/selectors'
-import { type Snapshot, useSnapshot } from '@/store/store'
+import { useSnapshot } from '@/store/store'
 
 function Section({
   title,
@@ -47,14 +49,6 @@ const Row = ({ children, tone }: { children: React.ReactNode; tone?: 'deny' | 'a
     {children}
   </div>
 )
-
-// viaAddress builds a remote endpoint's dial target: the owning machine's
-// advertised address, plus the endpoint's mTLS ingress port when the sim
-// knows it.
-function viaAddress(s: Snapshot, inst: Instance): string {
-  const machine = (inst.spec.node && s.nodes[inst.spec.node]?.status?.advertiseAddress) ?? '?'
-  return inst.status.ingressPort ? `${machine}:${inst.status.ingressPort}` : `${machine}`
-}
 
 export function InfraPodSheet({
   node,
@@ -137,16 +131,19 @@ export function InfraPodSheet({
                   {ready.length === 0 && draining.length === 0 && (
                     <span className="text-deny">no endpoints</span>
                   )}
-                  {ready.map((i) => (
-                    <span key={i.metadata.name}>
-                      {i.metadata.name} <span className="text-traffic">READY</span>{' '}
-                      {i.spec.node === name ? (
-                        <span className="text-muted-foreground">local </span>
-                      ) : (
-                        <span className="text-ctrl">via {viaAddress(snapshot, i)} (mTLS ingress) </span>
-                      )}
-                    </span>
-                  ))}
+                  {ready.map((i) => {
+                    const dial = dialTargetOf(snapshot, svc, i, name)
+                    return (
+                      <span key={i.metadata.name}>
+                        {i.metadata.name} <span className="text-traffic">READY</span>{' '}
+                        {dial.local ? (
+                          <span className="text-muted-foreground">local ({dial.address}) </span>
+                        ) : (
+                          <span className="text-ctrl">internet ({dial.address}) </span>
+                        )}
+                      </span>
+                    )
+                  })}
                   {draining.map((i) => (
                     <span key={i.metadata.name}>
                       {i.metadata.name} <span className="font-bold text-deny">DRAINING</span>{' '}
@@ -155,6 +152,26 @@ export function InfraPodSheet({
                 </Row>
               )
             })}
+          </Section>
+
+          <Section title="envoy · ingress (mTLS)" note="what this node publishes for remote proxies">
+            {node.status?.advertiseAddress ? (
+              <Row>
+                advertised as <span className="text-ctrl">{node.status.advertiseAddress}</span>
+              </Row>
+            ) : (
+              <Row>not advertised yet</Row>
+            )}
+            {ingressRowsOf(snapshot, name).length === 0 ? (
+              <Row>(nothing published yet)</Row>
+            ) : (
+              ingressRowsOf(snapshot, name).map((r) => (
+                <Row key={r.port}>
+                  :{r.port} <span className="text-muted-foreground">→</span> {r.instance}{' '}
+                  <span className="text-muted-foreground">{r.forward}</span>
+                </Row>
+              ))
+            )}
           </Section>
 
           <Section title="identity map" note="how RBAC knows who's calling">

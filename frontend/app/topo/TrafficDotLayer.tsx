@@ -77,7 +77,7 @@ function anchorIdFor(at: TraceStep['at'], trace: Trace): string {
   const e = trace.event
   if (at === 'caller') return `instance:${e.fromInstance}`
   if (at === 'target') return `instance:${e.toInstance}`
-  if (at === 'targetInfra') return `infra:${trace.targetNode}`
+  if (at === 'targetInfra') return `ingress:${trace.targetNode}`
   return `${at}:${e.viaNode}` // kdns | lds | rbac | eds sub-box on the caller's node
 }
 

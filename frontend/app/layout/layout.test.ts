@@ -25,12 +25,12 @@ describe('computeLayout', () => {
       expect(layout.anchors[`service:${name}`]).toBeDefined()
     }
     for (const name of Object.keys(snap.nodes)) {
-      for (const part of ['infra', 'kdns', 'lds', 'rbac', 'eds'] as const) {
+      for (const part of ['infra', 'kdns', 'lds', 'rbac', 'eds', 'ingress'] as const) {
         expect(layout.anchors[`${part}:${name}`]).toBeDefined()
       }
       // every sub-box nests inside its infra pod box
       const infra = layout.nodes[name].infra
-      for (const sub of [infra.kdns, infra.envoy, infra.lds, infra.rbac, infra.eds]) {
+      for (const sub of [infra.kdns, infra.envoy, infra.lds, infra.rbac, infra.eds, infra.ingress]) {
         expect(sub.y).toBeGreaterThanOrEqual(infra.box.y)
         expect(sub.y + sub.h).toBeLessThanOrEqual(infra.box.y + infra.box.h)
         expect(sub.x).toBeGreaterThanOrEqual(infra.box.x)
