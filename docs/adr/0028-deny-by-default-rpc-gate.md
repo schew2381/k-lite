@@ -12,4 +12,4 @@ klited serves everything — ClusterService, AgentService, ADS — on a single T
 
 - The CLI's `--insecure` skips certificate verification only, never encryption.
 - The admin token mints with O_EXCL so two replicas racing first boot can't both create it.
-- Recorded residual: xDS snapshots aren't yet bound to the certificate's node identity, so any certified node can read another's snapshot. M9 closes this while it's in the cross-node security business.
+- Recorded residual, since closed: M9 bound ADS streams to the caller's certificate at the interceptor (the first request must name the cert's node, and the stream keeps that binding), so a certified node can no longer read another's snapshot.
