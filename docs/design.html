@@ -505,24 +505,11 @@ spec:
   <div class="wrap">
     <p class="eyebrow"><b>07</b>a node joins</p>
     <h2>From declared to Ready, on either home</h2>
-    <div class="split">
-      <div>
-        <p class="filetag">on this machine — one button in the UI</p>
-        <div class="codepane"><span class="c"># the UI's join dialog: the facade starts</span>
-<span class="c"># the agent itself, right where klited runs</span>
-klite-agent --node node-5 --token K10…</div>
-      </div>
-      <div>
-        <p class="filetag">over the internet — printed by klite node add</p>
-        <div class="codepane">curl -sfL https://…/join.sh | \
-  KLITE_URL=<span class="g">203.0.113.7:7443</span> \
-  KLITE_TOKEN='K10…' KLITE_NODE=node-5 sh -
-<span class="c"># installs the binary and a systemd unit —</span>
-<span class="c"># the infra image arrives from ghcr</span></div>
-      </div>
+    <div class="boardbox">
+      <svg id="board-nodeboot" role="img" aria-label="A node starting up: klited on the left; node-5 on the right with the klite-agent host process, the infra pod (klite-net owning the netns, Envoy joining it), and future instances. Two gRPC streams connect them — the agent's WatchDesired down and ReportStatus up, and Envoy's ADS stream carrying LDS, CDS, EDS down with ACKs back. A numbered boot sequence runs beneath."></svg>
     </div>
 
-    <ol class="steps">
+    <ol class="steps">    <ol class="steps">
       <li><code>klite node add node-5</code> declares the Node and mints the token — <code>K10&lt;ca-hash&gt;::node:&lt;secret&gt;</code>. An agent for an undeclared name is refused.</li>
       <li>The agent dials out. It has no CA yet, so it verifies the certificate it's shown against the hash pinned inside the token.</li>
       <li>Register: the secret is checked in constant time, a CSR goes up, and a certificate comes back — <code>CN=klite:node:node-5</code>. The private key never left the machine.</li>
@@ -953,8 +940,9 @@ function makeScene(svgId, vw, vh){
   sc.arrow("M 332 90 C 480 90, 620 66, 786 62", { dash:"7 6", sw:2 });
   sc.stepDot(560, 76, 4);
   sc.txt(430, 76, "full desired snapshot", { size:10, cls:"mono", fill:C.ctrl });
-  sc.txt(346, 118, "the same engine also feeds every Envoy over ADS —", { size:9, cls:"mono soft" });
-  sc.txt(346, 133, "but b's endpoints only change at step 7, once Ready", { size:9, cls:"mono soft" });
+  sc.txt(346, 118, "the same engine also feeds every", { size:9, cls:"mono soft" });
+  sc.txt(346, 133, "Envoy over ADS — b's endpoints", { size:9, cls:"mono soft" });
+  sc.txt(346, 148, "only change at step 7, once Ready", { size:9, cls:"mono soft" });
 
   sc.instance(600, 120, "b-3f81", "10.44.128.21", "Ready");
   sc.txt(600, 226, "docker run klite.node-1.b-3f81", { size:10.5, cls:"mono" });
@@ -1026,6 +1014,72 @@ function makeScene(svgId, vw, vh){
   sc.txt(720, 250, "node-2's instances hear node-2's VIP", { size:10.5, cls:"mono", fill:C.ctrl });
   sc.txt(720, 290, "balancing already happened at the", { size:10.5, cls:"lbl soft" });
   sc.txt(720, 306, "VIP, so the last hop is a raw dial", { size:10.5, cls:"lbl soft" });
+})();
+
+/* ---------- 07 · a node starts: the two streams ---------- */
+(function nodeboot(){
+  const sc = makeScene("board-nodeboot", 1000, 490);
+
+  sc.rect(36, 56, 254, 150, { rx:11, sw:2.4 });
+  sc.txt(56, 84, "klited ★", { size:14, weight:750, cls:"mono" });
+  sc.txt(56, 104, "CA · controllers", { size:10, cls:"mono soft" });
+  sc.txt(56, 120, "endpoints engine · xDS", { size:10, cls:"mono soft" });
+  sc.rect(54, 136, 120, 30, { rx:7, sw:1.6 });
+  sc.txt(114, 155, "etcd", { size:11, anchor:"middle", cls:"mono", weight:650 });
+
+  sc.rect(430, 36, 540, 300, { rx:12, sw:2.4 });
+  sc.txt(450, 64, "node-5", { size:14.5, weight:750, cls:"mono" });
+  sc.rect(460, 80, 210, 44, { rx:8, sw:1.9 });
+  sc.txt(565, 98, "klite-agent", { size:11.5, anchor:"middle", weight:650, cls:"mono" });
+  sc.txt(565, 114, "host process — the kubelet", { size:8.6, anchor:"middle", cls:"mono soft" });
+
+  sc.rect(460, 160, 250, 150, { rx:9, sw:2 });
+  sc.txt(478, 184, "infra pod", { size:12, weight:700, cls:"mono" });
+  sc.rect(476, 196, 218, 44, { rx:7, sw:1.6 });
+  sc.txt(585, 214, "klite-net — owns the netns", { size:9.5, anchor:"middle", cls:"mono" });
+  sc.txt(585, 230, "kdns · VIPs · probes", { size:8.6, anchor:"middle", cls:"mono soft" });
+  sc.rect(476, 248, 218, 44, { rx:7, sw:1.6 });
+  sc.txt(585, 266, "envoy — joins the netns", { size:9.5, anchor:"middle", cls:"mono" });
+  sc.txt(585, 282, "VIP + ingress listeners", { size:8.6, anchor:"middle", cls:"mono soft" });
+
+  sc.rect(760, 170, 180, 120, { rx:9, sw:1.8, dash:"6 5" });
+  sc.txt(778, 196, "instances", { size:11, weight:650, cls:"mono" });
+  sc.txt(778, 214, "arrive once the", { size:9, cls:"mono soft" });
+  sc.txt(778, 228, "scheduler counts", { size:9, cls:"mono soft" });
+  sc.txt(778, 242, "this node", { size:9, cls:"mono soft" });
+
+  /* stream 1: agent ⇄ klited */
+  sc.arrow("M 294 92 C 360 84, 390 84, 456 90", { sw:2, dash:"7 6" });
+  sc.arrow("M 456 108 C 390 116, 360 116, 294 110", { sw:2, dash:"7 6" });
+  sc.lock(374, 76);
+  sc.txt(306, 62, "WatchDesired ↓", { size:9.2, cls:"mono", fill:C.ctrl });
+  sc.txt(306, 76, "{ instances · net }", { size:8.8, cls:"mono", fill:C.ctrl });
+  sc.txt(306, 134, "ReportStatus ↑ 5s", { size:9.2, cls:"mono", fill:C.ctrl });
+  sc.txt(306, 148, "{ phases · IPs · ↻ }", { size:8.8, cls:"mono", fill:C.ctrl });
+
+  /* stream 2: envoy ⇄ klited */
+  sc.arrow("M 294 176 C 370 210, 400 240, 472 264", { sw:2, dash:"7 6" });
+  sc.arrow("M 472 282 C 396 262, 366 232, 294 196", { sw:2, dash:"7 6" });
+  sc.lock(378, 224);
+  sc.txt(300, 226, "ADS ↓", { size:9.2, cls:"mono", fill:C.ctrl });
+  sc.txt(300, 241, "{ LDS · CDS · EDS }", { size:9.2, cls:"mono", fill:C.ctrl });
+  sc.txt(390, 300, "ACK / NACK ↑", { size:9.2, cls:"mono", fill:C.ctrl });
+
+  /* boot sequence */
+  const boot = [
+    "Register — token → CSR → cert",
+    "NetBootstrap — infra IP · port slice · image",
+    "infra pod up — klite-net first, envoy joins",
+    "both streams open — desired state flows",
+    "Ready — the scheduler starts counting node-5",
+  ];
+  let y = 372;
+  boot.forEach((t, i) => {
+    sc.stepDot(52, y - 4, i + 1);
+    sc.txt(72, y, t, { size:10.5, cls:"mono" });
+    y += 24;
+  });
+  sc.line("M 430 348 L 430 418", { sw:0.1, stroke:"none" });
 })();
 
 /* ---------- 08 · the two mTLS handshakes, ladder style ---------- */
