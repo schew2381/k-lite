@@ -440,11 +440,6 @@ spec:
   <div class="wrap">
     <p class="eyebrow"><b>05</b>declare → converge</p>
     <h2>Making changes and converging using reconciliation</h2>
-    <p class="lede">
-      Nothing executes your YAML. Watch-loops converge on it — each owns one step, none call each other,
-      and the objects are the only coordination.
-    </p>
-
     <div class="boardbox">
       <svg id="board-relay" role="img" aria-label="The convergence relay, numbered: apply writes etcd; the workload controller creates a Pending instance; the scheduler binds the emptiest node; WatchDesired streams the change to that node's agent; the agent runs the container; klite-net's probe makes it Ready; EDS tells every Envoy."></svg>
     </div>
@@ -908,7 +903,6 @@ function makeScene(svgId, vw, vh){
   sc.txt(106, 131, "etcd", { size:11, anchor:"middle", cls:"mono", weight:650 });
 
   sc.txt(96, 18, "you (CLI · UI): klite scale workload b --replicas 3", { size:11.5, cls:"mono", fill:C.ctrl, weight:700 });
-  sc.arrow("M 86 16 C 66 18, 56 24, 54 32", { sw:2 });
   sc.stepDot(70, 14, 1);
 
   sc.stepDot(40, 176, 2); sc.stepDot(40, 198, 3);
