@@ -347,7 +347,7 @@ func TestListSurfacesCorruptValue(t *testing.T) {
 	}
 }
 
-// A watch from a compacted revision surfaces the error, then the channel closes.
+// A watch from a compacted revision surfaces the error and then closes the channel.
 func TestWatchSurfacesCompaction(t *testing.T) {
 	cli := newClient(t)
 	s := store.NewEtcd(cli)

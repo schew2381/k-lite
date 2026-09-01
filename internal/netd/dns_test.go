@@ -202,7 +202,7 @@ func TestServeDNSRejectsNonQueryOpcode(t *testing.T) {
 }
 
 // run must flip ready once both listeners are up and return nil when asked
-// to stop; a stop-path shutdown error is noise, not a failure.
+// to stop. A stop-path shutdown error is noise, not a failure.
 func TestDNSRunLifecycle(t *testing.T) {
 	s := testDNSServer(t, "127.0.0.1:1")
 	s.listen = "127.0.0.1:0"
@@ -229,7 +229,7 @@ func TestDNSRunLifecycle(t *testing.T) {
 	}
 }
 
-// A listener that cannot bind must surface as an error, not hang the daemon.
+// A listener that can't bind must surface as an error, not hang the daemon.
 func TestDNSRunListenFailure(t *testing.T) {
 	s := testDNSServer(t, "127.0.0.1:1")
 	s.listen = "256.256.256.256:0"

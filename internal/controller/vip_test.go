@@ -98,9 +98,9 @@ func TestVIPReleasesStaleAndReservesItsAddress(t *testing.T) {
 	}
 }
 
-// TestVIPDuplicateRepaired: two leader lives can each create-only a different
-// allocation name holding the same address. The reconcile must keep exactly
-// one holder (the lexically-first) and move the other to a fresh VIP.
+// Two leader lives can each create-only a different allocation name holding
+// the same address. The reconcile must keep exactly one holder (the
+// lexically-first) and move the other to a fresh VIP.
 func TestVIPDuplicateRepaired(t *testing.T) {
 	t.Parallel()
 	st, c := vipSetup(t,
@@ -157,9 +157,9 @@ func TestVIPOutOfPoolReallocated(t *testing.T) {
 	}
 }
 
-// TestVIPAllocateLostCreateReservesCandidate: when the create-only Put loses
-// to a concurrent leader, the candidate address must still count as used so
-// the same pass can't hand it to the next pair.
+// When the create-only Put loses to a concurrent leader, the candidate
+// address must still count as used so the same pass can't hand it to the
+// next pair.
 func TestVIPAllocateLostCreateReservesCandidate(t *testing.T) {
 	t.Parallel()
 	st, c := vipSetup(t, allocationObj("b", "node-1", "10.44.64.9"))
