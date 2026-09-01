@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -38,6 +39,11 @@ type Config struct {
 	// bind-mounts it into Envoy. Empty renders a plaintext xDS bootstrap,
 	// which only unit tests should ever see.
 	TLSDir string
+	// CommandDial opens a connection pinned to one endpoint. The command
+	// plane needs it: output pushes must reach the exact klited holding the
+	// command stream, which Client's round-robin channel cannot promise.
+	// nil (unit tests) runs the command plane over Client.
+	CommandDial func(endpoint string) (*grpc.ClientConn, error)
 }
 
 // Agent is the per-node loop. All mutable state sits behind mu. The reconcile
@@ -57,6 +63,12 @@ type Agent struct {
 	// the last failed attempt happened (lockdown.go).
 	lockedDonor string
 	lockAttempt time.Time
+
+	// cmdDial and cmdIdx belong to the commandLoop goroutine alone: the
+	// pinned-connection factory and the endpoint rotation cursor
+	// (commands.go).
+	cmdDial func(endpoint string) (*grpc.ClientConn, error)
+	cmdIdx  int
 
 	mu           sync.Mutex
 	desired      map[string]*klitev1.Instance // by instance name
@@ -88,6 +100,7 @@ func New(cfg *Config) *Agent {
 		serverAddrs:   cfg.ServerAddrs,
 		stateDir:      cfg.StateDir,
 		tlsDir:        cfg.TLSDir,
+		cmdDial:       cfg.CommandDial,
 		now:           time.Now,
 		desired:       map[string]*klitev1.Instance{},
 		states:        map[string]*instState{},

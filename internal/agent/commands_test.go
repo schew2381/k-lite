@@ -119,7 +119,7 @@ func TestLogsCommandStreamsUntilEOF(t *testing.T) {
 	}
 	a, fc := commandAgent(t, rt)
 
-	a.dispatch(context.Background(), logsCommand("c1", false, 3))
+	a.dispatch(context.Background(), &cmdSession{client: a.client}, logsCommand("c1", false, 3))
 	a.cmdWG.Wait()
 
 	if gotID != "ctr-1" || gotFollow || gotTail != 3 {
@@ -168,15 +168,15 @@ func TestLogsCommandStopEndsFollow(t *testing.T) {
 	}
 	a, fc := commandAgent(t, rt)
 
-	a.dispatch(context.Background(), logsCommand("c1", true, 0))
+	a.dispatch(context.Background(), &cmdSession{client: a.client}, logsCommand("c1", true, 0))
 	waitFor(t, "first chunk", func() bool {
 		return fc.pushCount() == 1 && len(fc.pushes[0].snapshot()) > 0
 	})
 
 	// A duplicate delivery of a running command must not spawn a second pump.
-	a.dispatch(context.Background(), logsCommand("c1", true, 0))
+	a.dispatch(context.Background(), &cmdSession{client: a.client}, logsCommand("c1", true, 0))
 
-	a.dispatch(context.Background(), stopCommand("c1"))
+	a.dispatch(context.Background(), &cmdSession{client: a.client}, stopCommand("c1"))
 	a.cmdWG.Wait()
 
 	if fc.pushCount() != 1 {
@@ -205,7 +205,7 @@ func TestLogsCommandReportsReaderError(t *testing.T) {
 	}
 	a, fc := commandAgent(t, rt)
 
-	a.dispatch(context.Background(), logsCommand("c1", true, 0))
+	a.dispatch(context.Background(), &cmdSession{client: a.client}, logsCommand("c1", true, 0))
 	a.cmdWG.Wait()
 
 	sent := fc.pushes[0].snapshot()
@@ -220,7 +220,7 @@ func TestLogsCommandUnknownInstance(t *testing.T) {
 	rt := newFakeRuntime()
 	a, fc := commandAgent(t, rt)
 
-	a.dispatch(context.Background(), &klitev1.Command{Id: "c1", Cmd: &klitev1.Command_Logs{
+	a.dispatch(context.Background(), &cmdSession{client: a.client}, &klitev1.Command{Id: "c1", Cmd: &klitev1.Command_Logs{
 		Logs: &klitev1.LogsCommand{Instance: "ghost"},
 	}})
 	a.cmdWG.Wait()
@@ -248,8 +248,8 @@ func TestConcurrentLogsCommands(t *testing.T) {
 	}
 	a, fc := commandAgent(t, rt)
 
-	a.dispatch(context.Background(), logsCommand("c1", true, 0))
-	a.dispatch(context.Background(), logsCommand("c2", true, 0))
+	a.dispatch(context.Background(), &cmdSession{client: a.client}, logsCommand("c1", true, 0))
+	a.dispatch(context.Background(), &cmdSession{client: a.client}, logsCommand("c2", true, 0))
 	waitFor(t, "both streams to produce output", func() bool {
 		if fc.pushCount() != 2 {
 			return false
@@ -260,8 +260,8 @@ func TestConcurrentLogsCommands(t *testing.T) {
 		t.Errorf("running commands = %d, want 2", runningCommands(a))
 	}
 
-	a.dispatch(context.Background(), stopCommand("c1"))
-	a.dispatch(context.Background(), stopCommand("c2"))
+	a.dispatch(context.Background(), &cmdSession{client: a.client}, stopCommand("c1"))
+	a.dispatch(context.Background(), &cmdSession{client: a.client}, stopCommand("c2"))
 	a.cmdWG.Wait()
 
 	seen := map[string]bool{}
@@ -275,5 +275,30 @@ func TestConcurrentLogsCommands(t *testing.T) {
 	}
 	if !seen["c1"] || !seen["c2"] {
 		t.Errorf("streams seen = %v, want both c1 and c2", seen)
+	}
+}
+
+// The push must ride the SESSION's pinned client: on a round-robin channel it
+// could land on a replica with no waiter, and the CLI's log stream would hang
+// (the M8 failover regression).
+func TestLogsPushStaysOnTheSessionConnection(t *testing.T) {
+	t.Parallel()
+	rt := newFakeRuntime()
+	rt.logsFn = func(context.Context, string, bool, int32) (io.ReadCloser, error) {
+		return io.NopCloser(strings.NewReader("line\n")), nil
+	}
+	a, shared := commandAgent(t, rt)
+	sessClient := &fakeAgentClient{}
+	sess := &cmdSession{client: sessClient}
+
+	a.dispatch(context.Background(), sess, logsCommand("c1", false, 0))
+	sess.cmds.Wait()
+	a.cmdWG.Wait()
+
+	if sessClient.pushCount() != 1 {
+		t.Fatalf("session client got %d pushes, want 1", sessClient.pushCount())
+	}
+	if shared.pushCount() != 0 {
+		t.Fatalf("shared round-robin client got %d pushes, want 0", shared.pushCount())
 	}
 }

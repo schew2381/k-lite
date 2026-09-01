@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sync"
 	"time"
 
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
@@ -22,7 +23,7 @@ func (a *Agent) commandLoop(ctx context.Context) {
 	backoff := time.Second
 	for ctx.Err() == nil {
 		started := a.now()
-		err := a.commandsOnce(ctx)
+		err := a.commandSession(ctx)
 		if ctx.Err() != nil {
 			return
 		}
@@ -38,8 +39,43 @@ func (a *Agent) commandLoop(ctx context.Context) {
 	}
 }
 
-func (a *Agent) commandsOnce(ctx context.Context) error {
-	stream, err := a.client.StreamCommands(ctx, &klitev1.StreamCommandsRequest{Node: a.node})
+// cmdSession is one command-plane life: the stream and every output push it
+// spawns share a client PINNED to a single klited. Output must land on the
+// server holding the CLI's waiter, and that is the server that sent the
+// command — the agent's round-robin channel would scatter pushes across
+// replicas (M8).
+type cmdSession struct {
+	client klitev1.AgentServiceClient
+	cmds   sync.WaitGroup // commands started in this session
+}
+
+// commandSession pins a connection (rotating through the endpoints across
+// attempts), serves one stream life on it, and closes it only after the
+// session's last push drains.
+func (a *Agent) commandSession(ctx context.Context) error {
+	sess := &cmdSession{client: a.client}
+	cleanup := func() {}
+	if a.cmdDial != nil && len(a.serverAddrs) > 0 {
+		ep := a.serverAddrs[a.cmdIdx%len(a.serverAddrs)]
+		a.cmdIdx++
+		conn, err := a.cmdDial(ep)
+		if err != nil {
+			return fmt.Errorf("dial %s: %w", ep, err)
+		}
+		sess.client = klitev1.NewAgentServiceClient(conn)
+		cleanup = func() {
+			go func() {
+				sess.cmds.Wait()
+				conn.Close() //nolint:errcheck,gosec // best-effort teardown of a per-session conn
+			}()
+		}
+	}
+	defer cleanup()
+	return a.commandsOnce(ctx, sess)
+}
+
+func (a *Agent) commandsOnce(ctx context.Context, sess *cmdSession) error {
+	stream, err := sess.client.StreamCommands(ctx, &klitev1.StreamCommandsRequest{Node: a.node})
 	if err != nil {
 		return err
 	}
@@ -48,17 +84,17 @@ func (a *Agent) commandsOnce(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		a.dispatch(ctx, cmd)
+		a.dispatch(ctx, sess, cmd)
 	}
 }
 
 // dispatch starts logs commands and cancels stopped ones. Each logs command
 // runs in its own goroutine under its own cancelable context, so several can
 // stream at once and none of them blocks command intake.
-func (a *Agent) dispatch(ctx context.Context, cmd *klitev1.Command) {
+func (a *Agent) dispatch(ctx context.Context, sess *cmdSession, cmd *klitev1.Command) {
 	switch c := cmd.GetCmd().(type) {
 	case *klitev1.Command_Logs:
-		a.startLogs(ctx, cmd.GetId(), c.Logs)
+		a.startLogs(ctx, sess, cmd.GetId(), c.Logs)
 	case *klitev1.Command_Stop:
 		a.stopCommand(c.Stop.GetCommandId())
 	default:
@@ -68,7 +104,7 @@ func (a *Agent) dispatch(ctx context.Context, cmd *klitev1.Command) {
 
 // startLogs registers the command and hands it to a goroutine. A duplicate id
 // is dropped, since the first delivery already owns it.
-func (a *Agent) startLogs(ctx context.Context, id string, lc *klitev1.LogsCommand) {
+func (a *Agent) startLogs(ctx context.Context, sess *cmdSession, id string, lc *klitev1.LogsCommand) {
 	cmdCtx, cancel := context.WithCancel(ctx)
 	a.mu.Lock()
 	if _, dup := a.commands[id]; dup {
@@ -79,10 +115,12 @@ func (a *Agent) startLogs(ctx context.Context, id string, lc *klitev1.LogsComman
 	a.commands[id] = cancel
 	a.mu.Unlock()
 	a.cmdWG.Add(1)
+	sess.cmds.Add(1)
 	go func() {
 		defer a.cmdWG.Done()
+		defer sess.cmds.Done()
 		defer a.stopCommand(id) // releases cmdCtx once the pump ends on its own
-		a.runLogs(ctx, cmdCtx, id, lc)
+		a.runLogs(ctx, cmdCtx, sess, id, lc)
 	}()
 }
 
@@ -103,8 +141,8 @@ func (a *Agent) stopCommand(id string) {
 // than drained, the failure text rides along as the last chunk so the user
 // sees why their logs stopped. The push stream hangs off ctx, not cmdCtx, so
 // a StopCommand can't kill it before that final message goes out.
-func (a *Agent) runLogs(ctx, cmdCtx context.Context, id string, lc *klitev1.LogsCommand) {
-	push, err := a.client.PushCommandOutput(ctx)
+func (a *Agent) runLogs(ctx, cmdCtx context.Context, sess *cmdSession, id string, lc *klitev1.LogsCommand) {
+	push, err := sess.client.PushCommandOutput(ctx)
 	if err != nil {
 		slog.Warn("command output stream failed", "command", id, "err", err)
 		return

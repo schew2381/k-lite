@@ -89,6 +89,18 @@ func run(node, server, token, stateDir, dockerHost string) error {
 		ServerAddrs: endpoints,
 		StateDir:    stateDir,
 		TLSDir:      ident.Dir,
+		// The command plane pins one endpoint per stream life: output
+		// pushes only route on the klited that sent the command.
+		CommandDial: func(endpoint string) (*grpc.ClientConn, error) {
+			return grpc.NewClient(endpoint,
+				grpc.WithTransportCredentials(credentials.NewTLS(ident.TLS)),
+				grpc.WithKeepaliveParams(keepalive.ClientParameters{
+					Time:                20 * time.Second,
+					Timeout:             10 * time.Second,
+					PermitWithoutStream: true,
+				}),
+			)
+		},
 	})
 	return a.Run(ctx)
 }
