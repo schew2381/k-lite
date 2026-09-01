@@ -143,6 +143,13 @@ test('a service created from the dialog schedules and gets kdns records everywhe
   for (const node of ['node-1', 'node-2', 'node-3']) {
     await expect(page.getByTestId(`infra-${node}`)).toContainText('d.svc.klite')
   }
+
+  // and the whole pair deletes from the card: instances drain, kdns forgets
+  await page.getByTestId('service-d').hover()
+  await page.getByTestId('delete-service-d').click()
+  await expect(page.getByTestId('service-d')).toHaveCount(0)
+  await expect(page.locator('[data-testid^="instance-d-"]')).toHaveCount(0, { timeout: 30_000 })
+  await expect(page.getByTestId('infra-node-1')).not.toContainText('d.svc.klite')
 })
 
 test('live flow: flights run fast and untraced, the panel keeps the latest call', async ({ page }) => {

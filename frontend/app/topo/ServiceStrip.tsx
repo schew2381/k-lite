@@ -1,7 +1,9 @@
-import { MinusIcon, PlusIcon } from 'lucide-react'
+import { MinusIcon, PlusIcon, Trash2Icon } from 'lucide-react'
 import { motion } from 'motion/react'
+import { toast } from 'sonner'
 import type { Service, Workload } from '@/api/types'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { Rect } from '@/layout/layout'
 import { act } from '@/lib/act'
 import { useClient } from '@/lib/client-context'
@@ -25,6 +27,19 @@ export function ServiceCard({
   const { ready, draining } = endpointsOf(snapshot, service)
   const name = service.metadata.name
 
+  // the mirror of the create dialog: the pair goes together, and the
+  // instances drain out through the same reconcile everything else uses
+  const removeService = () =>
+    act(
+      (workload ? client.remove('Workload', workload.metadata.name) : Promise.resolve())
+        .then(() => client.remove('Service', name))
+        .then(() => {
+          toast(
+            `service/${name} deleted${workload ? ` with workload/${workload.metadata.name}` : ''}. Instances drain out`,
+          )
+        }),
+    )
+
   return (
     <motion.div
       layout
@@ -38,10 +53,27 @@ export function ServiceCard({
       }`}
       data-testid={`service-${name}`}
     >
-      <div className="flex items-baseline justify-between">
+      <div className="group flex items-baseline justify-between">
         <span className="font-mono text-sm font-bold">{name}</span>
-        <span className="font-mono text-[10px] text-muted-foreground">
-          :{service.spec.port}→{service.spec.targetPort}
+        <span className="flex items-center gap-1">
+          <span className="font-mono text-[10px] text-muted-foreground">
+            :{service.spec.port}→{service.spec.targetPort}
+          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="-mr-1 size-5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                aria-label={`Delete service ${name}`}
+                onClick={removeService}
+                data-testid={`delete-service-${name}`}
+              >
+                <Trash2Icon className="text-deny" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Delete {name} and its workload. Instances drain out.</TooltipContent>
+          </Tooltip>
         </span>
       </div>
       <div className="mt-0.5 flex items-center gap-2 font-mono text-[10px]">

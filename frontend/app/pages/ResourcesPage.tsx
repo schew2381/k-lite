@@ -236,6 +236,7 @@ export default function ResourcesPage() {
               <TableHead>ports</TableHead>
               <TableHead>VIPs (one per node)</TableHead>
               <TableHead>endpoints</TableHead>
+              <TableHead className="w-12" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -268,6 +269,16 @@ export default function ResourcesPage() {
                     {draining.length > 0 && (
                       <span className="text-draining"> · {draining.length} DRAINING</span>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Delete service ${svc.metadata.name}`}
+                      onClick={() => remove('Service', svc.metadata.name)}
+                    >
+                      <Trash2Icon className="text-deny" />
+                    </Button>
                   </TableCell>
                 </TableRow>
               )
