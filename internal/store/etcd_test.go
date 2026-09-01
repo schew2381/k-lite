@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,7 +20,7 @@ import (
 
 const etcdEndpoint = "127.0.0.1:2379"
 
-func newStore(t *testing.T) *store.Etcd {
+func newClient(t *testing.T) *clientv3.Client {
 	t.Helper()
 	conn, err := net.DialTimeout("tcp", etcdEndpoint, 500*time.Millisecond)
 	if err != nil {
@@ -31,7 +32,12 @@ func newStore(t *testing.T) *store.Etcd {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cli.Close() })
-	return store.NewEtcd(cli)
+	return cli
+}
+
+func newStore(t *testing.T) *store.Etcd {
+	t.Helper()
+	return store.NewEtcd(newClient(t))
 }
 
 func testName(t *testing.T) string {
@@ -289,6 +295,114 @@ func TestWatchKindFilterAndReplay(t *testing.T) {
 	ev = recvFor(t, replay, wlName)
 	if ev.Type != klitev1.EventType_EVENT_TYPE_ADDED || ev.Revision != wlRev {
 		t.Errorf("replayed event = %v rev=%d, want ADDED rev=%d", ev.Type, ev.Revision, wlRev)
+	}
+}
+
+// Concurrent CAS writers race from the same revision and exactly one wins.
+func TestCompareAndSwapConcurrent(t *testing.T) {
+	s := newStore(t)
+	name := testName(t)
+	rev := mustCreate(t, s, testWorkload(name, 1))
+
+	const writers = 8
+	errs := make(chan error, writers)
+	for i := range writers {
+		go func() {
+			_, err := s.Put(context.Background(), testWorkload(name, int32(i+2)), rev)
+			errs <- err
+		}()
+	}
+	var wins, conflicts int
+	for range writers {
+		switch err := <-errs; {
+		case err == nil:
+			wins++
+		case errors.Is(err, store.ErrConflict):
+			conflicts++
+		default:
+			t.Errorf("unexpected error: %v", err)
+		}
+	}
+	if wins != 1 || conflicts != writers-1 {
+		t.Errorf("wins = %d, conflicts = %d, want 1 and %d", wins, conflicts, writers-1)
+	}
+}
+
+// One corrupt value fails the whole List, and the error names the key.
+func TestListSurfacesCorruptValue(t *testing.T) {
+	cli := newClient(t)
+	s := store.NewEtcd(cli)
+	name := testName(t)
+	key := "/klite/v1/workloads/" + name
+	if _, err := cli.Put(context.Background(), key, "{corrupt"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = cli.Delete(context.Background(), key) })
+
+	if _, _, err := s.List(context.Background(), "workloads"); err == nil || !strings.Contains(err.Error(), key) {
+		t.Errorf("List err = %v, want the corrupt key named", err)
+	}
+	if _, _, err := s.Get(context.Background(), "workloads", name); err == nil || !strings.Contains(err.Error(), key) {
+		t.Errorf("Get err = %v, want the corrupt key named", err)
+	}
+}
+
+// A watch from a compacted revision surfaces the error, then the channel closes.
+func TestWatchSurfacesCompaction(t *testing.T) {
+	cli := newClient(t)
+	s := store.NewEtcd(cli)
+	name := testName(t)
+	firstRev := mustCreate(t, s, testWorkload(name, 1))
+	var lastRev int64
+	for i := range int32(5) {
+		obj, rev, err := s.Get(context.Background(), "workloads", name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		obj.GetWorkload().Spec.Replicas = i + 2
+		if lastRev, err = s.Put(context.Background(), obj, rev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := cli.Compact(context.Background(), lastRev, clientv3.WithCompactPhysical()); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ch, err := s.Watch(ctx, []string{"workloads"}, firstRev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sawErr := false
+	for ev := range ch {
+		if ev.Err != nil {
+			sawErr = true
+		}
+	}
+	if !sawErr {
+		t.Error("watch from compacted revision closed without an Err event")
+	}
+}
+
+func TestWatchClosesOnCancel(t *testing.T) {
+	s := newStore(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := s.Watch(ctx, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
+		case <-deadline:
+			t.Fatal("watch channel not closed within 5s of cancel")
+		}
 	}
 }
 
