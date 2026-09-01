@@ -13,6 +13,16 @@ import type { Trace, TraceStep } from '@/store/traceStore'
 
 export type { Trace, TraceStep } from '@/store/traceStore'
 
+// anchorIdFor names the layout anchor a step stands on. The dot layer asks
+// it where flights start and land.
+export function anchorIdFor(at: TraceStep['at'], trace: Trace): string {
+  const e = trace.event
+  if (at === 'caller') return `instance:${e.fromInstance}`
+  if (at === 'target') return `instance:${e.toInstance}`
+  if (at === 'targetInfra') return `ingress:${trace.targetNode}`
+  return `${at}:${e.viaNode}` // kdns | lds | rbac | eds sub-box on the caller's node
+}
+
 export function buildTrace(e: TrafficEvent, s: Snapshot): Trace {
   const svc = s.services[e.toService]
   const vip = vipFor(s, e.toService, e.viaNode) ?? '10.44.64.?'

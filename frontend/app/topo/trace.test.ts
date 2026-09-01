@@ -6,7 +6,7 @@ import { describe, expect, it } from 'bun:test'
 import type { TrafficEvent } from '@/api/types'
 import { Cluster } from '@/sim/cluster'
 import { seedObjects } from '@/sim/seed'
-import { buildTrace } from './trace'
+import { anchorIdFor, buildTrace } from './trace'
 
 function settle(c: Cluster, ms: number) {
   for (let t = 0; t < ms; t += 100) c.advance(100)
@@ -78,6 +78,9 @@ describe('buildTrace locality', () => {
     expect(trace.steps[0].at).toBe('kdns')
     expect(trace.steps.some((s) => s.at === 'caller')).toBe(false)
     expect(trace.steps.at(-1)?.at).toBe('target')
+    // the dot layer spawns a flight only if its first anchor resolves, so
+    // an anonymous story must never start on the empty caller anchor
+    expect(anchorIdFor(trace.steps[0].at, trace)).toBe(`kdns:${e.viaNode}`)
   })
 
   it('tells the internet story for a remote pick: mTLS leg, DNAT hop, raw hand-off', () => {

@@ -14,7 +14,7 @@ import { useClient } from '@/lib/client-context'
 import { clusterStore } from '@/store/store'
 import { traceStore } from '@/store/traceStore'
 import type { FlowMode } from '@/topo/flow'
-import { buildTrace, type Trace, type TraceStep } from '@/topo/trace'
+import { anchorIdFor, buildTrace, type Trace, type TraceStep } from '@/topo/trace'
 
 // Per-flow pacing in ms. Traced is readable and live is honest about speed.
 interface Pace {
@@ -87,14 +87,6 @@ function arc(a: Point, b: Point, t: number, bow: number): Point {
     x: u * u * a.x + 2 * u * t * cx + t * t * b.x,
     y: u * u * a.y + 2 * u * t * cy + t * t * b.y,
   }
-}
-
-function anchorIdFor(at: TraceStep['at'], trace: Trace): string {
-  const e = trace.event
-  if (at === 'caller') return `instance:${e.fromInstance}`
-  if (at === 'target') return `instance:${e.toInstance}`
-  if (at === 'targetInfra') return `ingress:${trace.targetNode}`
-  return `${at}:${e.viaNode}` // kdns | lds | rbac | eds sub-box on the caller's node
 }
 
 // Steps become a phase list. A step marked motion:'travel' is itself the travel: the
@@ -341,7 +333,8 @@ export function TrafficDotLayer({
         skipsLeft = 3
       }
       const anchors = layoutRef.current?.anchors ?? {}
-      if (!anchors[anchorIdFor('caller', trace)] || !anchors[anchorIdFor('kdns', trace)]) return
+      // wait for layout: a flight needs at least its starting anchor
+      if (!anchors[anchorIdFor(trace.steps[0].at, trace)]) return
       const color =
         e.verdict === 'allowed'
           ? 'var(--success)'

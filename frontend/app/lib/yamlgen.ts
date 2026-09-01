@@ -27,9 +27,9 @@ function chattyContainer(name: string, targets: string[]) {
     `echo "$(hostname) is ${name}" > /www/index.html`,
     'httpd -p 80 -h /www',
     // the roll rides the do-line: a '; ' join would otherwise render 'do;',
-    // which busybox ash rejects. 0..65535 from urandom, under 3277 is five percent
+    // which busybox ash rejects. 0..65535 from urandom, under 1638 is 2.5 percent
     'while sleep 1; do r=$(head -c2 /dev/urandom | od -An -tu2 | tr -d " ")',
-    '[ "$r" -lt 3277 ] || continue',
+    '[ "$r" -lt 1638 ] || continue',
     'n=0; for t in $TARGETS; do n=$((n+1)); done',
     '[ "$n" -gt 0 ] || continue',
     'k=$(( ($(head -c2 /dev/urandom | od -An -tu2 | tr -d " ") % n) + 1 ))',
