@@ -98,6 +98,13 @@ export interface ParsedApply {
 }
 
 // Multi-document YAML in, validated objects and per-document errors out.
+function nameOf(raw: Record<string, unknown>): string {
+  if (typeof raw.metadata === 'object' && raw.metadata !== null && 'name' in raw.metadata) {
+    return String((raw.metadata as { name: unknown }).name)
+  }
+  return '(unnamed)'
+}
+
 export function parseApplyYaml(text: string): ParsedApply {
   const objects: KliteObject[] = []
   const errors: ApplyResult[] = []
@@ -114,19 +121,25 @@ export function parseApplyYaml(text: string): ParsedApply {
     }
     const raw = doc.toJS() as Record<string, unknown> | null
     if (raw == null) continue // blank document between separators
+    if (raw.kind === 'Instance' || raw.kind === 'VIPAllocation') {
+      // server-materialized kinds, mirroring klited's apply rejection (ADR 0022)
+      errors.push({
+        kind: raw.kind,
+        name: nameOf(raw),
+        action: 'error',
+        error: `${raw.kind} is server-materialized, so apply can't create one`,
+      })
+      continue
+    }
     const result = anyObject.safeParse(raw)
     if (result.success) {
       objects.push(result.data as KliteObject)
     } else {
       const issue = result.error.issues[0]
       const kind = typeof raw.kind === 'string' ? (raw.kind as ApplyResult['kind']) : 'Workload'
-      const name =
-        typeof raw.metadata === 'object' && raw.metadata !== null && 'name' in raw.metadata
-          ? String((raw.metadata as { name: unknown }).name)
-          : '(unnamed)'
       errors.push({
         kind,
-        name,
+        name: nameOf(raw),
         action: 'error',
         error: `${issue.path.join('.') || 'document'}: ${issue.message}`,
       })

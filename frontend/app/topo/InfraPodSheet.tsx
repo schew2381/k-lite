@@ -6,7 +6,7 @@ import type { NodeObj } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
-import { endpointsOf, identityRows, rbacView, sortedServices } from '@/store/selectors'
+import { endpointsOf, identityRows, rbacView, sortedServices, vipFor } from '@/store/selectors'
 import { useSnapshot } from '@/store/store'
 
 function Section({
@@ -72,7 +72,7 @@ export function InfraPodSheet({
             {services.map((svc) => (
               <Row key={svc.metadata.name}>
                 {svc.metadata.name}.svc.klite <span className="text-muted-foreground">→</span>{' '}
-                {svc.status?.vips[name] ?? '(no VIP yet)'}
+                {vipFor(snapshot, svc.metadata.name, name) ?? '(no VIP yet)'}
               </Row>
             ))}
             {services.length === 0 && <Row>no services</Row>}
@@ -81,7 +81,7 @@ export function InfraPodSheet({
           <Section title="envoy · listeners (LDS)" note="one per VIP this node owns">
             {services.map((svc) => (
               <Row key={svc.metadata.name}>
-                {svc.status?.vips[name] ?? '?'}:{svc.spec.port}{' '}
+                {vipFor(snapshot, svc.metadata.name, name) ?? '?'}:{svc.spec.port}{' '}
                 <span className="text-muted-foreground">→ cluster</span> {svc.metadata.name}
               </Row>
             ))}

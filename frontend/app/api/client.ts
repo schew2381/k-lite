@@ -6,9 +6,9 @@ import type {
   Kind,
   KliteObject,
   LogLine,
-  TopologySnapshot,
+  PolicyVerdict,
+  Topology,
   TrafficEvent,
-  Verdict,
   WatchEvent,
 } from './types'
 
@@ -31,8 +31,8 @@ export interface KliteClient {
   watchTraffic(onEvent: (e: TrafficEvent) => void): Unsubscribe
   streamLogs(instance: string, onLine: (l: LogLine) => void): Unsubscribe
 
-  policyCheck(from: string, to: string): Promise<Verdict>
-  topology(): Promise<TopologySnapshot>
+  policyCheck(from: string, to: string): Promise<PolicyVerdict>
+  topology(): Promise<Topology>
   killInstance(name: string): Promise<void>
   health(): Promise<{ ok: boolean }>
   dispose?(): void
@@ -51,6 +51,7 @@ export async function createClient(): Promise<KliteClient> {
   const mode = import.meta.env.VITE_KLITE_MODE ?? 'mock'
   if (mode === 'http') {
     const { HttpClient } = await import('./httpClient')
+    // '' means same-origin: the embedded case, where klite-facade serves the SPA
     return new HttpClient(import.meta.env.VITE_KLITE_API ?? '')
   }
   const { createMockClient } = await import('./mockClient')

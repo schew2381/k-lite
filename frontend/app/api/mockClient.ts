@@ -3,13 +3,73 @@
 // because the watch replay, event shapes, and verdicts are identical.
 
 import { Cluster } from '@/sim/cluster'
+import { toPolicyVerdict } from '@/sim/policy'
 import { seedObjects } from '@/sim/seed'
 import type { KliteClient } from './client'
 import { parseApplyYaml } from './schemas'
-import type { Kind, TopologySnapshot } from './types'
+import { type Kind, selectorMatches, type Topology } from './types'
 
 const TICK_MS = 100
 const MAX_STEP_MS = 1000 // background tabs clamp timers, so one firing must not warp time
+
+// composeTopology mirrors the facade's ComposeTopology: the same graph from
+// the same five lists, so a page written against one answers to the other.
+function composeTopology(cluster: Cluster): Topology {
+  const workloads = cluster.list('Workload').filter((o) => o.kind === 'Workload')
+  const instances = cluster.list('Instance').filter((o) => o.kind === 'Instance')
+  const nodes = cluster.list('Node').filter((o) => o.kind === 'Node')
+  const services = cluster.list('Service').filter((o) => o.kind === 'Service')
+  const policies = cluster.list('NetworkPolicy').filter((o) => o.kind === 'NetworkPolicy')
+
+  const templateLabels = new Map(workloads.map((w) => [w.metadata.name, w.spec.template.labels]))
+  const toTopo = (i: (typeof instances)[number]) => ({
+    name: i.metadata.name,
+    workload: i.spec.workload,
+    phase: i.status.phase,
+    restarts: i.status.restarts,
+    ip: i.status.instanceIp ?? '',
+  })
+  // Running counts as routable alongside Ready, matching the facade's note
+  const routable = new Set(
+    instances
+      .filter((i) => i.status.phase === 'Running' || i.status.phase === 'Ready')
+      .map((i) => i.metadata.name),
+  )
+
+  return {
+    nodes: nodes.map((n) => ({
+      name: n.metadata.name,
+      phase: n.status?.phase ?? 'Unknown',
+      unschedulable: n.status?.unschedulable ?? false,
+      instances: instances.filter((i) => i.spec.node === n.metadata.name).map(toTopo),
+    })),
+    services: services.map((s) => ({
+      name: s.metadata.name,
+      port: s.spec.port,
+      targetPort: s.spec.targetPort,
+      selector: s.spec.selector,
+      endpoints: instances
+        .filter(
+          (i) =>
+            routable.has(i.metadata.name) &&
+            selectorMatches(s.spec.selector, templateLabels.get(i.spec.workload)),
+        )
+        .map((i) => i.metadata.name)
+        .sort(),
+    })),
+    policies: policies.map((p) => ({
+      name: p.metadata.name,
+      action: p.spec.action,
+      rules: p.spec.rules,
+    })),
+    workloads: workloads.map((w) => ({
+      name: w.metadata.name,
+      ready: w.status?.readyInstances ?? 0,
+      total: w.spec.replicas,
+    })),
+    unscheduled: instances.filter((i) => !i.spec.node).map(toTopo),
+  }
+}
 
 export function createMockClient(): KliteClient {
   const cluster = new Cluster(seedObjects())
@@ -63,11 +123,10 @@ export function createMockClient(): KliteClient {
     },
 
     async policyCheck(from, to) {
-      return cluster.policyCheck(from, to)
+      return toPolicyVerdict(cluster.policyCheck(from, to), from, to)
     },
-    async topology(): Promise<TopologySnapshot> {
-      const kinds: Kind[] = ['Node', 'Workload', 'Service', 'NetworkPolicy', 'Instance']
-      return { rev: cluster.currentRev(), objects: kinds.flatMap((k) => cluster.list(k)) }
+    async topology(): Promise<Topology> {
+      return composeTopology(cluster)
     },
     async killInstance(name) {
       cluster.killInstance(name)

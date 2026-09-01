@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { useSnapshot } from '@/store/store'
 
-type ObjectMap = 'nodes' | 'workloads' | 'services' | 'policies' | 'instances'
+type ObjectMap = 'nodes' | 'workloads' | 'services' | 'policies' | 'instances' | 'vipAllocations'
 
 const GROUPS: { kind: Kind; prefix: string; map: ObjectMap }[] = [
   { kind: 'Node', prefix: '/klite/nodes', map: 'nodes' },
@@ -17,6 +17,7 @@ const GROUPS: { kind: Kind; prefix: string; map: ObjectMap }[] = [
   { kind: 'Service', prefix: '/klite/services', map: 'services' },
   { kind: 'NetworkPolicy', prefix: '/klite/networkpolicies', map: 'policies' },
   { kind: 'Instance', prefix: '/klite/instances', map: 'instances' },
+  { kind: 'VIPAllocation', prefix: '/klite/vipallocations', map: 'vipAllocations' },
 ]
 
 function summarize(obj: KliteObject): string {
@@ -24,13 +25,17 @@ function summarize(obj: KliteObject): string {
     case 'Workload':
       return `replicas ${obj.spec.replicas} · ${obj.spec.template.containers[0].image}`
     case 'Service':
-      return `:${obj.spec.port}→${obj.spec.targetPort} · ${Object.keys(obj.status?.vips ?? {}).length} VIPs`
+      return `:${obj.spec.port}→${obj.spec.targetPort} · selects ${Object.entries(obj.spec.selector)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(',')}`
     case 'Node':
       return `${obj.status?.phase ?? 'NotReady'}${obj.status?.unschedulable ? ' · cordoned' : ''} · ${obj.status?.instanceCount ?? 0} instances`
     case 'NetworkPolicy':
       return `${obj.spec.action} · ${obj.spec.rules.map((r) => `${r.from}→${r.to}`).join(', ')}`
     case 'Instance':
       return `${obj.status.phase} · ${obj.spec.node ?? 'unbound'} · ${obj.status.instanceIp ?? 'no ip'}`
+    case 'VIPAllocation':
+      return `${obj.spec.vip} · ${obj.spec.service} on ${obj.spec.node}`
   }
 }
 

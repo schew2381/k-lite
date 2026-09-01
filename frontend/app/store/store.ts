@@ -11,6 +11,7 @@ import type {
   NetworkPolicy,
   NodeObj,
   Service,
+  VIPAllocation,
   WatchEvent,
   Workload,
 } from '@/api/types'
@@ -23,6 +24,7 @@ export interface Snapshot {
   nodes: Record<string, NodeObj>
   instances: Record<string, Instance>
   policies: Record<string, NetworkPolicy>
+  vipAllocations: Record<string, VIPAllocation>
 }
 
 const EMPTY: Snapshot = {
@@ -33,9 +35,13 @@ const EMPTY: Snapshot = {
   nodes: {},
   instances: {},
   policies: {},
+  vipAllocations: {},
 }
 
-type ObjectMapKey = keyof Pick<Snapshot, 'workloads' | 'services' | 'nodes' | 'instances' | 'policies'>
+type ObjectMapKey = keyof Pick<
+  Snapshot,
+  'workloads' | 'services' | 'nodes' | 'instances' | 'policies' | 'vipAllocations'
+>
 
 const KEY: Record<Kind, ObjectMapKey> = {
   Workload: 'workloads',
@@ -43,6 +49,7 @@ const KEY: Record<Kind, ObjectMapKey> = {
   Node: 'nodes',
   NetworkPolicy: 'policies',
   Instance: 'instances',
+  VIPAllocation: 'vipAllocations',
 }
 
 export class ClusterStore {

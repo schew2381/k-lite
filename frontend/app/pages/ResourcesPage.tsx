@@ -251,11 +251,13 @@ export default function ResourcesPage() {
                   </TableCell>
                   <TableCell>
                     <span className="flex flex-wrap gap-1">
-                      {Object.entries(svc.status?.vips ?? {}).map(([node, vip]) => (
-                        <Badge key={node} variant="outline" className="font-mono text-[10px]">
-                          {node}: {vip}
-                        </Badge>
-                      ))}
+                      {Object.values(snapshot.vipAllocations)
+                        .filter((va) => va.spec.service === svc.metadata.name)
+                        .map(({ spec: { node, vip } }) => (
+                          <Badge key={node} variant="outline" className="font-mono text-[10px]">
+                            {node}: {vip}
+                          </Badge>
+                        ))}
                     </span>
                   </TableCell>
                   <TableCell className="font-mono text-xs">

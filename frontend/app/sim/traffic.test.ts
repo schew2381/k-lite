@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import type { TrafficEvent, Workload } from '@/api/types'
 import { Cluster } from './cluster'
+import { toPolicyVerdict } from './policy'
 import { seedObjects } from './seed'
 import { DEFAULT_TIMINGS } from './timings'
 
@@ -113,5 +114,73 @@ describe('random traffic generation', () => {
     c.applyObjects([DENY_A_TO_C])
     settle(c, 90000)
     expect(a1lines.some((l) => l.includes('c => blocked by deny-a-to-c'))).toBe(true)
+  })
+})
+
+describe('vip allocations', () => {
+  it('materializes one per (service, node), heals deletion, and releases on service delete', () => {
+    const c = new Cluster(seedObjects(), DENSE)
+    settle(c, 4000)
+    expect(c.list('VIPAllocation').length).toBe(9) // 3 services × 3 nodes
+    const before = c.get('VIPAllocation', 'b.node-2')
+    expect(before?.kind).toBe('VIPAllocation')
+
+    // hand-delete a server-materialized object and the reconciler puts it back
+    c.remove('VIPAllocation', 'b.node-2')
+    settle(c, 2000)
+    expect(c.get('VIPAllocation', 'b.node-2')).not.toBeNull()
+
+    c.remove('Service', 'b')
+    settle(c, 2000)
+    const leaked = c
+      .list('VIPAllocation')
+      .filter((a) => a.kind === 'VIPAllocation' && a.spec.service === 'b')
+    expect(leaked).toEqual([])
+  })
+
+  it('the traced VIP comes from the allocation object', () => {
+    const c = new Cluster(seedObjects(), DENSE)
+    settle(c, 4000)
+    const alloc = c.get('VIPAllocation', 'c.node-1')
+    expect(alloc?.kind === 'VIPAllocation' && alloc.spec.vip).toMatch(
+      /^10\.44\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./,
+    )
+    expect(c.vipFor('c', 'node-1')).toBe(alloc?.kind === 'VIPAllocation' ? alloc.spec.vip : '')
+  })
+})
+
+describe('policy verdict phrasing', () => {
+  it("matches internal/policy's sentences in every branch", () => {
+    expect(toPolicyVerdict({ allowed: true, reason: 'default-allow' }, 'a', 'b')).toEqual({
+      available: true,
+      allowed: true,
+      matchedPolicy: undefined,
+      reason: 'no ALLOW targets b, default allow',
+    })
+    expect(
+      toPolicyVerdict(
+        {
+          allowed: false,
+          reason: 'deny-rule',
+          matchedRule: { policy: 'lockdown-a', ruleIndex: 0, action: 'DENY' },
+        },
+        'b',
+        'a',
+      ).reason,
+    ).toBe('denied by lockdown-a rule 1')
+    expect(
+      toPolicyVerdict(
+        {
+          allowed: true,
+          reason: 'allow-rule',
+          matchedRule: { policy: 'vip-only', ruleIndex: 1, action: 'ALLOW' },
+        },
+        'a',
+        'b',
+      ).reason,
+    ).toBe('allowed by vip-only rule 2')
+    expect(toPolicyVerdict({ allowed: false, reason: 'no-allow-match' }, 'c', 'b').reason).toBe(
+      'b is allowlist-mode and no ALLOW admits c',
+    )
   })
 })

@@ -20,6 +20,7 @@ import {
   selectorMatches,
   type TrafficEvent,
   type Verdict,
+  type VIPAllocation,
   type WatchEvent,
   type Workload,
 } from '@/api/types'
@@ -76,6 +77,7 @@ export class Cluster {
     Node: new Map(),
     NetworkPolicy: new Map(),
     Instance: new Map(),
+    VIPAllocation: new Map(),
   }
   private tasks: Task[] = []
   private agents = new Map<string, AgentState>()
@@ -120,6 +122,7 @@ export class Cluster {
       this.nodeLifecycle()
     }
     this.reconcileWorkloads()
+    this.reconcileVipAllocations()
     this.schedule()
 
     // 3. traffic generator
@@ -196,7 +199,7 @@ export class Cluster {
           kind,
           name,
           action: 'error',
-          error: 'Instances are server-materialized; apply a Workload instead',
+          error: 'Instances are server-materialized. Apply a Workload instead',
         })
         continue
       }
@@ -225,17 +228,9 @@ export class Cluster {
           this.after(this.t.infraStartMs, `infra:${name}`, () => this.infraUp(name))
         }
       }
-      if (kind === 'Service') {
-        const s = stored as Service
-        const prev = existing as Service | undefined
-        s.status = prev?.status ?? { vips: {} }
-        for (const node of this.objects.Node.keys()) {
-          s.status.vips[node] ??= this.ipam.vip()
-        }
-      }
       this.objects[kind].set(name, stored)
       this.emit(existing ? 'MODIFIED' : 'ADDED', stored)
-      if (kind === 'Node' && !existing) this.assignVipsForNode(name)
+      if (kind === 'Service' || kind === 'Node') this.reconcileVipAllocations()
       results.push({ kind, name, action: existing ? 'updated' : 'created' })
     }
     return results
@@ -255,6 +250,7 @@ export class Cluster {
     }
     this.objects[kind].delete(name)
     this.emit('DELETED', obj)
+    if (kind === 'Service') this.reconcileVipAllocations()
     // Instances of a deleted Workload drain out via reconcile. A deleted
     // Service stops resolving (no-endpoints), and policies flip verdicts.
   }
@@ -274,7 +270,7 @@ export class Cluster {
     this.after(backoff, `restart:${name}`, () => this.restart(name))
   }
 
-  // Uncordon reopens scheduling but does not recall instances already
+  // Uncordon reopens scheduling but doesn't recall instances already
   // evacuating: a drain in flight finishes, matching kubectl's semantics.
   cordon(name: string, on: boolean) {
     const node = this.objects.Node.get(name) as NodeObj | undefined
@@ -313,14 +309,42 @@ export class Cluster {
     this.emit('MODIFIED', node)
   }
 
-  private assignVipsForNode(name: string) {
-    for (const svc of this.objects.Service.values() as Iterable<Service>) {
-      svc.status ??= { vips: {} }
-      if (!svc.status.vips[name]) {
-        svc.status.vips[name] = this.ipam.vip()
-        this.emit('MODIFIED', svc)
+  // The VIPAllocation reconciler (ADR 0022) keeps one server-materialized
+  // object per (Service, Node), named "<service>.<node>", creating it when
+  // the pair exists and releasing it when either side goes. Delete one by
+  // hand and the next sweep recreates it, exactly like the real leader-only
+  // controller.
+  private reconcileVipAllocations() {
+    const want = new Set<string>()
+    for (const svc of this.objects.Service.keys()) {
+      for (const node of this.objects.Node.keys()) {
+        want.add(`${svc}.${node}`)
       }
     }
+    for (const [name, obj] of this.objects.VIPAllocation) {
+      if (!want.has(name)) {
+        this.objects.VIPAllocation.delete(name)
+        this.emit('DELETED', obj)
+      }
+    }
+    for (const name of want) {
+      if (this.objects.VIPAllocation.has(name)) continue
+      const dot = name.lastIndexOf('.')
+      const alloc: VIPAllocation = {
+        apiVersion: 'klite/v1',
+        kind: 'VIPAllocation',
+        metadata: { name, createdUnix: this.simUnix() },
+        spec: { service: name.slice(0, dot), node: name.slice(dot + 1), vip: this.ipam.vip() },
+      }
+      this.objects.VIPAllocation.set(name, alloc)
+      this.emit('ADDED', alloc)
+    }
+  }
+
+  // vipFor answers straight from the allocation objects.
+  vipFor(service: string, node: string): string | undefined {
+    const alloc = this.objects.VIPAllocation.get(`${service}.${node}`) as VIPAllocation | undefined
+    return alloc?.spec.vip
   }
 
   private cordonAndDrain(name: string) {
@@ -386,12 +410,7 @@ export class Cluster {
           this.agents.delete(name)
           this.objects.Node.delete(name)
           this.emit('DELETED', node)
-          for (const svc of this.objects.Service.values() as Iterable<Service>) {
-            if (svc.status?.vips[name]) {
-              delete svc.status.vips[name]
-              this.emit('MODIFIED', svc)
-            }
-          }
+          this.reconcileVipAllocations()
           continue // nothing below may emit for this node: MODIFIED after DELETED resurrects it downstream
         }
         if (node.status.phase === 'Draining') {

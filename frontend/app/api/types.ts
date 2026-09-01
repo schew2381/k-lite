@@ -1,11 +1,12 @@
-// These types mirror api/proto/klite/v1/objects.proto. Field names follow the
-// protojson forms the real codec speaks, plus the two user-facing conventions
-// internal/object/codec.go applies: the meta field is spelled `metadata`, and
-// enums cross the wire in their short forms ("DENY", "Ready"). CONTEXT.md
-// vocabulary is binding: Workload, Instance, Service, VIP, Node, Endpoint,
-// and never Deployment, Pod, or ClusterIP.
+// These types mirror api/proto/klite/v1/objects.proto in the canonical form
+// the app uses everywhere: `metadata` for the meta field and short enum forms
+// ("DENY", "Ready"). The facade speaks two dialects on the wire (the codec's
+// user-facing JSON on lists and apply, raw protojson on watch events), and
+// decode.ts normalizes both into these shapes. CONTEXT.md vocabulary is
+// binding: Workload, Instance, Service, VIP, Node, Endpoint, and never
+// Deployment, Pod, or ClusterIP.
 
-export type Kind = 'Workload' | 'Service' | 'Node' | 'NetworkPolicy' | 'Instance'
+export type Kind = 'Workload' | 'Service' | 'Node' | 'NetworkPolicy' | 'Instance' | 'VIPAllocation'
 
 export type InstancePhase = 'Pending' | 'Running' | 'Ready' | 'Draining' | 'Failed' | 'Terminating'
 
@@ -66,10 +67,18 @@ export interface Service extends Base<'Service'> {
     port: number
     targetPort: number
   }
-  // Facade enrichment, not stored object state: each Node's own VIP for this
-  // Service (ADR 0006). The proto Service carries no status, so klited's
-  // topology/watch facade decorates it so the UI can show address ownership.
-  status?: { vips: Record<string, string> }
+}
+
+// A VIPAllocation is server-materialized: one per (Service, Node), named
+// "<service>.<node>" (ADR 0022). Apply rejects the kind. kdns and the UI
+// read the per-node VIP a caller resolves from these objects and never
+// compute it.
+export interface VIPAllocation extends Base<'VIPAllocation'> {
+  spec: {
+    service: string
+    node: string
+    vip: string // from 10.44.64.0/18, fixed for the pair's lifetime
+  }
 }
 
 export interface NodeObj extends Base<'Node'> {
@@ -116,7 +125,7 @@ export interface Instance extends Base<'Instance'> {
   }
 }
 
-export type KliteObject = Workload | Service | NodeObj | NetworkPolicy | Instance
+export type KliteObject = Workload | Service | NodeObj | NetworkPolicy | Instance | VIPAllocation
 
 // A Service selects the instances whose labels carry all its selector pairs.
 export function selectorMatches(
@@ -136,21 +145,22 @@ export function endpointStateOf(inst: Instance): EndpointState | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Watch stream. The gRPC WatchEvent is {type, object, revision}, and the facade
-// wraps it in SSE and synthesizes SYNC (after the initial replay) and RESET
-// (when resuming past a compaction). Wire shape documented in httpClient.ts.
+// Watch stream. The gRPC WatchEvent is {type, object, revision} and delivers
+// changes only — no initial replay. Clients bootstrap with lists, synthesize
+// ADDED events plus a SYNC marker, and emit RESET before re-listing after a
+// reconnect. The mock follows the same convention.
 
 export type WatchEventType = 'ADDED' | 'MODIFIED' | 'DELETED' | 'SYNC' | 'RESET'
 
 export interface WatchEvent {
   type: WatchEventType
-  rev: number // WatchEvent.revision, doubling as the SSE id for Last-Event-ID resume
+  rev: number // WatchEvent.revision (etcd mod revision)
   kind?: Kind // absent on SYNC / RESET
   object?: KliteObject // the full object, where DELETED carries the last-known state
 }
 
 // ---------------------------------------------------------------------------
-// Traffic stream. Mocked today. The real backend adds GET /v1/traffic (SSE,
+// Traffic stream. Mocked today. The real facade adds GET /api/traffic (SSE,
 // fed from Envoy access logs) — ADR 0024, reopening ADR 0015's frozen list.
 
 export interface TrafficEvent {
@@ -167,10 +177,23 @@ export interface TrafficEvent {
   latencyMs?: number
 }
 
+// The simulator's structured verdict, shared by its traffic path and tests.
 export interface Verdict {
   allowed: boolean
   reason: 'deny-rule' | 'allow-rule' | 'default-allow' | 'no-allow-match'
   matchedRule?: { policy: string; ruleIndex: number; action: 'ALLOW' | 'DENY' }
+}
+
+// PolicyVerdict is what policyCheck answers over the client seam, mirroring
+// the facade's /api/policycheck envelope. `available` is false while klited's
+// PolicyCheck RPC is unimplemented. The reason is the evaluator's own
+// sentence (e.g. "denied by lockdown-a rule 1"), worded identically in mock
+// and http modes.
+export interface PolicyVerdict {
+  available: boolean
+  allowed?: boolean
+  matchedPolicy?: string
+  reason?: string
 }
 
 // Mirrors the proto ApplyResult: action ∈ created|updated|unchanged|deleted,
@@ -187,7 +210,31 @@ export interface LogLine {
   line: string
 }
 
-export interface TopologySnapshot {
-  rev: number
-  objects: KliteObject[]
+// GET /api/topology returns this composed graph, mirroring
+// internal/facade/topology.go. Phases arrive in display form.
+export interface TopologyInstance {
+  name: string
+  workload: string
+  phase: string
+  restarts: number
+  ip: string
+}
+
+export interface Topology {
+  nodes: {
+    name: string
+    phase: string
+    unschedulable: boolean
+    instances: TopologyInstance[]
+  }[]
+  services: {
+    name: string
+    port: number
+    targetPort: number
+    selector: Record<string, string>
+    endpoints: string[]
+  }[]
+  policies: { name: string; action: 'ALLOW' | 'DENY' | 'UNKNOWN'; rules: PolicyRule[] }[]
+  workloads: { name: string; ready: number; total: number }[]
+  unscheduled: TopologyInstance[]
 }

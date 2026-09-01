@@ -127,6 +127,23 @@ export function identityRows(s: Snapshot): IdentityRow[] {
     }))
 }
 
+// vipFor answers the per-node VIP a caller resolves, reading VIPAllocation
+// objects the way kdns compiles its table (ADR 0022). The memo lives per
+// immutable snapshot.
+const vipCache = new WeakMap<Snapshot, Map<string, string>>()
+
+export function vipFor(s: Snapshot, service: string, node: string): string | undefined {
+  let table = vipCache.get(s)
+  if (!table) {
+    table = new Map()
+    for (const va of Object.values(s.vipAllocations)) {
+      table.set(`${va.spec.service}|${va.spec.node}`, va.spec.vip)
+    }
+    vipCache.set(s, table)
+  }
+  return table.get(`${service}|${node}`)
+}
+
 // The compiled RBAC view every node's Envoy enforces: DENY rules first, then
 // ALLOW rules, then the default line.
 export interface RbacView {

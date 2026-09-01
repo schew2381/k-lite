@@ -2,7 +2,7 @@
 // function. The traffic path, policyCheck, and the UI's simulator all import
 // it, so a verdict shown anywhere is the data path's own.
 
-import type { NetworkPolicy, Verdict } from '@/api/types'
+import type { NetworkPolicy, PolicyVerdict, Verdict } from '@/api/types'
 
 function matches(selector: string, name: string): boolean {
   return selector === '*' || selector === name
@@ -45,4 +45,32 @@ export function evaluate(policies: NetworkPolicy[], from: string, to: string): V
 
   if (targeted) return { allowed: false, reason: 'no-allow-match' }
   return { allowed: true, reason: 'default-allow' }
+}
+
+// toPolicyVerdict renders the structured verdict in the client-seam shape,
+// wording the reason exactly as internal/policy/policy.go does, so the mock
+// and the real facade answer with identical sentences.
+export function toPolicyVerdict(v: Verdict, from: string, to: string): PolicyVerdict {
+  const rule = v.matchedRule
+  let reason: string
+  switch (v.reason) {
+    case 'deny-rule':
+      reason = `denied by ${rule?.policy} rule ${(rule?.ruleIndex ?? 0) + 1}`
+      break
+    case 'allow-rule':
+      reason = `allowed by ${rule?.policy} rule ${(rule?.ruleIndex ?? 0) + 1}`
+      break
+    case 'default-allow':
+      reason = `no ALLOW targets ${to}, default allow`
+      break
+    case 'no-allow-match':
+      reason = `${to} is allowlist-mode and no ALLOW admits ${from}`
+      break
+  }
+  return {
+    available: true,
+    allowed: v.allowed,
+    matchedPolicy: rule?.policy,
+    reason,
+  }
 }

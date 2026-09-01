@@ -7,6 +7,7 @@
 // platform-generic: resolvers, not Docker.
 
 import type { TrafficEvent } from '@/api/types'
+import { vipFor } from '@/store/selectors'
 import type { Snapshot } from '@/store/store'
 import type { Trace, TraceStep } from '@/store/traceStore'
 
@@ -14,7 +15,7 @@ export type { Trace, TraceStep } from '@/store/traceStore'
 
 export function buildTrace(e: TrafficEvent, s: Snapshot): Trace {
   const svc = s.services[e.toService]
-  const vip = svc?.status?.vips[e.viaNode] ?? '10.44.64.?'
+  const vip = vipFor(s, e.toService, e.viaNode) ?? '10.44.64.?'
   const port = svc?.spec.port ?? 8080
   const callerIp = s.instances[e.fromInstance]?.status.instanceIp ?? '10.44.128.?'
   const targetNode = e.toInstance ? (s.instances[e.toInstance]?.spec.node ?? '?') : undefined

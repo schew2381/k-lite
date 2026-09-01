@@ -17,7 +17,7 @@ import type { NodeLayout, Rect } from '@/layout/layout'
 import { act } from '@/lib/act'
 import { useClient } from '@/lib/client-context'
 import { cn } from '@/lib/utils'
-import { endpointsOf, rbacView, sortedServices } from '@/store/selectors'
+import { endpointsOf, rbacView, sortedServices, vipFor } from '@/store/selectors'
 import { useSnapshot } from '@/store/store'
 import { InfraPodSheet } from '@/topo/InfraPodSheet'
 
@@ -187,7 +187,7 @@ export function NodeCard({ node, layout, count }: { node: NodeObj; layout: NodeL
           {services.map((svc) => (
             <div key={svc.metadata.name} className="truncate">
               {svc.metadata.name}.svc.klite <span className="text-muted-foreground">→</span>{' '}
-              {svc.status?.vips[name] ?? '…'}
+              {vipFor(snapshot, svc.metadata.name, name) ?? '…'}
             </div>
           ))}
           <div className="truncate text-[9.5px] text-muted-foreground">
@@ -205,7 +205,7 @@ export function NodeCard({ node, layout, count }: { node: NodeObj; layout: NodeL
         <SubBox rect={layout.infra.lds} within={layout.infra.box} title="listeners (LDS)">
           {services.map((svc) => (
             <div key={svc.metadata.name} className="truncate">
-              {svc.status?.vips[name] ?? '…'}:{svc.spec.port}{' '}
+              {vipFor(snapshot, svc.metadata.name, name) ?? '…'}:{svc.spec.port}{' '}
               <span className="text-muted-foreground">→</span> cluster {svc.metadata.name}
             </div>
           ))}

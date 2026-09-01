@@ -3,7 +3,7 @@
 // this panel says is what the proxy does.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Verdict } from '@/api/types'
+import type { PolicyVerdict } from '@/api/types'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -19,13 +19,6 @@ import { cn } from '@/lib/utils'
 import { sortedServices } from '@/store/selectors'
 import { useSnapshot } from '@/store/store'
 
-const REASON_COPY: Record<Verdict['reason'], string> = {
-  'default-allow': 'no ALLOW policy targets it, so the default says yes',
-  'allow-rule': 'an ALLOW rule matches this caller',
-  'deny-rule': 'a DENY rule matches, so the connection resets',
-  'no-allow-match': "an ALLOW policy targets it and this caller isn't on the list",
-}
-
 export function PolicySimPanel({
   onHighlight,
 }: {
@@ -36,7 +29,7 @@ export function PolicySimPanel({
   const services = sortedServices(snapshot).map((s) => s.metadata.name)
   const [from, setFrom] = useState<string>()
   const [to, setTo] = useState<string>()
-  const [verdict, setVerdict] = useState<Verdict | null>(null)
+  const [verdict, setVerdict] = useState<PolicyVerdict | null>(null)
 
   // changing either end voids the shown verdict and the board highlight
   const pick = (set: (v: string) => void) => (v: string) => {
@@ -98,7 +91,13 @@ export function PolicySimPanel({
           check
         </Button>
       </div>
-      {verdict && (
+      {verdict && !verdict.available && (
+        <p className="text-xs text-muted-foreground" data-testid="policy-verdict-unavailable">
+          The cluster doesn't answer policy checks yet. The panel wakes up when the PolicyCheck RPC
+          lands.
+        </p>
+      )}
+      {verdict?.available && (
         <div
           className={cn(
             'rounded-lg border-[1.5px] px-3 py-2',
@@ -112,12 +111,10 @@ export function PolicySimPanel({
           >
             {verdict.allowed ? '✓ allowed' : '✕ denied'}
           </div>
-          <div className="mt-0.5 text-xs text-muted-foreground">{REASON_COPY[verdict.reason]}</div>
-          {verdict.matchedRule && (
-            <div className="mt-1 font-mono text-[11px]">
-              {verdict.matchedRule.policy} · rule {verdict.matchedRule.ruleIndex + 1} ·{' '}
-              {verdict.matchedRule.action}
-            </div>
+          {/* the same sentence internal/policy produces, whichever client answered */}
+          <div className="mt-0.5 text-xs text-muted-foreground">{verdict.reason}</div>
+          {verdict.matchedPolicy && (
+            <div className="mt-1 font-mono text-[11px]">{verdict.matchedPolicy}</div>
           )}
         </div>
       )}

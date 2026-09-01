@@ -69,16 +69,18 @@ describe('surge-first drain (ADR 0010)', () => {
     expect(failures).toEqual([])
   })
 
-  it('removing a node deletes it once drained, and its VIPs go with it', () => {
+  it('removing a node deletes it once drained, and its VIPAllocations go with it', () => {
     const c = new Cluster(seedObjects())
     settle(c, 4000)
+    // the reconciler materialized one allocation per (service, node)
+    expect(c.get('VIPAllocation', 'b.node-3')).not.toBeNull()
     c.remove('Node', 'node-3')
     settle(c, 16000)
     expect(c.get('Node', 'node-3')).toBeNull()
-    const svcB = c.get('Service', 'b')
-    expect(
-      (svcB as { status?: { vips: Record<string, string> } }).status?.vips['node-3'],
-    ).toBeUndefined()
+    const leaked = c
+      .list('VIPAllocation')
+      .filter((a) => a.kind === 'VIPAllocation' && a.spec.node === 'node-3')
+    expect(leaked).toEqual([])
   })
 
   it('a watch consumer also sees the node stay deleted — no event after DELETED resurrects it', async () => {
