@@ -49,6 +49,8 @@ linters:
       - internal/gen/
       - hack/
       - ui/
+      - internal/facade/
+      - cmd/klite-facade/
 formatters:
   enable:
     - gofumpt
