@@ -27,7 +27,10 @@ message ApplyRequest {
 message ApplyResult {
   string kind = 1;
   string name = 2;
-  string action = 3; // created | updated | unchanged | deleted
+  // created | updated | unchanged | deleted, or a choreography note like
+  // "draining (delete pending)". Apply appends " (client status ignored)"
+  // when the YAML carried a status block, which is server-owned (ADR 0042).
+  string action = 3;
   string error = 4;
 }
 

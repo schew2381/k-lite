@@ -1074,8 +1074,13 @@ type ReportStatusRequest struct {
 	// the infra pod converges — later than Register. Empty leaves the stored
 	// value alone.
 	AdvertiseAddress string `protobuf:"bytes,4,opt,name=advertise_address,json=advertiseAddress,proto3" json:"advertise_address,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// The index this agent's infra actually runs, from its Register-time
+	// NetBootstrap. The server restores a stored index that went missing —
+	// a node record recreated by apply after delete churn (ADR 0042) — and
+	// never overwrites a set one. Zero means the agent predates this field.
+	NodeIndex     int32 `protobuf:"varint,5,opt,name=node_index,json=nodeIndex,proto3" json:"node_index,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ReportStatusRequest) Reset() {
@@ -1134,6 +1139,13 @@ func (x *ReportStatusRequest) GetAdvertiseAddress() string {
 		return x.AdvertiseAddress
 	}
 	return ""
+}
+
+func (x *ReportStatusRequest) GetNodeIndex() int32 {
+	if x != nil {
+		return x.NodeIndex
+	}
+	return 0
 }
 
 type ReportStatusResponse struct {
@@ -1598,12 +1610,14 @@ const file_klite_v1_agent_proto_rawDesc = "" +
 	"\x0eKliteNetStatus\x12\x18\n" +
 	"\ahealthy\x18\x01 \x01(\bR\ahealthy\x12\x1d\n" +
 	"\n" +
-	"admin_port\x18\x02 \x01(\x05R\tadminPort\"\xcb\x01\n" +
+	"admin_port\x18\x02 \x01(\x05R\tadminPort\"\xea\x01\n" +
 	"\x13ReportStatusRequest\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12<\n" +
 	"\tinstances\x18\x02 \x03(\v2\x1e.klite.v1.InstanceStatusUpdateR\tinstances\x125\n" +
 	"\tklite_net\x18\x03 \x01(\v2\x18.klite.v1.KliteNetStatusR\bkliteNet\x12+\n" +
-	"\x11advertise_address\x18\x04 \x01(\tR\x10advertiseAddress\"\x16\n" +
+	"\x11advertise_address\x18\x04 \x01(\tR\x10advertiseAddress\x12\x1d\n" +
+	"\n" +
+	"node_index\x18\x05 \x01(\x05R\tnodeIndex\"\x16\n" +
 	"\x14ReportStatusResponse\"+\n" +
 	"\x15StreamCommandsRequest\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\"U\n" +

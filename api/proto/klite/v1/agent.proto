@@ -156,6 +156,11 @@ message ReportStatusRequest {
   // the infra pod converges — later than Register. Empty leaves the stored
   // value alone.
   string advertise_address = 4;
+  // The index this agent's infra actually runs, from its Register-time
+  // NetBootstrap. The server restores a stored index that went missing —
+  // a node record recreated by apply after delete churn (ADR 0042) — and
+  // never overwrites a set one. Zero means the agent predates this field.
+  int32 node_index = 5;
 }
 
 message ReportStatusResponse {}
