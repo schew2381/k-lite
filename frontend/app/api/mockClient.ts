@@ -83,6 +83,12 @@ export function createMockClient(): KliteClient {
     if (speed > 0) cluster.advance(dt * speed)
   }, TICK_MS)
 
+  if (typeof window !== 'undefined') {
+    window.__kliteSpeed = (x) => {
+      speed = Math.max(0, x)
+    }
+  }
+
   return {
     mode: 'mock',
     can: { cordon: true, uncordon: true, drain: true },
@@ -147,5 +153,13 @@ export function createMockClient(): KliteClient {
       },
       speed: () => speed,
     },
+  }
+}
+
+// The header lost its speed buttons, so tests fast-forward the sim through
+// this hook instead: window.__kliteSpeed(4) cranks it, (0) pauses it.
+declare global {
+  interface Window {
+    __kliteSpeed?: (multiplier: number) => void
   }
 }

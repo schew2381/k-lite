@@ -4,9 +4,12 @@
 import { expect, type Page, test } from '@playwright/test'
 
 // Traffic beats every 4 sim-seconds and one story plays at a time, so tests
-// that wait on specific calls crank the sim to 4× first.
+// that wait on specific calls crank the sim through the mock's test hook
+// (the header no longer has speed buttons).
 async function fourX(page: Page) {
-  await page.getByRole('radio', { name: 'Four times speed' }).click()
+  await page.evaluate(() => {
+    ;(window as { __kliteSpeed?: (x: number) => void }).__kliteSpeed?.(4)
+  })
 }
 
 test('cluster boots: three nodes, five Ready instances, a traced call flowing', async ({ page }) => {
@@ -155,13 +158,15 @@ test('a service created from the dialog schedules and gets kdns records everywhe
 test('live flow: flights run fast and untraced, the panel keeps the latest call', async ({ page }) => {
   await page.goto('/')
   await fourX(page)
-  await page.getByTestId('flow-toggle').getByRole('radio', { name: 'Live flow' }).click()
+  await page.getByTestId('mode-toggle').click()
   await expect(page.locator('.traffic-dot').first()).toBeVisible({ timeout: 60_000 })
   // no step-by-step walkthrough in live flow
   expect(await page.getByTestId('trace-step-active').count()).toBe(0)
   // pause the sim so no new flights spawn: the airborne ones land in seconds,
   // not the traced half-minute
-  await page.getByRole('radio', { name: 'Pause' }).click()
+  await page.evaluate(() => {
+    ;(window as { __kliteSpeed?: (x: number) => void }).__kliteSpeed?.(0)
+  })
   await expect(page.locator('.traffic-dot')).toHaveCount(0, { timeout: 15_000 })
   await expect(page.getByTestId('trace-panel')).toContainText('latest call')
   await expect(page.getByTestId('trace-panel').locator('ol li').first()).toBeVisible()
