@@ -16,7 +16,7 @@ import (
 	"github.com/schew2381/k-lite/internal/ca"
 )
 
-// Auth is klited's deny-by-default gate (ADR 0013, research/join-auth.md).
+// Auth is klited's deny-by-default gate (ADR 0028, research/join-auth.md).
 // Identity arrives one of two ways: a verified node client cert on the TLS
 // session, or the admin bearer token in metadata. Every method belongs to
 // exactly one caller class, and anything unlisted is denied:

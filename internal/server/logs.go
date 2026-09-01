@@ -30,7 +30,7 @@ func (s *Cluster) Logs(req *klitev1.LogsRequest, stream grpc.ServerStreamingServ
 	}
 
 	id := uuid.NewString()
-	w := s.hub.addWaiter(id)
+	w := s.hub.addWaiter(id, node)
 	defer s.hub.removeWaiter(id)
 	ok := s.hub.send(node, &klitev1.Command{Id: id, Cmd: &klitev1.Command_Logs{Logs: &klitev1.LogsCommand{
 		Instance: req.GetInstance(),

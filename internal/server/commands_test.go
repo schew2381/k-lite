@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
 )
@@ -82,7 +84,7 @@ func TestHubDetachFailsQueuedCommands(t *testing.T) {
 	t.Parallel()
 	h := NewCommandHub()
 	cs := h.attach("node-1")
-	w := h.addWaiter("c1")
+	w := h.addWaiter("c1", "node-1")
 	if !h.send("node-1", logsCmd("c1")) {
 		t.Fatal("send must succeed while the stream is attached")
 	}
@@ -111,7 +113,7 @@ func TestHubSendFullQueueFails(t *testing.T) {
 func TestHubRouteToWaiter(t *testing.T) {
 	t.Parallel()
 	h := NewCommandHub()
-	w := h.addWaiter("c1")
+	w := h.addWaiter("c1", "node-1")
 
 	if !h.route(nil, output("c1", "hello")) {
 		t.Fatal("route must deliver to a registered waiter")
@@ -137,7 +139,7 @@ func TestHubRouteToWaiter(t *testing.T) {
 func TestHubRouteUnblocksWhenWaiterLeaves(t *testing.T) {
 	t.Parallel()
 	h := NewCommandHub()
-	w := h.addWaiter("c1")
+	w := h.addWaiter("c1", "node-1")
 	for range cap(w.ch) {
 		if !h.route(nil, output("c1", "fill")) {
 			t.Fatal("filling the waiter buffer must succeed")
@@ -164,9 +166,11 @@ func TestHubRouteUnblocksWhenWaiterLeaves(t *testing.T) {
 }
 
 // fakePushServer feeds PushCommandOutput a fixed message sequence, then err
-// or a clean io.EOF.
+// or a clean io.EOF. ctx overrides the stream context, for tests that need a
+// caller principal on it.
 type fakePushServer struct {
 	grpc.ServerStream
+	ctx    context.Context
 	msgs   []*klitev1.CommandOutput
 	err    error
 	closed bool
@@ -189,7 +193,12 @@ func (s *fakePushServer) SendAndClose(*klitev1.PushCommandOutputResponse) error 
 	return nil
 }
 
-func (s *fakePushServer) Context() context.Context { return context.Background() }
+func (s *fakePushServer) Context() context.Context {
+	if s.ctx != nil {
+		return s.ctx
+	}
+	return context.Background()
+}
 
 func drainWaiter(w *outputWaiter) []*klitev1.CommandOutput {
 	var out []*klitev1.CommandOutput
@@ -206,7 +215,7 @@ func drainWaiter(w *outputWaiter) []*klitev1.CommandOutput {
 func TestPushCommandOutputRoutesToWaiter(t *testing.T) {
 	t.Parallel()
 	h := NewCommandHub()
-	w := h.addWaiter("c1")
+	w := h.addWaiter("c1", "node-1")
 	a := NewAgent(&AgentConfig{ClusterToken: "tok", Hub: h})
 	stream := &fakePushServer{msgs: []*klitev1.CommandOutput{
 		output("c1", "hello"),
@@ -228,7 +237,7 @@ func TestPushCommandOutputRoutesToWaiter(t *testing.T) {
 func TestPushCommandOutputSynthesizesEOFOnBrokenStream(t *testing.T) {
 	t.Parallel()
 	h := NewCommandHub()
-	w := h.addWaiter("c1")
+	w := h.addWaiter("c1", "node-1")
 	a := NewAgent(&AgentConfig{ClusterToken: "tok", Hub: h})
 	stream := &fakePushServer{
 		msgs: []*klitev1.CommandOutput{output("c1", "hello")},
@@ -262,7 +271,7 @@ func TestPushCommandOutputRejectsUnknownCommand(t *testing.T) {
 func TestHubRouteUnblocksOnStop(t *testing.T) {
 	t.Parallel()
 	h := NewCommandHub()
-	w := h.addWaiter("c1")
+	w := h.addWaiter("c1", "node-1")
 	for range cap(w.ch) {
 		h.route(nil, output("c1", "fill"))
 	}
@@ -278,5 +287,44 @@ func TestHubRouteUnblocksOnStop(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("route ignored the stop channel")
+	}
+}
+
+// A push must come from the node the command targeted. Command ids are
+// unguessable, and this closes the rest of the gap: a certified node that
+// somehow learns another node's command id still can't feed its log stream.
+func TestPushCommandOutputForeignNodeDenied(t *testing.T) {
+	t.Parallel()
+	h := NewCommandHub()
+	w := h.addWaiter("c1", "node-1")
+	a := NewAgent(&AgentConfig{ClusterToken: "tok", Hub: h})
+	auth := NewAuth("secret")
+
+	foreign, err := auth.authorize(nodeCertCtx(t, "node-2"), "/klite.v1.AgentService/PushCommandOutput")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := &fakePushServer{ctx: foreign, msgs: []*klitev1.CommandOutput{output("c1", "spoof")}}
+	if err := a.PushCommandOutput(stream); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("foreign push = %v, want PermissionDenied", err)
+	}
+	if got := drainWaiter(w); len(got) != 0 {
+		t.Fatalf("waiter received %v, foreign output must never route", got)
+	}
+
+	// The node the command went to still pushes freely.
+	own, err := auth.authorize(nodeCertCtx(t, "node-1"), "/klite.v1.AgentService/PushCommandOutput")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream = &fakePushServer{ctx: own, msgs: []*klitev1.CommandOutput{
+		output("c1", "hello"),
+		{CommandId: "c1", Eof: true},
+	}}
+	if err := a.PushCommandOutput(stream); err != nil {
+		t.Fatal(err)
+	}
+	if got := drainWaiter(w); len(got) != 2 {
+		t.Fatalf("waiter received %d messages, want the data and the eof", len(got))
 	}
 }

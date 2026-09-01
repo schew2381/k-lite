@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"slices"
 	"sync"
 	"time"
 
@@ -22,7 +23,7 @@ import (
 	"github.com/schew2381/k-lite/internal/store"
 )
 
-// Register hands out this cluster network layout (ADR 0008). Infra pods sit
+// Register hands out the cluster's network layout (ADR 0008). Infra pods sit
 // at 10.44.0.<10+index>, below the VIP range at 10.44.64.0/18 and the dynamic
 // container range at 10.44.128.0/17.
 const (
@@ -67,9 +68,9 @@ type Agent struct {
 	klitev1.UnimplementedAgentServiceServer
 	cfg AgentConfig
 
-	// indexMu serializes node-index assignment on this server, which is
-	// enough while one klited handles registration. Multiple servers need
-	// an etcd-side reservation, which belongs to M8's join flow.
+	// indexMu serializes node-index assignment on this server. Two replicas
+	// assigning at once slip past it, so Register re-checks after its write
+	// and yields the index when another node beat it there (yieldIndexCollision).
 	indexMu sync.Mutex
 }
 
@@ -105,7 +106,8 @@ func (a *Agent) Register(ctx context.Context, req *klitev1.RegisterRequest) (*kl
 			node.Status = &klitev1.NodeStatus{}
 		}
 		idx := node.GetStatus().GetNodeIndex()
-		if idx == 0 {
+		fresh := idx == 0
+		if fresh {
 			if idx, err = a.freeNodeIndex(ctx); err != nil {
 				return nil, storeStatus(err)
 			}
@@ -121,6 +123,15 @@ func (a *Agent) Register(ctx context.Context, req *klitev1.RegisterRequest) (*kl
 				continue
 			}
 			return nil, storeStatus(err)
+		}
+		if fresh {
+			yielded, err := a.yieldIndexCollision(ctx, req.GetNode(), idx)
+			if err != nil {
+				return nil, storeStatus(err)
+			}
+			if yielded {
+				continue
+			}
 		}
 		slog.Info("node registered", "node", req.GetNode(), "index", idx, "certIssued", len(certPEM) > 0)
 		resp := &klitev1.RegisterResponse{Net: a.netBootstrap(idx)}
@@ -174,6 +185,46 @@ func (a *Agent) freeNodeIndex(ctx context.Context) (int32, error) {
 			return i, nil
 		}
 	}
+}
+
+// yieldIndexCollision clears the node's freshly assigned index when another
+// node holds the same one, and true tells Register to reassign. indexMu only
+// covers this process, so two replicas registering two fresh nodes at once
+// can both pick the same free index. etcd serializes their writes, so the
+// later writer's list always shows the collision and at least one side backs
+// off here instead of keeping a doubled index.
+func (a *Agent) yieldIndexCollision(ctx context.Context, name string, idx int32) (bool, error) {
+	objs, _, err := a.cfg.Store.List(ctx, object.KindNode)
+	if err != nil {
+		return false, err
+	}
+	collision := slices.ContainsFunc(objs, func(o *klitev1.Object) bool {
+		n := o.GetNode()
+		return n.GetMeta().GetName() != name && n.GetStatus().GetNodeIndex() == idx
+	})
+	if !collision {
+		return false, nil
+	}
+	slog.Warn("node index assigned twice, yielding", "node", name, "index", idx)
+	for range casRetries {
+		obj, rev, err := a.cfg.Store.Get(ctx, object.KindNode, name)
+		if err != nil {
+			return false, err
+		}
+		node := obj.GetNode()
+		if node.GetStatus().GetNodeIndex() != idx {
+			return true, nil
+		}
+		node.Status.NodeIndex = 0
+		if _, err := a.cfg.Store.Put(ctx, obj, rev); err != nil {
+			if errors.Is(err, store.ErrConflict) {
+				continue
+			}
+			return false, err
+		}
+		return true, nil
+	}
+	return false, fmt.Errorf("node %s index yield: %w", name, store.ErrConflict)
 }
 
 func (a *Agent) netBootstrap(idx int32) *klitev1.NetBootstrap {
@@ -243,7 +294,7 @@ func (a *Agent) ReportStatus(ctx context.Context, req *klitev1.ReportStatusReque
 	// A failed instance write never fails the heartbeat: the instance may
 	// simply be gone, and the next snapshot stands the agent down.
 	for _, u := range req.GetInstances() {
-		if err := a.applyInstanceStatus(ctx, u); err != nil {
+		if err := a.applyInstanceStatus(ctx, req.GetNode(), u); err != nil {
 			slog.Warn("instance status update failed", "instance", u.GetName(), "err", err)
 		}
 	}
@@ -253,23 +304,29 @@ func (a *Agent) ReportStatus(ctx context.Context, req *klitev1.ReportStatusReque
 	return &klitev1.ReportStatusResponse{}, nil
 }
 
-// advertiseIP screens a reported advertise address down to a literal IP.
-// Endpoints carry it into EDS, and Envoy rejects hostnames there, so a bad
-// value is dropped loudly rather than poisoning every consumer's snapshot.
+// advertiseIP screens a reported advertise address down to a literal,
+// routable IP. Endpoints carry it into EDS, and Envoy rejects hostnames
+// there. That's why a bad value is dropped loudly rather than poisoning
+// every consumer's snapshot. Loopback and unspecified addresses are just as
+// poisonous, since every remote proxy would dial itself. The agent already
+// refuses them (advertise.go), so only a buggy or foreign agent sends one.
 func advertiseIP(node, addr string) string {
 	if addr == "" {
 		return ""
 	}
-	if _, err := netip.ParseAddr(addr); err != nil {
-		slog.Warn("ignoring non-IP advertise address", "node", node, "addr", addr)
+	ip, err := netip.ParseAddr(addr)
+	if err != nil || ip.IsLoopback() || ip.IsUnspecified() {
+		slog.Warn("ignoring unroutable advertise address", "node", node, "addr", addr)
 		return ""
 	}
 	return addr
 }
 
 // applyInstanceStatus CAS-writes one instance status, skipping vanished
-// instances, stale UIDs, and no-op updates.
-func (a *Agent) applyInstanceStatus(ctx context.Context, u *klitev1.InstanceStatusUpdate) error {
+// instances, stale UIDs, and no-op updates. node is the reporting agent's
+// authenticated name: an instance scheduled elsewhere is rejected, so one
+// node's certificate can never rewrite another node's statuses.
+func (a *Agent) applyInstanceStatus(ctx context.Context, node string, u *klitev1.InstanceStatusUpdate) error {
 	reported := u.GetStatus().GetPhase()
 	for range casRetries {
 		obj, rev, err := a.cfg.Store.Get(ctx, object.KindInstance, u.GetName())
@@ -280,6 +337,9 @@ func (a *Agent) applyInstanceStatus(ctx context.Context, u *klitev1.InstanceStat
 			return err
 		}
 		inst := obj.GetInstance()
+		if got := inst.GetSpec().GetNode(); got != node {
+			return fmt.Errorf("instance %s is scheduled to node %q, not %q", u.GetName(), got, node)
+		}
 		if inst.GetMeta().GetUid() != u.GetUid() {
 			return nil
 		}

@@ -21,6 +21,8 @@ import (
 
 	"github.com/schew2381/k-lite/internal/ca"
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
+	"github.com/schew2381/k-lite/internal/object"
+	"github.com/schew2381/k-lite/internal/store"
 	"github.com/schew2381/k-lite/internal/store/storetest"
 )
 
@@ -336,5 +338,67 @@ func TestNodeTokenMintsPinnedToken(t *testing.T) {
 	none := NewCluster(storetest.New(), NewCommandHub(), nil)
 	if _, err := none.NodeToken(context.Background(), &klitev1.NodeTokenRequest{}); status.Code(err) != codes.Unimplemented {
 		t.Fatalf("CA-less server should refuse to mint, got %v", err)
+	}
+}
+
+// racingStore hides one node from a single List call, replaying the window
+// where a sibling replica's index write hasn't landed when freeNodeIndex
+// scans but has landed by Register's collision re-check.
+type racingStore struct {
+	store.Store
+	hideOnce string // node name to omit from the first node List
+}
+
+func (r *racingStore) List(ctx context.Context, kind string) ([]*klitev1.Object, int64, error) {
+	objs, rev, err := r.Store.List(ctx, kind)
+	if r.hideOnce == "" || kind != object.KindNode || err != nil {
+		return objs, rev, err
+	}
+	name := r.hideOnce
+	r.hideOnce = ""
+	kept := make([]*klitev1.Object, 0, len(objs))
+	for _, o := range objs {
+		if o.GetNode().GetMeta().GetName() != name {
+			kept = append(kept, o)
+		}
+	}
+	return kept, rev, nil
+}
+
+// indexMu only serializes one klited, so two replicas can hand out the same
+// fresh index. Register re-checks after writing and yields, landing the
+// second registrant on the next free index.
+func TestRegisterYieldsIndexCollision(t *testing.T) {
+	t.Parallel()
+	st := storetest.New()
+	ctx := context.Background()
+	seedNode(t, st, "node-a", klitev1.NodePhase_NODE_PHASE_UNSPECIFIED)
+	seedNode(t, st, "node-b", klitev1.NodePhase_NODE_PHASE_UNSPECIFIED)
+
+	// node-a registered through a sibling replica and holds index 1.
+	obj, rev, err := st.Get(ctx, object.KindNode, "node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	obj.GetNode().Status = &klitev1.NodeStatus{NodeIndex: 1}
+	if _, err := st.Put(ctx, obj, rev); err != nil {
+		t.Fatal(err)
+	}
+
+	// This replica's free-index scan misses that write, exactly once.
+	a := NewAgent(&AgentConfig{Store: &racingStore{Store: st, hideOnce: "node-a"}, ClusterToken: "join-me"})
+	resp, err := a.Register(ctx, &klitev1.RegisterRequest{Node: "node-b", ClusterToken: "join-me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resp.GetNet().GetNodeIndex(); got != 2 {
+		t.Fatalf("node-b registered with index %d, want 2 (1 is node-a's)", got)
+	}
+	stored, _, err := st.Get(ctx, object.KindNode, "node-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx := stored.GetNode().GetStatus().GetNodeIndex(); idx != 2 {
+		t.Fatalf("stored index = %d, want 2", idx)
 	}
 }

@@ -31,6 +31,7 @@ type commandStream struct {
 
 // outputWaiter is one Logs RPC waiting for a command's output.
 type outputWaiter struct {
+	node string // the node the command was sent to, and only its pushes may land here
 	ch   chan *klitev1.CommandOutput
 	gone chan struct{} // closed when the waiter stops reading
 }
@@ -102,14 +103,25 @@ func (h *CommandHub) send(node string, cmd *klitev1.Command) bool {
 	}
 }
 
-// addWaiter parks a channel for the command's output. Callers must pair it
-// with removeWaiter.
-func (h *CommandHub) addWaiter(id string) *outputWaiter {
-	w := &outputWaiter{ch: make(chan *klitev1.CommandOutput, 16), gone: make(chan struct{})}
+// addWaiter parks a channel for the command's output, bound to the node the
+// command targets. Callers must pair it with removeWaiter.
+func (h *CommandHub) addWaiter(id, node string) *outputWaiter {
+	w := &outputWaiter{node: node, ch: make(chan *klitev1.CommandOutput, 16), gone: make(chan struct{})}
 	h.mu.Lock()
 	h.waiters[id] = w
 	h.mu.Unlock()
 	return w
+}
+
+// waiterNode reports which node a live command's output must come from.
+func (h *CommandHub) waiterNode(id string) (string, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	w := h.waiters[id]
+	if w == nil {
+		return "", false
+	}
+	return w.node, true
 }
 
 func (h *CommandHub) removeWaiter(id string) {
@@ -174,7 +186,9 @@ func (a *Agent) StreamCommands(req *klitev1.StreamCommandsRequest, stream grpc.S
 // vanished waiter ends the stream with an error, so the agent stops pumping
 // even if its StopCommand got lost in a reconnect. A stream that dies before
 // its eof message gets a synthetic one, so the waiter ends instead of hanging
-// on an agent that vanished mid-command.
+// on an agent that vanished mid-command. Every message must come from the
+// node the command targeted: command ids are unguessable, but nothing else
+// stops one certified node from injecting into another node's log stream.
 func (a *Agent) PushCommandOutput(stream grpc.ClientStreamingServer[klitev1.CommandOutput, klitev1.PushCommandOutputResponse]) error {
 	ctx := stream.Context()
 	id := ""
@@ -193,6 +207,12 @@ func (a *Agent) PushCommandOutput(stream grpc.ClientStreamingServer[klitev1.Comm
 				return stream.SendAndClose(&klitev1.PushCommandOutputResponse{})
 			}
 			return err
+		}
+		if p := callerPrincipal(ctx); p.kind == principalNode {
+			if node, ok := a.cfg.Hub.waiterNode(out.GetCommandId()); ok && node != p.node {
+				return status.Errorf(codes.PermissionDenied,
+					"command %s was sent to node %q, not %q", out.GetCommandId(), node, p.node)
+			}
 		}
 		id = out.GetCommandId()
 		sawEOF = out.GetEof()

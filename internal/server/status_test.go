@@ -30,7 +30,7 @@ func TestApplyInstanceStatusKeepsDraining(t *testing.T) {
 			Status: &klitev1.InstanceStatus{Phase: phase, InstanceIp: "10.44.128.9", ContainerId: "ctr-1"},
 		}
 	}
-	if err := a.applyInstanceStatus(ctx, update(klitev1.InstancePhase_INSTANCE_PHASE_READY)); err != nil {
+	if err := a.applyInstanceStatus(ctx, "node-1", update(klitev1.InstancePhase_INSTANCE_PHASE_READY)); err != nil {
 		t.Fatal(err)
 	}
 	got, _, _ := st.Get(ctx, object.KindInstance, "b-aa")
@@ -42,7 +42,7 @@ func TestApplyInstanceStatusKeepsDraining(t *testing.T) {
 		t.Errorf("status = %v, want the rest of the report merged", s)
 	}
 
-	if err := a.applyInstanceStatus(ctx, update(klitev1.InstancePhase_INSTANCE_PHASE_FAILED)); err != nil {
+	if err := a.applyInstanceStatus(ctx, "node-1", update(klitev1.InstancePhase_INSTANCE_PHASE_FAILED)); err != nil {
 		t.Fatal(err)
 	}
 	got, _, _ = st.Get(ctx, object.KindInstance, "b-aa")
@@ -162,5 +162,63 @@ func TestDeleteNodeDrainsFirst(t *testing.T) {
 	resp, err = s.Delete(ctx, &klitev1.DeleteRequest{Kind: "node", Name: "node-2"})
 	if err != nil || resp.GetResults()[0].GetAction() != "draining (delete pending)" {
 		t.Fatalf("repeat delete = %v (%v), want the same drain-pending answer", resp.GetResults(), err)
+	}
+}
+
+// A node's report only writes statuses for instances scheduled to it. A
+// report naming another node's instance is dropped whatever UID it carries,
+// and the heartbeat still lands.
+func TestReportStatusRejectsForeignNodeInstances(t *testing.T) {
+	t.Parallel()
+	st := storetest.New()
+	ctx := context.Background()
+	seedNode(t, st, "node-2", klitev1.NodePhase_NODE_PHASE_READY)
+	seedInstance(t, st, "b-aa", "b", "node-1", klitev1.InstancePhase_INSTANCE_PHASE_READY)
+	obj, _, err := st.Get(ctx, object.KindInstance, "b-aa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uid := obj.GetInstance().GetMeta().GetUid()
+	a := NewAgent(&AgentConfig{Store: st, ClusterToken: "tok", Hub: NewCommandHub()})
+
+	if _, err := a.ReportStatus(ctx, &klitev1.ReportStatusRequest{
+		Node: "node-2",
+		Instances: []*klitev1.InstanceStatusUpdate{{
+			Name: "b-aa", Uid: uid,
+			Status: &klitev1.InstanceStatus{Phase: klitev1.InstancePhase_INSTANCE_PHASE_FAILED, InstanceIp: "10.9.9.9"},
+		}},
+	}); err != nil {
+		t.Fatalf("the heartbeat must survive a rejected instance write: %v", err)
+	}
+	got, _, _ := st.Get(ctx, object.KindInstance, "b-aa")
+	s := got.GetInstance().GetStatus()
+	if s.GetPhase() != klitev1.InstancePhase_INSTANCE_PHASE_READY || s.GetInstanceIp() == "10.9.9.9" {
+		t.Fatalf("status = %v, a foreign node's report must not land", s)
+	}
+	node, _, _ := st.Get(ctx, object.KindNode, "node-2")
+	if node.GetNode().GetStatus().GetLastHeartbeatUnix() == 0 {
+		t.Error("heartbeat was not stamped")
+	}
+}
+
+// advertiseIP screens what agents report before it can reach EDS: hostnames,
+// loopback, and unspecified addresses would each break or misroute every
+// remote consumer.
+func TestAdvertiseIPScreens(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ addr, want string }{
+		{"192.168.5.2", "192.168.5.2"},
+		{"2001:db8::7", "2001:db8::7"},
+		{"host.docker.internal", ""},
+		{"127.0.0.1", ""},
+		{"::1", ""},
+		{"0.0.0.0", ""},
+		{"::", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := advertiseIP("node-1", tt.addr); got != tt.want {
+			t.Errorf("advertiseIP(%q) = %q, want %q", tt.addr, got, tt.want)
+		}
 	}
 }
