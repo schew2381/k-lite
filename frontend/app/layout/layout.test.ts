@@ -28,6 +28,12 @@ describe('computeLayout', () => {
       for (const part of ['infra', 'kdns', 'lds', 'rbac', 'eds', 'ingress'] as const) {
         expect(layout.anchors[`${part}:${name}`]).toBeDefined()
       }
+      // the agent bar sits between the header and the infra pod, inside the card
+      const { agent, card } = layout.nodes[name]
+      expect(agent.y).toBeGreaterThan(card.y)
+      expect(agent.y + agent.h).toBeLessThanOrEqual(layout.nodes[name].infra.box.y)
+      expect(agent.x).toBeGreaterThanOrEqual(card.x)
+      expect(agent.x + agent.w).toBeLessThanOrEqual(card.x + card.w)
       // every sub-box nests inside its infra pod box
       const infra = layout.nodes[name].infra
       for (const sub of [infra.kdns, infra.envoy, infra.lds, infra.rbac, infra.eds, infra.ingress]) {

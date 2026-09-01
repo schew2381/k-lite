@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useClient } from '@/lib/client-context'
 import { cn } from '@/lib/utils'
-import { sortedNodes } from '@/store/selectors'
+import { agentViewOf, sortedNodes } from '@/store/selectors'
 import { useSnapshot } from '@/store/store'
 
 function Card({
@@ -46,7 +46,6 @@ const Line = ({ label, children }: { label: string; children: React.ReactNode })
 // A registered agent reports every ~5s. After twice that plus slack we
 // presume the stream broken, the same arithmetic klited's own NotReady sweep
 // uses.
-const HEARTBEAT_FRESH_MS = 15_000
 
 export function ControlPlaneStrip() {
   const client = useClient()
@@ -65,11 +64,8 @@ export function ControlPlaneStrip() {
   // In mock, phase is the truth. Against a live cluster, a stream is only as
   // alive as its last heartbeat, and a declared-but-never-registered node has
   // no stream at all.
-  const streamOpen = (n: (typeof nodes)[number]): boolean => {
-    if (mock) return n.status?.phase !== 'NotReady'
-    const beat = n.status?.lastHeartbeatUnix
-    return beat !== undefined && Date.now() - beat * 1000 < HEARTBEAT_FRESH_MS
-  }
+  const streamOpen = (n: (typeof nodes)[number]): boolean =>
+    agentViewOf(n, mock, Date.now()).state === 'running'
 
   return (
     <div className="mb-3 flex flex-wrap items-stretch gap-3" data-testid="control-plane">

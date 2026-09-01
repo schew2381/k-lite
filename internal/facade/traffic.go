@@ -12,6 +12,9 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
 )
 
@@ -35,6 +38,7 @@ type trafficEvent struct {
 	Count   int    `json:"count"`              // calls since the previous poll
 	Verdict string `json:"verdict"`            // allowed | denied
 	Phase   string `json:"rbacPhase,omitzero"` // denied only: deny | allow, which RBAC filter killed it
+	Caller  string `json:"caller,omitzero"`    // caller instance IP, when kdns saw the lookup
 }
 
 // trafficFeed fans Envoy counter deltas to SSE subscribers. The baselines
@@ -45,6 +49,11 @@ type trafficFeed struct {
 	adminURL func(nodeIndex int32) string
 	interval time.Duration
 	httpc    *http.Client
+
+	// netAddr names each node's klite-net admin gRPC, whose RecentQueries
+	// ring attributes calls to the instance that resolved the name.
+	netAddr  func(nodeIndex int32) string
+	netConns map[int32]*grpc.ClientConn
 
 	mu   sync.Mutex
 	subs map[chan []byte]struct{}
@@ -58,9 +67,13 @@ func newTrafficFeed(client klitev1.ClusterServiceClient) *trafficFeed {
 		adminURL: func(nodeIndex int32) string {
 			return fmt.Sprintf("http://127.0.0.1:%d", 19500+nodeIndex)
 		},
+		netAddr: func(nodeIndex int32) string {
+			return fmt.Sprintf("127.0.0.1:%d", 19000+nodeIndex)
+		},
 		interval: trafficPollInterval,
 		httpc:    &http.Client{Timeout: 800 * time.Millisecond},
 		subs:     map[chan []byte]struct{}{},
+		netConns: map[int32]*grpc.ClientConn{},
 	}
 }
 
@@ -121,8 +134,9 @@ func (tf *trafficFeed) poll(ctx context.Context) {
 			continue
 		}
 		name, admin := node.GetMeta().GetName(), tf.adminURL(idx)
-		events = append(events, tf.pollNode(ctx, name, admin, now, seen)...)
-		events = append(events, tf.pollRBAC(ctx, name, admin, now, seen)...)
+		nodeEvents := tf.pollNode(ctx, name, admin, now, seen)
+		nodeEvents = append(nodeEvents, tf.pollRBAC(ctx, name, admin, now, seen)...)
+		events = append(events, tf.attribute(ctx, idx, now, nodeEvents)...)
 	}
 	tf.mu.Lock()
 	// Keys that vanished belong to removed instances, and dropping them
@@ -283,6 +297,64 @@ func (tf *trafficFeed) pollRBAC(ctx context.Context, node, adminURL string, now 
 		}
 	}
 	return events
+}
+
+// attribute joins a node's counter deltas with its kdns ring. Every chatty
+// call resolves its target name first, and kdns records the query's source
+// IP, which is the caller instance. A delta whose service has a matching
+// fresh query splits into single calls that carry their caller. Anything
+// unmatched stays node-attributed. A donor without the RPC yet just answers
+// errors, so the feed degrades to exactly the old behavior.
+func (tf *trafficFeed) attribute(ctx context.Context, idx int32, now int64, events []trafficEvent) []trafficEvent {
+	if len(events) == 0 {
+		return events
+	}
+	queries := tf.recentQueries(ctx, idx, now-5_000)
+	if len(queries) == 0 {
+		return events
+	}
+	bySvc := map[string][]string{}
+	for _, q := range queries {
+		bySvc[q.GetService()] = append(bySvc[q.GetService()], q.GetSourceIp())
+	}
+	var out []trafficEvent
+	for _, ev := range events {
+		pool := bySvc[ev.Service]
+		took := min(len(pool), ev.Count)
+		for _, ip := range pool[:took] {
+			single := ev
+			single.Count = 1
+			single.Caller = ip
+			out = append(out, single)
+		}
+		bySvc[ev.Service] = pool[took:]
+		if rest := ev.Count - took; rest > 0 {
+			ev.Count = rest
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+func (tf *trafficFeed) recentQueries(ctx context.Context, idx int32, sinceUnixMs int64) []*klitev1.RecentQuery {
+	tf.mu.Lock()
+	conn := tf.netConns[idx]
+	tf.mu.Unlock()
+	if conn == nil {
+		fresh, err := grpc.NewClient(tf.netAddr(idx), grpc.WithTransportCredentials(insecure.NewCredentials()))
+		if err != nil {
+			return nil
+		}
+		conn = fresh
+		tf.mu.Lock()
+		tf.netConns[idx] = conn
+		tf.mu.Unlock()
+	}
+	resp, err := klitev1.NewKliteNetServiceClient(conn).RecentQueries(ctx, &klitev1.RecentQueriesRequest{SinceUnixMs: sinceUnixMs})
+	if err != nil {
+		return nil
+	}
+	return resp.GetQueries()
 }
 
 // handleTraffic serves the feed as SSE, one JSON event per data line.

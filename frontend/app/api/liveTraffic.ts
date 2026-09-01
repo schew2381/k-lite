@@ -18,6 +18,7 @@ export interface TrafficDelta {
   count: number
   verdict?: 'allowed' | 'denied'
   rbacPhase?: 'deny' | 'allow'
+  caller?: string // caller instance IP, when the node's kdns ring saw the lookup
 }
 
 // One delta row can cover several calls. More dots than this per row per
@@ -43,13 +44,19 @@ export function enrichTrafficDelta(raw: TrafficDelta, s: Snapshot): TrafficEvent
     }
   }
 
+  // A caller IP names the instance that resolved the target, so the dot can
+  // start at its chip instead of the kdns box.
+  const callerInst = raw.caller
+    ? Object.values(s.instances).find((i) => i.status.instanceIp === raw.caller)
+    : undefined
+
   const events: TrafficEvent[] = []
   for (let i = 0; i < Math.min(raw.count, MAX_EVENTS_PER_DELTA); i++) {
     events.push({
       id: `live-${raw.unixMs}-${seq++}`,
       ts: raw.unixMs,
-      fromInstance: '',
-      fromService: '',
+      fromInstance: callerInst?.metadata.name ?? '',
+      fromService: callerInst?.spec.workload ?? '',
       toService: raw.service,
       viaNode: raw.node,
       verdict: denied ? 'denied' : 'allowed',

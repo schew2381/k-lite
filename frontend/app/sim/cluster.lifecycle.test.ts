@@ -17,7 +17,7 @@ describe('instance lifecycle', () => {
     c.advance(100)
     // declare-then-converge: records exist before anything "runs"
     const early = instances(c)
-    expect(early.length).toBe(5) // a×1, b×2, c×2
+    expect(early.length).toBe(8) // a×1, b×2, c×3, d×2
     expect(early.every((i) => i.status.phase === 'Pending')).toBe(true)
 
     settle(c, 1500) // infra up (~1s) + container start
@@ -29,27 +29,47 @@ describe('instance lifecycle', () => {
     expect(all.every((i) => i.status.phase === 'Ready')).toBe(true)
   })
 
-  it('a (no probe) turns Ready while the probed b is still Running', () => {
-    const c = new Cluster(seedObjects())
-    let guard = 0
-    while (!instances(c).some((i) => i.spec.workload === 'a' && i.status.phase === 'Ready')) {
-      c.advance(100)
-      if (++guard > 300) throw new Error('a never became Ready')
+  it('a probed workload waits out its probe while the probeless seeds turn Ready', () => {
+    const probed: Workload = {
+      apiVersion: 'klite/v1',
+      kind: 'Workload',
+      metadata: { name: 'probed', labels: { app: 'probed' } },
+      spec: {
+        replicas: 1,
+        template: {
+          labels: { app: 'probed' },
+          containers: [
+            {
+              name: 'web',
+              image: 'traefik/whoami:v1.10',
+              ports: [{ containerPort: 80 }],
+              readinessProbe: { tcpPort: 80 },
+            },
+          ],
+        },
+      },
     }
-    const bPhases = instances(c)
-      .filter((i) => i.spec.workload === 'b')
-      .map((i) => i.status.phase)
-    expect(bPhases.length).toBeGreaterThan(0)
-    expect(bPhases.every((phase) => phase !== 'Ready')).toBe(true)
+    const c = new Cluster([...seedObjects(), probed])
+    let guard = 0
+    while (!instances(c).some((i) => i.spec.workload === 'probed' && i.status.phase === 'Running')) {
+      c.advance(100)
+      if (++guard > 300) throw new Error('probed never started Running')
+    }
+    const name = instances(c).find((i) => i.spec.workload === 'probed')?.metadata.name as string
+    // freshly Running: the probe gate holds Ready back for a beat
+    c.advance(300)
+    expect((c.get('Instance', name) as Instance).status.phase).toBe('Running')
+    settle(c, 3000)
+    expect((c.get('Instance', name) as Instance).status.phase).toBe('Ready')
   })
 
-  it('spreads 5 instances 2/2/1 across 3 nodes', () => {
+  it('spreads 8 instances 2/2/2/2 across 4 nodes', () => {
     const c = new Cluster(seedObjects())
     settle(c, 4000)
     const byNode = new Map<string, number>()
     for (const i of instances(c))
       byNode.set(i.spec.node ?? '?', (byNode.get(i.spec.node ?? '?') ?? 0) + 1)
-    expect([...byNode.values()].sort()).toEqual([1, 2, 2])
+    expect([...byNode.values()].sort()).toEqual([2, 2, 2, 2])
   })
 
   it('kill → Failed → backoff restart → Ready with an honest count; backoff doubles', () => {
@@ -118,7 +138,7 @@ describe('instance lifecycle', () => {
     for (const name of onVictim) expect(c.get('Instance', name)).toBeNull()
     settle(c, 3000)
     const healthy = instances(c).filter((i) => i.status.phase === 'Ready')
-    expect(healthy.length).toBe(5) // full strength again, elsewhere
+    expect(healthy.length).toBe(8) // full strength again, elsewhere
     expect(healthy.every((i) => i.spec.node !== victim)).toBe(true)
   })
 
@@ -131,6 +151,6 @@ describe('instance lifecycle', () => {
     c.reviveNodeAgent(victim)
     settle(c, 3000)
     expect((c.get('Node', victim) as NodeObj).status?.phase).toBe('Ready')
-    expect(instances(c).filter((i) => i.status.phase === 'Ready').length).toBe(5)
+    expect(instances(c).filter((i) => i.status.phase === 'Ready').length).toBe(8)
   })
 })

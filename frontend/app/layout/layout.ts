@@ -39,6 +39,7 @@ export interface InfraLayout {
 }
 
 export interface NodeLayout {
+  agent: Rect // the klite-agent status line
   card: Rect
   infra: InfraLayout
   slots: Record<string, Rect> // instance name → chip rect
@@ -60,6 +61,7 @@ const SERVICE_H = 112
 const SERVICE_W = 200
 const NODE_MIN_W = 340
 const NODE_HEADER_H = 56
+const AGENT_BAR_H = 24 // the klite-agent line between header and infra pod
 const CHIP_W = 148
 const CHIP_H = 72
 const CHIP_GAP = 10
@@ -114,8 +116,10 @@ export function computeLayout(s: Snapshot, width: number): Layout {
     anchors: {},
   }
 
-  // service strip along the top. Policies get a band above it for their arcs
-  let y = GAP + (Object.keys(s.policies).length > 0 ? 48 : 0)
+  // service strip along the top. Policies get a band above it for their
+  // arcs, one stagger level per policy so labels never share an apex
+  const policyCount = Object.keys(s.policies).length
+  let y = GAP + (policyCount > 0 ? 48 + (policyCount - 1) * 22 : 0)
   services.forEach((svc: Service, i) => {
     const perRow = Math.max(1, Math.floor((width - GAP) / (SERVICE_W + GAP)))
     const row = Math.floor(i / perRow)
@@ -151,7 +155,14 @@ export function computeLayout(s: Snapshot, width: number): Layout {
   const heights = nodes.map((n: NodeObj) => {
     const count = (byNode.get(n.metadata.name) ?? []).length
     const rows = Math.max(1, Math.ceil(count / chipsPerRow))
-    return NODE_HEADER_H + infraBoxHOf(n.metadata.name) + 10 + rows * (CHIP_H + CHIP_GAP) + CARD_PAD * 2
+    return (
+      NODE_HEADER_H +
+      AGENT_BAR_H +
+      infraBoxHOf(n.metadata.name) +
+      10 +
+      rows * (CHIP_H + CHIP_GAP) +
+      CARD_PAD * 2
+    )
   })
 
   const colBottoms = Array.from({ length: columns }, () => y)
@@ -168,7 +179,18 @@ export function computeLayout(s: Snapshot, width: number): Layout {
     const nodeName = node.metadata.name
     const ingRows = ingRowsOf.get(nodeName) ?? 0
     const infraBoxH = infraBoxHOf(nodeName)
-    const box = { x: x + CARD_PAD, y: cardY + NODE_HEADER_H, w: cardW - CARD_PAD * 2, h: infraBoxH }
+    const agent = {
+      x: x + CARD_PAD,
+      y: cardY + NODE_HEADER_H,
+      w: cardW - CARD_PAD * 2,
+      h: AGENT_BAR_H - 4,
+    }
+    const box = {
+      x: x + CARD_PAD,
+      y: cardY + NODE_HEADER_H + AGENT_BAR_H,
+      w: cardW - CARD_PAD * 2,
+      h: infraBoxH,
+    }
     const ix = box.x + INFRA_PAD
     const iw = box.w - INFRA_PAD * 2
     const kdns = { x: ix, y: box.y + INFRA_PAD + INFRA_HEAD_H, w: iw, h: kdnsH(svcCount) }
@@ -195,7 +217,7 @@ export function computeLayout(s: Snapshot, width: number): Layout {
       layout.anchors[`instance:${inst.metadata.name}`] = center(rect)
     })
 
-    layout.nodes[node.metadata.name] = { card, infra, slots }
+    layout.nodes[node.metadata.name] = { card, agent, infra, slots }
     const n = node.metadata.name
     layout.anchors[`infra:${n}`] = center(box)
     layout.anchors[`kdns:${n}`] = center(kdns)

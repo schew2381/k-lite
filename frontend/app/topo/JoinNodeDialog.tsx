@@ -43,7 +43,26 @@ export function internetJoinCommand(info: JoinInfo): string {
   return `klite-agent --node ${info.node} --server ${routableServer(info)} --token ${info.token} --advertise-address <new-machine-address>`
 }
 
-function CommandBlock({ command }: { command: string }) {
+// A tailnet address means the joining machine must be on the tailnet too,
+// which join.sh handles during install (KLITE_VPN=tailscale). 100.64/10 is
+// the CGNAT space tailnets hand out.
+function isTailnetAddress(host: string): boolean {
+  const m = host.match(/^100\.(\d+)\./)
+  return m !== null && Number(m[1]) >= 64 && Number(m[1]) <= 127
+}
+
+// The same one-liner klite node add prints: join.sh installs what a fresh
+// Linux box is missing and runs the agent under systemd (ADR 0038).
+export function oneLinerJoinCommand(info: JoinInfo): string {
+  const server = routableServer(info)
+  const env = `KLITE_URL=${server} KLITE_TOKEN='${info.token}' KLITE_NODE=${info.node}`
+  const vpn = isTailnetAddress(server.split(':')[0])
+    ? " KLITE_VPN=tailscale KLITE_TS_AUTHKEY='tskey-auth-…' KLITE_YES=1"
+    : ''
+  return `curl -sfL https://github.com/schew2381/k-lite/releases/latest/download/join.sh | ${env}${vpn} sh -`
+}
+
+function CommandBlock({ command, testid = 'copy-join-command' }: { command: string; testid?: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <>
@@ -53,7 +72,7 @@ function CommandBlock({ command }: { command: string }) {
       <Button
         size="sm"
         variant="outline"
-        data-testid="copy-join-command"
+        data-testid={testid}
         onClick={() => {
           navigator.clipboard.writeText(command).then(() => {
             setCopied(true)
@@ -149,10 +168,13 @@ export function JoinNodeDialog({
             <LocalJoin info={info} onDone={() => onOpenChange(false)} />
           </TabsContent>
           <TabsContent value="internet" className="flex flex-col gap-2">
-            <CommandBlock command={internetJoinCommand(info)} />
+            <p className="eyebrow text-[10px]">linux, one line</p>
+            <CommandBlock command={oneLinerJoinCommand(info)} testid="copy-join-oneliner" />
+            <p className="eyebrow text-[10px]">by hand, any OS</p>
+            <CommandBlock command={internetJoinCommand(info)} testid="copy-join-command" />
             <p className="text-xs text-muted-foreground">
-              Run it on the new machine, filling in that machine's own routable address. Other nodes dial
-              that address for the mTLS ingress, so each side has to reach the other (ADR 0034).
+              Run either on the new machine, filling in that machine's own routable address. Other nodes
+              dial that address for the mTLS ingress, so each side has to reach the other (ADR 0034).
             </p>
           </TabsContent>
         </Tabs>

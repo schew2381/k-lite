@@ -32,7 +32,8 @@ describe('watch contract', () => {
         c.list('Service').length +
         c.list('Instance').length +
         c.list('VIPAllocation').length +
-        c.list('IngressAllocation').length,
+        c.list('IngressAllocation').length +
+        c.list('NetworkPolicy').length,
     )
 
     const before = events.length

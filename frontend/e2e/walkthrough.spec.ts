@@ -12,12 +12,21 @@ async function fourX(page: Page) {
   })
 }
 
-test('cluster boots: three nodes, five Ready instances, a traced call flowing', async ({ page }) => {
+test('cluster boots: four nodes, eight Ready instances, a traced call flowing', async ({ page }) => {
   await page.goto('/')
   await expect(page.getByTestId('node-node-1')).toBeVisible()
   await expect(page.getByTestId('node-node-2')).toBeVisible()
   await expect(page.getByTestId('node-node-3')).toBeVisible()
-  await expect(page.locator('[data-testid^="instance-"][data-phase="Ready"]')).toHaveCount(5)
+  await expect(page.getByTestId('node-node-4')).toBeVisible()
+  await expect(page.locator('[data-testid^="instance-"][data-phase="Ready"]')).toHaveCount(8, {
+    timeout: 20_000,
+  })
+  // every node card carries its agent line
+  await expect(page.getByTestId('agent-node-1')).toContainText('klite-agent')
+  await expect(page.getByTestId('agent-node-1')).toHaveAttribute('data-state', 'running')
+  // the seeded policies draw directed arcs at rest, one arrowhead each way
+  await expect(page.locator('path[marker-end*="arrow-deny"]').first()).toBeVisible()
+  await expect(page.locator('path[marker-end*="arrow-allow"]').first()).toBeVisible()
   await fourX(page)
   await expect(page.getByTestId('rail-allowed').or(page.getByTestId('rail-denied')).first()).toBeVisible(
     {
@@ -41,7 +50,9 @@ test('the etcd browser lists live keys and expands them to YAML', async ({ page 
 
 test('the infra pod inspector shows what the control plane programmed', async ({ page }) => {
   await page.goto('/')
-  await expect(page.locator('[data-testid^="instance-"][data-phase="Ready"]')).toHaveCount(5)
+  await expect(page.locator('[data-testid^="instance-"][data-phase="Ready"]')).toHaveCount(8, {
+    timeout: 20_000,
+  })
   await page.getByTestId('infra-node-1').click()
   const sheet = page.getByTestId('infra-sheet')
   await expect(sheet).toContainText('b.svc.klite')
@@ -121,7 +132,9 @@ test('draining a node migrates its instances and removes the card', async ({ pag
   await page.getByRole('menuitem', { name: 'Drain & remove' }).click()
   await expect(page.getByTestId('node-node-3')).toHaveCount(0, { timeout: 60_000 })
   // capacity is back to full elsewhere, and nothing is left Pending
-  await expect(page.locator('[data-testid^="instance-"][data-phase="Ready"]')).toHaveCount(5)
+  await expect(page.locator('[data-testid^="instance-"][data-phase="Ready"]')).toHaveCount(8, {
+    timeout: 20_000,
+  })
   await expect(page.getByTestId('pending-tray')).toHaveCount(0)
 })
 
@@ -141,23 +154,23 @@ test('a service created from the dialog schedules and gets kdns records everywhe
   await page.goto('/')
   await fourX(page)
   await page.getByTestId('add-service').click()
-  await page.getByTestId('new-service-name').fill('d')
+  await page.getByTestId('new-service-name').fill('e')
   await page.getByTestId('new-service-create').click()
-  await expect(page.getByTestId('service-d')).toBeVisible()
-  await expect(page.locator('[data-testid^="instance-d-"][data-phase="Ready"]')).toHaveCount(2, {
+  await expect(page.getByTestId('service-e')).toBeVisible()
+  await expect(page.locator('[data-testid^="instance-e-"][data-phase="Ready"]')).toHaveCount(2, {
     timeout: 30_000,
   })
   // every node's infra pod now serves the new name
-  for (const node of ['node-1', 'node-2', 'node-3']) {
-    await expect(page.getByTestId(`infra-${node}`)).toContainText('d.svc.klite')
+  for (const node of ['node-1', 'node-2', 'node-3', 'node-4']) {
+    await expect(page.getByTestId(`infra-${node}`)).toContainText('e.svc.klite')
   }
 
   // and the whole pair deletes from the card: instances drain, kdns forgets
-  await page.getByTestId('service-d').hover()
-  await page.getByTestId('delete-service-d').click()
-  await expect(page.getByTestId('service-d')).toHaveCount(0)
-  await expect(page.locator('[data-testid^="instance-d-"]')).toHaveCount(0, { timeout: 30_000 })
-  await expect(page.getByTestId('infra-node-1')).not.toContainText('d.svc.klite')
+  await page.getByTestId('service-e').hover()
+  await page.getByTestId('delete-service-e').click()
+  await expect(page.getByTestId('service-e')).toHaveCount(0)
+  await expect(page.locator('[data-testid^="instance-e-"]')).toHaveCount(0, { timeout: 30_000 })
+  await expect(page.getByTestId('infra-node-1')).not.toContainText('e.svc.klite')
 })
 
 test('live flow: flights run fast and untraced, the panel keeps the latest call', async ({ page }) => {

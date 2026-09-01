@@ -62,6 +62,19 @@ describe('enrichTrafficDelta', () => {
     expect(ev.toInstance).toBeUndefined()
   })
 
+  it('starts the story at the caller chip when the kdns ring named it', () => {
+    const s = liveSnapshot()
+    const inst = Object.values(s.instances).find((i) => i.status.instanceIp)
+    if (!inst) throw new Error('seed produced no instance with an IP')
+    const target = Object.keys(s.services).find((n) => n !== inst.spec.workload) as string
+    const [ev] = enrichTrafficDelta(
+      { ...base, service: target, address: '10.9.9.9', port: 80, caller: inst.status.instanceIp },
+      s,
+    )
+    expect(ev.fromInstance).toBe(inst.metadata.name)
+    expect(ev.fromService).toBe(inst.spec.workload)
+  })
+
   it('caps one delta row at a handful of events', () => {
     const s = liveSnapshot()
     const svc = Object.keys(s.services)[0]

@@ -121,7 +121,7 @@ describe('vip allocations', () => {
   it('materializes one per (service, node), heals deletion, and releases on service delete', () => {
     const c = new Cluster(seedObjects(), DENSE)
     settle(c, 4000)
-    expect(c.list('VIPAllocation').length).toBe(9) // 3 services × 3 nodes
+    expect(c.list('VIPAllocation').length).toBe(16) // 4 services × 4 nodes
     const before = c.get('VIPAllocation', 'b.node-2')
     expect(before?.kind).toBe('VIPAllocation')
 

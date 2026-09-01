@@ -47,7 +47,7 @@ describe('surge-first drain (ADR 0010)', () => {
     // the drained node is empty and cordoned, and capacity is back to full
     const left = c.list('Instance') as Instance[]
     expect(left.filter((i) => i.spec.node === target).length).toBe(0)
-    expect(left.filter((i) => i.status.phase === 'Ready').length).toBe(5)
+    expect(left.filter((i) => i.status.phase === 'Ready').length).toBe(8)
 
     // exactly one replacement per evacuee — a draining instance must never
     // count toward replicas, or the reconciler churns replacements forever
@@ -58,9 +58,11 @@ describe('surge-first drain (ADR 0010)', () => {
   it('records zero failed calls during a full node drain', () => {
     const c = new Cluster(seedObjects(), DENSE)
     settle(c, 4000)
+    // the seeded policies deny some pairs at rest, so a policy verdict is
+    // background noise here — only a missing endpoint marks a bad drain
     const failures: TrafficEvent[] = []
     c.subscribeTraffic((e) => {
-      if (e.verdict === 'denied') failures.push(e)
+      if (e.verdict === 'denied' && e.reason === 'no-endpoints') failures.push(e)
     })
     const target = (c.list('Instance') as Instance[]).find((i) => i.spec.workload === 'b')?.spec
       .node as string
@@ -95,7 +97,7 @@ describe('surge-first drain (ADR 0010)', () => {
     c.remove('Node', 'node-3')
     settle(c, 20000)
     expect(store.getSnapshot().nodes['node-3']).toBeUndefined()
-    expect(Object.keys(store.getSnapshot().nodes).sort()).toEqual(['node-1', 'node-2'])
+    expect(Object.keys(store.getSnapshot().nodes).sort()).toEqual(['node-1', 'node-2', 'node-4'])
   })
 
   it('never routes to a DRAINING endpoint, checked at hit time', () => {

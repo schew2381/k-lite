@@ -16,8 +16,10 @@ import {
 import type { NodeLayout, Rect } from '@/layout/layout'
 import { act } from '@/lib/act'
 import { useClient } from '@/lib/client-context'
+import { useNowTick } from '@/lib/useNowTick'
 import { cn } from '@/lib/utils'
 import {
+  agentViewOf,
   dialTargetOf,
   endpointsOf,
   infraIpOf,
@@ -91,6 +93,11 @@ export function NodeCard({
     rules.map((r) => `${r.from}→${r.to}`).join(', ')
   const name = node.metadata.name
   const phase = node.status?.phase ?? 'NotReady'
+
+  const now = useNowTick(1000)
+  const agent = agentViewOf(node, client.mode === 'mock', now)
+  const beatLabel =
+    agent.beatAgoMs !== undefined ? `beat ${Math.round(agent.beatAgoMs / 1000)}s ago` : undefined
 
   const cordoned = node.status?.unschedulable ?? false
   const cordon = (on: boolean) =>
@@ -183,6 +190,34 @@ export function NodeCard({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+      </div>
+
+      {/* The agent line names the process that joins the node, runs the infra
+          pod, reconciles instances, and heartbeats klited. It never appears in a
+          trace, since it never touches a packet. */}
+      <div
+        className="absolute flex items-center gap-1.5 overflow-hidden whitespace-nowrap px-1 font-mono text-[10px]"
+        style={rectStyle(layout.agent, layout.card)}
+        data-testid={`agent-${name}`}
+        data-state={agent.state}
+      >
+        <span
+          className={cn(
+            'font-semibold',
+            agent.state === 'running' && 'text-traffic',
+            agent.state === 'gone' && 'text-deny',
+            agent.state === 'waiting' && 'text-muted-foreground',
+          )}
+        >
+          klite-agent {agent.state === 'running' ? '⇅' : agent.state === 'gone' ? '✕' : '—'}
+        </span>
+        <span className={cn('truncate', agent.state === 'gone' ? 'text-deny' : 'text-muted-foreground')}>
+          {agent.state === 'running' &&
+            `${beatLabel ?? 'watches klited'} · runs the infra pod + ${count} ${count === 1 ? 'instance' : 'instances'}`}
+          {agent.state === 'gone' &&
+            `${beatLabel ? `last ${beatLabel}` : 'stopped heartbeating'} · nothing reconciles here`}
+          {agent.state === 'waiting' && 'not started · Join… hands this node its machine'}
+        </span>
       </div>
 
       {/* The infra pod as sub-boxes: kdns, then envoy wrapping LDS, RBAC, and

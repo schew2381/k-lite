@@ -26,7 +26,7 @@ export function newNodeYaml(name: string): string {
 // generation of dots together and they land before the next wave fires.
 // 13107 of 65536 is 20 percent, the per-wave equivalent of the old 2.5
 // percent per second. TARGETS is baked at creation time.
-function chattyContainer(name: string, targets: string[]) {
+export function chattyContainer(name: string, targets: string[]) {
   const script = [
     `echo "$(hostname) is ${name}" > /www/index.html`,
     'httpd -p 80 -h /www',

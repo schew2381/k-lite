@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -125,5 +126,75 @@ func TestTrafficRouteIsSSE(t *testing.T) {
 	srv.Handler().ServeHTTP(rec, req)
 	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
 		t.Fatalf("content type %q", got)
+	}
+}
+
+// fakeNetd answers RecentQueries with a canned ring.
+type fakeNetd struct {
+	klitev1.UnimplementedKliteNetServiceServer
+	queries []*klitev1.RecentQuery
+}
+
+func (f *fakeNetd) RecentQueries(context.Context, *klitev1.RecentQueriesRequest) (*klitev1.RecentQueriesResponse, error) {
+	return &klitev1.RecentQueriesResponse{Queries: f.queries}, nil
+}
+
+func TestAttributeJoinsKdnsQueries(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := grpc.NewServer()
+	klitev1.RegisterKliteNetServiceServer(srv, &fakeNetd{queries: []*klitev1.RecentQuery{
+		{SourceIp: "10.44.128.5", Service: "b", UnixMs: 1},
+		{SourceIp: "10.44.128.9", Service: "b", UnixMs: 2},
+	}})
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+
+	tf := newTrafficFeed(trafficFake{&fakeClient{}})
+	tf.netAddr = func(int32) string { return lis.Addr().String() }
+
+	events := tf.attribute(context.Background(), 1, 10_000, []trafficEvent{
+		{Node: "node-1", Service: "b", Count: 3, Verdict: "allowed"},
+		{Node: "node-1", Service: "c", Count: 1, Verdict: "denied", Phase: "deny"},
+	})
+
+	var callers []string
+	rest := 0
+	for _, ev := range events {
+		if ev.Service != "b" {
+			continue
+		}
+		if ev.Caller != "" {
+			callers = append(callers, ev.Caller)
+			if ev.Count != 1 {
+				t.Fatalf("an attributed call is a single call, got count %d", ev.Count)
+			}
+		} else {
+			rest += ev.Count
+		}
+	}
+	if len(callers) != 2 || callers[0] != "10.44.128.5" || callers[1] != "10.44.128.9" {
+		t.Fatalf("callers %v", callers)
+	}
+	if rest != 1 {
+		t.Fatalf("unattributed remainder %d, want 1", rest)
+	}
+	// c had no matching query, so its event rides through untouched
+	for _, ev := range events {
+		if ev.Service == "c" && (ev.Caller != "" || ev.Count != 1) {
+			t.Fatalf("denied c event changed: %+v", ev)
+		}
+	}
+}
+
+func TestAttributeSurvivesAMissingRing(t *testing.T) {
+	tf := newTrafficFeed(trafficFake{&fakeClient{}})
+	tf.netAddr = func(int32) string { return "127.0.0.1:1" } // nothing listens
+	in := []trafficEvent{{Node: "node-1", Service: "b", Count: 2, Verdict: "allowed"}}
+	out := tf.attribute(context.Background(), 1, 10_000, in)
+	if len(out) != 1 || out[0].Caller != "" || out[0].Count != 2 {
+		t.Fatalf("degraded path changed the event: %+v", out)
 	}
 }

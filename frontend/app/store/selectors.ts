@@ -226,3 +226,25 @@ export function rbacView(s: Snapshot): RbacView {
   rbacCache.set(s, view)
   return view
 }
+
+// The klited side calls a node NotReady after this long without a beat, and
+// the UI presumes the same (the strip's pills and the node cards' agent bars
+// share this arithmetic).
+export const HEARTBEAT_FRESH_MS = 15_000
+
+export interface AgentView {
+  state: 'waiting' | 'running' | 'gone'
+  beatAgoMs?: number
+}
+
+// agentViewOf reads the klite-agent's health out of what the node object
+// carries. The mock trusts phase, since the simulator pauses with the page,
+// while live trusts the heartbeat, the only agent signal klited stores.
+export function agentViewOf(node: NodeObj, mock: boolean, nowMs: number): AgentView {
+  if (!node.status) return { state: 'waiting' }
+  if (mock) return { state: node.status.phase !== 'NotReady' ? 'running' : 'gone' }
+  const beat = node.status.lastHeartbeatUnix
+  if (beat === undefined) return { state: 'waiting' }
+  const beatAgoMs = Math.max(0, nowMs - beat * 1000)
+  return { state: beatAgoMs < HEARTBEAT_FRESH_MS ? 'running' : 'gone', beatAgoMs }
+}
