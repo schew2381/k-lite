@@ -509,40 +509,32 @@ spec:
       <svg id="board-nodeboot" role="img" aria-label="A node starting up: klited on the left; node-5 on the right with the klite-agent host process, the infra pod (klite-net owning the netns, Envoy joining it), and future instances. Two gRPC streams connect them — the agent's WatchDesired down and ReportStatus up, and Envoy's ADS stream carrying LDS, CDS, EDS down with ACKs back. A numbered boot sequence runs beneath."></svg>
     </div>
 
-    <ol class="steps">    <ol class="steps">
-      <li><code>klite node add node-5</code> declares the Node and mints the token — <code>K10&lt;ca-hash&gt;::node:&lt;secret&gt;</code>. An agent for an undeclared name is refused.</li>
-      <li>The agent dials out. It has no CA yet, so it verifies the certificate it's shown against the hash pinned inside the token.</li>
-      <li>Register: the secret is checked in constant time, a CSR goes up, and a certificate comes back — <code>CN=klite:node:node-5</code>. The private key never left the machine.</li>
-      <li>The same response carries NetBootstrap: infra IP <code>10.44.0.15</code>, the VIP pool, ingress slice <code>:20128–20159</code>, the pinned infra image.</li>
-      <li>The agent builds the infra pod — klite-net owns the netns and the published port slice, Envoy joins it — then opens its streams: WatchDesired down, ReportStatus up every 5s.</li>
-      <li>klited stamps the node Ready and the scheduler starts counting it. 15 quiet seconds would mark it NotReady, 30 more evacuate its instances.</li>
-    </ol>
-
-    <h3 class="sub">klite-agent is the kubelet</h3>
-    <ul class="plain">
-      <li>holds the node's identity, builds the infra pod, drives Docker — create, stop, restart with backoff</li>
-      <li>owns readiness: reads klite-net's probe verdicts and turns them into instance phases</li>
-      <li>streams container logs up on request — klited can never dial a node</li>
-    </ul>
-    <ul class="plain" style="margin-top:10px">
-      <li><b>down</b> (WatchDesired stream): the node's full desired snapshot on every change — its instances, plus the net config (DNS table, VIPs, probe targets, ingress listeners)</li>
-      <li><b>up</b> (ReportStatus, every 5s + on change): every instance's phase, IP, and restart count — this is also the heartbeat</li>
-    </ul>
-    <div class="codepane" style="margin:12px 0 18px"><span class="c"># abbreviated exchange</span>
-<span class="g">klited →</span> DesiredState { revision: <span class="y">1214</span>,
+    <div class="split">
+      <div>
+        <p class="filetag">klite-agent ⇄ klited — desired state down, status up</p>
+        <div class="codepane"><span class="g">klited →</span> DesiredState { revision: <span class="y">1214</span>,
            instances: [ b-3f81 — busybox:1.36, node-1 ],
            net: { b → vip <span class="b">10.44.64.5</span>, probe b-3f81 :80 } }
 <span class="b">agent →</span>  ReportStatus { node: node-1,
            instances: [ b-3f81: <span class="g">Ready</span> · <span class="b">10.44.128.21</span> · ↻0 ] }</div>
+      </div>
+      <div>
+        <p class="filetag">envoy ⇄ klited — ADS snapshots down, ACKs up</p>
+        <div class="codepane"><span class="b">envoy →</span>  DiscoveryRequest  { node.id: <span class="g">"node-1"</span>, type: Cluster }
+<span class="g">klited →</span> DiscoveryResponse { version: <span class="y">"1214"</span>,
+           b: [<span class="b">10.44.128.6:80</span> · <span class="b">203.0.113.7:20129</span> (mTLS)] }
+<span class="b">envoy →</span>  DiscoveryRequest  { version: <span class="y">"1214"</span> }   <span class="c"># ACK</span></div>
+      </div>
+    </div>
 
-    <table class="addr">
+    <table class="addr" style="margin-top:18px">
       <thead><tr><th>range</th><th>what</th><th>allocated by</th></tr></thead>
       <tbody>
         <tr><td>10.44.0.0/16</td><td>the <code>klite0</code> bridge — every container's world</td><td class="who">first agent creates it, later agents validate-or-fail</td></tr>
-        <tr><td>10.44.0.10+n</td><td>infra pod IPs — node-1 gets <code>.11</code></td><td class="who">klited, by formula (node index)</td></tr>
+        <tr><td>10.44.0.10+n</td><td>each node's infra pod gets a fixed IP: 10.44.0.10 + its node number (node-1 → <code>.11</code>, node-2 → <code>.12</code>)</td><td class="who">klited, by formula</td></tr>
         <tr><td>10.44.64.0/18</td><td>VIP pool — never given to Docker</td><td class="who">vip controller, first free, stored</td></tr>
         <tr><td>10.44.128.0/17</td><td>instance IPs</td><td class="who">Docker's own IPAM, pinned by ip-range</td></tr>
-        <tr><td>:20000 + 32·(n−1)</td><td>ingress-port slice on the <em>machine</em> address (slide 9)</td><td class="who">ingress controller, first free in the slice</td></tr>
+        <tr><td>:20000 + 32·(n−1)</td><td>every node reserves 32 ports on its machine for incoming cross-node traffic — node-1 owns 20000–20031, node-2 owns 20032–20063 (slide 9 shows how a call uses one)</td><td class="who">klited picks each instance's port from the owner's 32</td></tr>
       </tbody>
     </table>
   </div>
