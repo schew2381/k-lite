@@ -83,8 +83,8 @@ func (d *Docker) RunOneShot(ctx context.Context, spec *InfraContainer) error {
 		return fmt.Errorf("wait for %s: %w", spec.Name, werr)
 	case res := <-wait.Result:
 		// The daemon can report an error with a zero status code. For a
-		// lockdown helper a swallowed failure means rules silently not
-		// applied, so an error here never passes as success.
+		// lockdown helper a swallowed failure would mean rules were silently
+		// never applied, so an error here never passes as success.
 		if res.Error != nil {
 			return fmt.Errorf("wait for %s: %s", spec.Name, res.Error.Message)
 		}

@@ -56,8 +56,8 @@ type ingressController struct {
 // while the node has no index yet or the slice would leave the 1-65535 port
 // space. The lower bound matters as much as the upper: a negative base
 // (int32 truncation of a fat-fingered flag) would otherwise mint negative
-// ports, and xds.validateNet rejects those, wedging every node on its last
-// good snapshot. The agent's ingressPortRange makes the same refusal, so
+// ports. xds.validateNet rejects those, wedging every node on its last good
+// snapshot. The agent's ingressPortRange makes the same refusal, so
 // allocator and donor stay agreed on "no slice".
 func (c *ingressController) nodeRange(index int32) (lo, hi int32, ok bool) {
 	if index < 1 {
@@ -108,7 +108,7 @@ func (c *ingressController) reconcile(ctx context.Context) error {
 }
 
 // wanted maps every (service, selected instance) pair to the allocation it
-// should hold. Phase is ignored on purpose: the port is fixed at instance
+// should hold. Phase is ignored on purpose. The port is fixed at instance
 // birth so the ingress listener exists by the time the endpoint turns Ready,
 // and Ready<->Draining flips never churn it.
 func (c *ingressController) wanted(svcObjs, instObjs []*klitev1.Object, index map[string]int32) map[string]*klitev1.IngressAllocationSpec {

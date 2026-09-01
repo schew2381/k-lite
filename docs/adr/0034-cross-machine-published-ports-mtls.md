@@ -1,6 +1,6 @@
 # Cross-machine traffic rides node-published ports behind proxy mTLS
 
-This ends ADR 0016's deferral. When an endpoint lives on another node, klited renders it in the consuming node's EDS as `machineAddress:ingressPort` instead of a pod IP. The ingress port belongs to the destination node's Envoy: one mTLS-required listener per local endpoint, bound inside a host-port range the infra-pod donor publishes at creation, forwarding to the local pod. Both sides authenticate with the node certificates the join flow already issues, and the source side keeps making all balancing and draining decisions, since it still picks the exact endpoint.
+This ends ADR 0016's deferral. When an endpoint lives on another node, klited renders it in the consuming node's EDS as `machineAddress:ingressPort` instead of a pod IP. The ingress port belongs to the destination node's Envoy: one mTLS-required listener per local endpoint, bound inside a host-port range the infra-pod donor publishes at creation, forwarding to the local pod. Both sides authenticate with the node certificates the join flow already issues, and the source side keeps making all balancing and draining decisions since it still picks the exact endpoint.
 
 ## Considered Options
 

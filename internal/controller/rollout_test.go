@@ -566,7 +566,7 @@ func TestDoomedTurnedReadySurvivesStaleDelete(t *testing.T) {
 }
 
 // A lagging leader whose drain clock expired must not take out an instance
-// a newer leader already deleted and whose name the workload controller
+// a newer leader already deleted, whose name the workload controller then
 // recycled. The pinned delete conflicts on the recreated object's revision.
 func TestLaggingDrainExpirySkipsRecycledName(t *testing.T) {
 	t.Parallel()

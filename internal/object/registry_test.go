@@ -55,9 +55,9 @@ func TestEveryKindCrossesTheCodec(t *testing.T) {
 }
 
 // FuzzDecode hammers the YAML boundary, the one place untrusted bytes become
-// typed objects. Whatever arrives, the codec must error, never panic, and
-// anything it accepts must encode back out (that's the `get -o yaml` path
-// for stored objects).
+// typed objects. Whatever arrives, the codec may reject it but must never
+// panic, and anything it accepts must encode back out (that's the
+// `get -o yaml` path for stored objects).
 func FuzzDecode(f *testing.F) {
 	for _, kind := range object.Kinds {
 		f.Add([]byte(minimalYAML(kind)))

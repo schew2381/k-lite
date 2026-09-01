@@ -11,6 +11,6 @@ Cross-machine ingress (0034) needed a port per local endpoint from each node's p
 ## Consequences
 
 - `klite get ingressallocations` shows the port map, and Apply rejects the kind like the other server-materialized ones.
-- Remote endpoints render as `machineAddress:ingressPort` against a constant `transport_socket_matches` pair. Regenerating the match list from live endpoints would churn CDS and drain connections mid-rollout, so it never varies.
+- Remote endpoints render as `machineAddress:ingressPort` against a constant `transport_socket_matches` pair. Regenerating the match list from live endpoints would churn CDS and drain connections mid-rollout.
 - A remote endpoint without its allocation is omitted from EDS entirely. The flat-bridge path is dead, not a fallback.
 - The kind registration surfaced a codec gap (a forged YAML could nil-panic klited through the envelope switch), now closed and pinned by tests.

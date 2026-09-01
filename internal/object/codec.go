@@ -106,10 +106,10 @@ func DecodeOne(doc []byte) (*klitev1.Object, error) {
 	}
 	msg := message(obj)
 	if msg == nil {
-		// Unreachable while New and message agree on the kind set. The guard
-		// is here because they're separate switches: a kind added to one and
-		// not the other once let a forged YAML nil-panic klited, and an error
-		// beats betting that never recurs.
+		// This is unreachable while New and message agree on the kind set.
+		// The guard is here because they're separate switches: a kind added
+		// to one and not the other once let a forged YAML nil-panic klited,
+		// and an error beats betting that it never recurs.
 		return nil, fmt.Errorf("kind %s has no envelope mapping", kind)
 	}
 	if err := protojson.Unmarshal(body, msg); err != nil {

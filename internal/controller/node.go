@@ -62,10 +62,10 @@ func (c *nodeController) reconcileNode(ctx context.Context, obj *klitev1.Object,
 	st := node.Status
 	pendingDelete := node.GetMeta().GetLabels()[object.LabelPendingDelete] == "true"
 	if pendingDelete && count == 0 {
-		// Pinned to the listed revision because a re-apply cancels a pending
-		// delete (ADR 0033): a lagging pass that still sees the label must
-		// not take out the re-declared record. Conflict and absence both mean
-		// the next pass decides on fresh state.
+		// The delete is pinned to the listed revision because a re-apply
+		// cancels a pending delete (ADR 0033): a lagging pass that still
+		// sees the label must not take out the re-declared record. Conflict
+		// and absence both mean the next pass decides on fresh state.
 		err := c.st.DeleteIfRevision(ctx, object.KindNode, name, node.GetMeta().GetResourceVersion())
 		switch {
 		case errors.Is(err, store.ErrNotFound), errors.Is(err, store.ErrConflict):
@@ -124,7 +124,7 @@ func phaseTransition(st *klitev1.NodeStatus, name string, silence time.Duration,
 
 // evacuate deletes a dead node's instance objects, each pinned to the
 // revision this pass listed, so a lagging leader can't evacuate a namesake
-// recreated after its list. The workload controller recreates the deleted
+// minted after its list. The workload controller recreates the deleted
 // instances, the scheduler places them on live nodes, and the dead node's
 // containers wait for its agent to return and clean up.
 func (c *nodeController) evacuate(ctx context.Context, node string, instObjs []*klitev1.Object) error {
