@@ -1,6 +1,6 @@
 # internal/controller
 
-The leader-only reconcile loops: workload materialization, the scheduler, node lifecycle, and endpoints. klited runs them inside `leader.RunWhenLeader`, so at most one replica drives the cluster while every replica keeps serving the API.
+This package holds the leader-only reconcile loops: workload materialization, the scheduler, node lifecycle, and endpoints. klited runs them inside `leader.RunWhenLeader`, so at most one replica drives the cluster while every replica keeps serving the API.
 
 Invariants:
 

@@ -281,8 +281,8 @@ func TestScaleDownDeletesNonReadyImmediately(t *testing.T) {
 	}
 }
 
-// TestRolloutCapacityFallback: when the surge can't schedule anywhere, the
-// old instance drains first (the documented dip), freeing its slot.
+// When the surge can't schedule anywhere, the old instance drains first
+// (the documented dip), freeing its slot.
 func TestRolloutCapacityFallback(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -330,8 +330,8 @@ func TestRolloutCapacityFallback(t *testing.T) {
 	}
 }
 
-// TestNodeDrainRetiresInstances: a DRAINING node makes its current-hash
-// instances retiring, so the same surge-first dance moves them elsewhere.
+// A DRAINING node makes its current-hash instances retiring, so the same
+// surge-first dance moves them elsewhere.
 func TestNodeDrainRetiresInstances(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -483,8 +483,8 @@ func TestScaleUpDuringRolloutRefillsInBulk(t *testing.T) {
 	}
 }
 
-// TestDeadlinesPrunedWithInstances: the drain bookkeeping must not outlive
-// the instances it tracks, or a long leadership accumulates dead entries.
+// The drain bookkeeping must not outlive the instances it tracks, or a long
+// leadership accumulates dead entries.
 func TestDeadlinesPrunedWithInstances(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

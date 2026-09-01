@@ -22,7 +22,7 @@ const (
 )
 
 // nodeController turns silent nodes NOT_READY, evacuates them after a grace
-// window, keeps per-node instance counts current, and finishes drains: a
+// window, keeps per-node instance counts current, and finishes drains. A
 // DRAINING node with no instances left flips back to READY (still cordoned),
 // or disappears when its deletion is pending (ADR 0010).
 type nodeController struct {

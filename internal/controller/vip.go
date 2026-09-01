@@ -68,9 +68,9 @@ func (c *vipController) reconcile(ctx context.Context) error {
 }
 
 // reconcileAllocation keeps, releases, or queues one existing allocation for
-// reallocation. It reserves every VIP it sees, even a doomed one, because the
-// release may not land this pass and handing the address out again while the
-// old object lingers would mint the very duplicate this loop repairs.
+// reallocation. It reserves every VIP it sees, even a doomed one. The release
+// may not land this pass, and handing the address out again while the old
+// object lingers would mint the very duplicate this loop repairs.
 func (c *vipController) reconcileAllocation(ctx context.Context, alloc *klitev1.VIPAllocation, want map[string]*klitev1.VIPAllocationSpec, used map[netip.Addr]bool) error {
 	name := alloc.GetMeta().GetName()
 	ip, parseErr := netip.ParseAddr(alloc.GetSpec().GetVip())

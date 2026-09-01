@@ -62,8 +62,8 @@ func TestBuildAllServicesAndInstances(t *testing.T) {
 	}
 }
 
-// Endpoints span nodes: READY and DRAINING make it in, RUNNING and ip-less
-// do not.
+// Endpoints span nodes: READY and DRAINING make it in while RUNNING and
+// ip-less don't.
 func TestBuildAllEndpoints(t *testing.T) {
 	t.Parallel()
 	n1 := buildAll(fixtureInputs())["node-1"].Net
@@ -133,7 +133,7 @@ func TestStoreDropsDepartedNodeAfterDecay(t *testing.T) {
 	changed, removed := e.store(built("node-1", "node-2"))
 	assertPass("initial store", changed, removed, []string{"node-1", "node-2"}, nil)
 
-	// node-2 leaves the inputs: first pass decays it to empty.
+	// node-2 leaves the inputs, so the first pass decays it to empty.
 	changed, removed = e.store(built("node-1"))
 	assertPass("decay pass", changed, removed, []string{"node-2"}, nil)
 	if snap, ok := e.Snapshot("node-2"); !ok || len(snap.Instances) != 0 || snap.Revision == 0 {
@@ -151,8 +151,8 @@ func TestStoreDropsDepartedNodeAfterDecay(t *testing.T) {
 	assertPass("steady state", changed, removed, nil, nil)
 }
 
-// TestStoreKeepsRevisionWhenContentUnchanged: rapid no-op recomputes must not
-// churn revisions, or every resync tick would re-push identical xDS state.
+// Rapid no-op recomputes must not churn revisions, or every resync tick
+// would re-push identical xDS state.
 func TestStoreKeepsRevisionWhenContentUnchanged(t *testing.T) {
 	t.Parallel()
 	e := NewEndpoints(nil, nil)

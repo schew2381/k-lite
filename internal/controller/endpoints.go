@@ -336,7 +336,8 @@ func endpointHealth(phase klitev1.InstancePhase) (klitev1.EndpointHealth, bool) 
 
 // buildIPIdentity maps every addressed instance to the first service that
 // selects it, the source identity Envoy RBAC matches on. Phase is
-// deliberately ignored: a not-yet-ready instance can still open connections.
+// deliberately ignored because a not-yet-ready instance can still open
+// connections.
 func buildIPIdentity(in *inputs) map[string]string {
 	out := map[string]string{}
 	for _, inst := range in.instances {
@@ -354,9 +355,9 @@ func buildIPIdentity(in *inputs) map[string]string {
 	return out
 }
 
-// buildProbeTargets lists what the node's klite-net should TCP-probe: the
-// node's own addressed instances, on the readiness port or the selecting
-// service's targetPort when the spec names none.
+// buildProbeTargets lists the node's own addressed instances for klite-net
+// to TCP-probe, on the readiness port or the selecting service's targetPort
+// when the spec names none.
 func buildProbeTargets(in *inputs, node string) []*klitev1.ProbeTarget {
 	var out []*klitev1.ProbeTarget
 	for _, inst := range in.instances {

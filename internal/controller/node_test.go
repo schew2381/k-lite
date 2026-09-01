@@ -104,8 +104,8 @@ func TestPendingDeleteReassertsDrain(t *testing.T) {
 	}
 }
 
-// TestSilentNodeEvacuatedAfterGrace: the two timers from the package
-// invariants. Silence past 15s turns the node NOT_READY, and 30s more
+// TestSilentNodeEvacuatedAfterGrace exercises the two timers from the
+// package invariants. Silence past 15s turns the node NOT_READY, and 30s more
 // deletes its instances so the workload controller can recreate them
 // elsewhere. The node record itself stays for the agent's return.
 func TestSilentNodeEvacuatedAfterGrace(t *testing.T) {

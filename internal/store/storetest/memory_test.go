@@ -48,8 +48,8 @@ func TestPutSentinels(t *testing.T) {
 	}
 }
 
-// TestUpsertAdoptsIdentity: a blind upsert with empty uid and created time
-// must keep the stored identity, the way the etcd store re-reads and adopts.
+// A blind upsert with empty uid and created time must keep the stored
+// identity, the way the etcd store re-reads and adopts.
 func TestUpsertAdoptsIdentity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -77,8 +77,8 @@ func TestUpsertAdoptsIdentity(t *testing.T) {
 	}
 }
 
-// TestReadsCloneAndCarryRevision: mutating a returned object must not touch
-// stored state, and resource_version is derived on read, never persisted.
+// Mutating a returned object must not touch stored state, and
+// resource_version is derived on read, never persisted.
 func TestReadsCloneAndCarryRevision(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

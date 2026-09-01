@@ -60,24 +60,24 @@ func (c *workloadController) advance(ctx context.Context, w *klitev1.Workload, h
 	}
 	errs = append(errs, c.expireDrains(ctx, g.draining))
 
-	// Scale-down: surplus fresh instances drain out newest-first, all at
-	// once, since the survivors already cover the replica count.
+	// On scale-down, surplus fresh instances drain out newest-first, all
+	// at once, since the survivors already cover the replica count.
 	if surplus := len(g.fresh) - replicas; surplus > 0 {
 		for _, inst := range g.fresh[:surplus] {
 			errs = append(errs, c.retire(ctx, inst, "scale-down"))
 		}
 		return errors.Join(errs...)
 	}
-	// Restore base capacity in bulk: initial create, scale-up, and refill
-	// after a node evacuation are not rolling updates.
+	// Base capacity is restored in bulk because initial create, scale-up,
+	// and refill after a node evacuation are not rolling updates.
 	if missing := replicas - len(g.fresh) - len(g.retiring); missing > 0 {
 		for range missing {
 			errs = append(errs, c.createInstance(ctx, w, hash))
 		}
 		return errors.Join(errs...)
 	}
-	// One retirement in flight at a time: nothing new starts while an
-	// instance is draining.
+	// Only one retirement is in flight at a time, so nothing new starts
+	// while an instance is draining.
 	if len(g.retiring) == 0 || len(g.draining) > 0 {
 		return errors.Join(errs...)
 	}
@@ -86,7 +86,7 @@ func (c *workloadController) advance(ctx context.Context, w *klitev1.Workload, h
 }
 
 // rollStep performs at most one rollout action: surge, or mark the next
-// victim DRAINING once enough fresh instances are READY. A surge that cannot
+// victim DRAINING once enough fresh instances are READY. A surge that can't
 // schedule falls back to drain-first for that one instance (ADR 0010).
 func (c *workloadController) rollStep(ctx context.Context, w *klitev1.Workload, hash string, replicas int, g *groups) error {
 	ready := 0
