@@ -16,7 +16,7 @@ spec:
         # The chatty shape, shared with dialog-created services (see
         # frontend/app/lib/yamlgen.ts chattyContainer): serve this instance's
         # hostname on :80, and once a second roll two urandom bytes. A roll
-        # under 3277 of 65536 (5%) wgets one random name from TARGETS through
+        # under 1638 of 65536 (2.5%) wgets one random name from TARGETS through
         # the real data path (kdns, VIP, Envoy). sh as pid 1 drops SIGTERM
         # by default, so the TERM trap lets drains and orphan sweeps finish
         # in a second instead of the full grace period.
@@ -28,7 +28,7 @@ spec:
             httpd -p 80 -h /www
             while sleep 1; do
               r=$(head -c2 /dev/urandom | od -An -tu2 | tr -d " ")
-              [ "$r" -lt 3277 ] || continue
+              [ "$r" -lt 1638 ] || continue
               n=0; for t in $TARGETS; do n=$((n+1)); done
               [ "$n" -gt 0 ] || continue
               k=$(( ($(head -c2 /dev/urandom | od -An -tu2 | tr -d " ") % n) + 1 ))

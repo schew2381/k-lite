@@ -78,7 +78,7 @@ wait_for 10 nodes_ready \
 
 # --- workload a: a ticker that prints one line a second ---
 # The log-plumbing checks need a steady cadence. The seeded demo apps chat
-# on a sparse 5% roll, so this stays a dedicated inline fixture.
+# on a sparse 2.5% roll, so this stays a dedicated inline fixture.
 cat <<'EOF' | "$KLITE" apply -f - >/dev/null \
   && pass "apply the inline ticker workload a" || die "apply the inline ticker workload a"
 apiVersion: klite/v1

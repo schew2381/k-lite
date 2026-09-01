@@ -7,7 +7,7 @@
 #   churn      scale-out convergence, instance-kill recovery
 #   chatter    the seeded apps' own random calls complete
 # Traffic assertions ride a deterministic probe loop (wget once a second from
-# inside a's container). The apps' 5% random chatter is checked last, on its
+# inside a's container). The apps' 2.5% random chatter is checked last, on its
 # own clock.
 # Leaves etcd, the klite0 network, and images in place.
 set -u
@@ -72,7 +72,7 @@ all_ready() {
   [[ "$("$KLITE" get instances | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == 4 ]]
 }
 
-# The seeded apps chat at random (a 5% roll per second, see examples/apps),
+# The seeded apps chat at random (a 2.5% roll per second, see examples/apps),
 # which is the wrong clock to hang assertions on. The script runs its own
 # probe loop instead: one wget per second to b's service, executed inside
 # a's container so it rides the same kdns -> VIP -> Envoy path. Each probe
@@ -217,7 +217,7 @@ wait_for 30 b_answers_again \
   || { tail -n 8 "$PROBE_FILE"; die "probes recover after kill"; }
 
 # --- the seeded chatter itself ------------------------------------------------
-# The apps also call each other on their own 5% roll. By this point the run
+# The apps also call each other on their own 2.5% roll. By this point the run
 # is minutes old, so every workload should have landed at least one call.
 chatty_flowing() {
   local wl
@@ -226,7 +226,7 @@ chatty_flowing() {
       | xargs -I{} docker logs {} 2>/dev/null | grep -q '^-> [abcd] ok$' || return 1
   done
 }
-wait_for 90 chatty_flowing \
+wait_for 180 chatty_flowing \
   && pass "chatty traffic flows: a, b, c, and d each logged a '-> <target> ok' call" \
   || die "a workload (a, b, c, or d) never completed a chatty call"
 

@@ -18,7 +18,7 @@
 #   finale      the apps' own chatter confirmed, then the live board
 #
 # Zero-failure gates ride deterministic probe loops (wget to b and to c once
-# a second from inside a's container). The apps' 5% random chatter is shown
+# a second from inside a's container). The apps' 2.5% random chatter is shown
 # and checked on its own clock, never used as a gate's denominator.
 #
 # The demo leaves everything running so the audience can poke at it. Tear
@@ -306,7 +306,7 @@ show "$KLITE" get instances
 A_INST="$("$KLITE" get instances | awk '$2=="a" {print $1}' | head -1)"
 A_NODE="$("$KLITE" get instances | awk '$2=="a" {print $3}' | head -1)"
 [[ -n "$A_INST" && -n "$A_NODE" ]] || die "resolve a's instance and node"
-info "every instance serves its hostname on :80 and rolls a 5% die each second"
+info "every instance serves its hostname on :80 and rolls a 2.5% die each second"
 info "a hit calls one random peer from TARGETS, the chatter the board feeds on"
 start_probes
 pause
@@ -404,7 +404,7 @@ OUT="$("$KLITE" policy check a b 2>&1)"
 grep -q 'allowed' <<<"$OUT" && pass "and a -> b stays open: $OUT" || die "policy check a b should allow, got: $OUT"
 
 # The deny must bite the apps' own chatter as well as the probes. Chatter is
-# sparse (a 5% roll), so denials appear only when a roll picks c, but
+# sparse (a 2.5% roll), so denials appear only when a roll picks c, but
 # completions must sit at zero from the moment of the apply.
 CHAT_OK="$(docker logs "$(a_ctr)" --since "$CHAT_MARK" 2>/dev/null | grep -c '^-> c ok')"
 CHAT_FAIL="$(docker logs "$(a_ctr)" --since "$CHAT_MARK" 2>/dev/null | grep -c '^-> c FAILED')"
@@ -540,7 +540,7 @@ chatty_flowing() {
       | xargs -I{} docker logs {} 2>/dev/null | grep -q '^-> [abcd] ok$' || return 1
   done
 }
-wait_for 90 chatty_flowing \
+wait_for 180 chatty_flowing \
   && pass "every app chats on its own: a, b, c, and d each completed a random call" \
   || die "an app has not completed a single chatty call"
 info "a's chatter so far:"

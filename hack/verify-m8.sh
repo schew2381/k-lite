@@ -236,7 +236,7 @@ A_INST="$("$KLITE" --server "$BOTH" get instances | awk '$2=="a" {print $1}' | h
 A_NODE="$("$KLITE" --server "$BOTH" get instances | awk '$2=="a" {print $3}' | head -1)"
 # A burst of probes from inside a's container rides kdns -> VIP -> Envoy.
 # Bodies read "<cid> is b", so two distinct cids prove both endpoints answer.
-# The seeded apps' own 5% chatter is too sparse to gate on.
+# The seeded apps' own 2.5% chatter is too sparse to gate on.
 b_lb() {
   local i
   [[ "$(for i in $(seq 1 10); do

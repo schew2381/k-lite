@@ -10,7 +10,7 @@
 #
 # The zero-failure gates ride deterministic probe loops (wget once a second
 # to b and to c, exec'd inside a's container so they take the kdns -> VIP ->
-# Envoy path). The seeded apps' own 5% chatter is too sparse to gate on.
+# Envoy path). The seeded apps' own 2.5% chatter is too sparse to gate on.
 set -u
 
 cd "$(dirname "$0")/.."
