@@ -15,3 +15,7 @@ This ends ADR 0016's deferral. When an endpoint lives on another node, klited re
 - Donors publish a fixed ingress-port range at creation, because Docker can't add published ports to a running container. klited allocates per-endpoint ingress ports from that range.
 - Agents advertise a routable machine address (flag, with the local default above). Mutual reachability is still required — a NAT'd node needs option 3.
 - Identity is node-level, not per-service: any workload on a certified node can be dialed by any other node's proxy. The per-service SPIFFE-style upgrade stays future work, noted here so nobody mistakes the gap for an accident.
+
+## Outcome
+
+verify-m9 pins the design end to end on a fresh cluster. Consumer EDS carries `machineAddress:ingressPort` for every remote endpoint and the raw pod IP appears nowhere in the consumer's cluster table, so the flat-bridge path is verifiably gone. The remote listener's `ssl.handshake` counter rises while the client loop runs, plaintext and foreign-CA and certless dials all die in the handshake with zero decrypted bytes moved toward the pod, and a node-cert dial on the same listener reaches it (the positive control). Scale, rollout, drain, and a live advertise-address flip to the machine's LAN IP all pass through the ingress hop with zero failed requests.

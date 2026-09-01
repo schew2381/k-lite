@@ -14,3 +14,7 @@ Cluster state lives in a 3-member etcd. Every `klited` server handles reads and 
 - `hack/etcd-up.sh` runs three etcd containers with client ports on 127.0.0.1, so the cluster has infrastructure of its own before the first node joins.
 - Any klited can die without losing data. M7's kill-the-leader demo exists because of this decision.
 - Writes use mod-revision transactions, and controllers stay level-based and idempotent so a brief double-leadership window is harmless.
+
+## Outcome
+
+verify-m7 puts numbers on the promise. With the workload mid-scale-churn, the standby logged `controllers: leading` 4.5s after the leader's SIGKILL (the 5s election-lease TTL is most of that wait), converged the churned store to 8/8 within another 2s with no duplicate or orphaned containers, and no node dipped from Ready through the takeover. The same run survives an etcd member stop without a visible wobble, recovers from full quorum loss once members return (a leader re-establishes about 7s after restore), and resumes a mid-flight rollout under a second leader kill with the instance count held in [3,5]. The kill-the-leader demo this ADR predicted is now one beat of `make demo`.

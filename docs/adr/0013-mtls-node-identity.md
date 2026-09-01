@@ -13,3 +13,7 @@
 - klited carries CA code that issues, verifies, and stores under `~/.klite/server/tls`.
 - Certificate rotation is out of scope for v1, written here so nobody mistakes the omission for an accident.
 - The WAN posture falls out for free, since a remote node needs only the server address, a token, and an outbound connection. Nothing on the node listens.
+
+## Outcome
+
+M8 shipped the flow as designed: klited mints the CA at first boot, `klite node token` binds the CA hash into the token, and the agent trades it for a certificate over CSR so keys never travel. verify-m8 proves the negatives too, a wrong secret and a tampered CA pin both die without persisting anything, and its WAN-shaped join walks a node in through the machine's LAN address. Two later ADRs leaned on this one as predicted: the deny-by-default gate classifies callers by these certificates (0028), and the ingress data plane reuses them wholesale after widening the EKUs (0034, 0036). Rotation stayed out of scope, as written.

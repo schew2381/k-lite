@@ -21,3 +21,7 @@ A rolling update is the same dance one instance at a time. `klite drain <node>` 
 - Every Envoy cluster sets `healthy_panic_threshold: 0`. The default 50% panic mode ignores health the moment one endpoint of two drains, which would send fresh connections to the instance we're retiring (research/envoy-xds.md).
 - The scheduler places surge instances with the draining node already excluded.
 - The two timeouts live in Workload YAML under `drain:`, so a demo can shrink them for pace without touching code.
+
+## Outcome
+
+The promise held under measurement. verify-m5 runs a client loop through a full rolling update and a node drain and gates on zero FAILED lines, with the rollout counted one-at-a-time inside the [replicas-1, replicas+1] window. verify-m9 repeats the same loop across the cross-machine ingress hop (scale, rollout, drain, and an advertise-address flip) and still ends clean, which means the surge choreography survives even when the endpoints being drained sit behind mTLS listeners on another machine. The drain-first fallback for capacity-starved clusters remains implemented and informational in verify-m5, never yet needed by a demo.

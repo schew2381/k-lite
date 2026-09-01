@@ -12,3 +12,7 @@ Node certs were ClientAuth-only, which broke 0034's assumption the moment a dest
 - Identities minted before this change dial fine but can't serve. Agents self-heal: a persisted ServerAuth-less cert triggers a silent re-join when a token is in hand, and a pointed error without one.
 - Certificate material folds into the Envoy config hash, since Envoy loads TLS files at resource creation and never re-reads them.
 - Recorded trust delta: the source Envoy verifies the serving cert chains to the cluster CA, not that it belongs to the specific node EDS named. klited controls EDS addresses, so this stays inside 0034's node-level trust model — tightening it to per-node SAN matching is the known next step.
+
+## Outcome
+
+verify-m9 starts from wiped state on every run, so the dual-EKU join flow is what each pass proves: `openssl -purpose` shows `SSL server : Yes` on all three fresh node certs, the ingress listeners complete handshakes against node certificates, and a certificate signed by a foreign CA registers as `fail_verify_error` instead of reaching the pod. The self-heal path for pre-M9 identities shipped alongside and stays covered by the agent's join tests.

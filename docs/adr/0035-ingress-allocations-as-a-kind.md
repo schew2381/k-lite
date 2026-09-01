@@ -15,3 +15,7 @@ Cross-machine ingress (0034) needed a port per local endpoint from each node's p
 - A remote endpoint without its allocation is omitted from EDS entirely. The flat-bridge path is dead, not a fallback.
 - The kind registration surfaced a codec gap (a forged YAML could nil-panic klited through the envelope switch), now closed and pinned by tests.
 - Ports burn per (service, instance), not per instance: an instance selected by N services takes N of its node's 32 slots, and surplus endpoints past exhaustion silently lose remote reachability. Acceptable at demo scale, and the first knob to revisit if real clusters arrive.
+
+## Outcome
+
+verify-m9 holds the kind to its contract: one allocation per (service, instance), every port inside its owner's published slice, Apply rejecting a client-written object, and a killed instance's allocation released with the replacement minting its own. The allocation-driven listener list did what it was chosen for, since the drain and rollout steps run traffic through listeners whose instances are mid-teardown and finish with zero failed requests. The port-burn consequence stands as accepted risk and hasn't bitten at demo scale.
