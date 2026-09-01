@@ -7,8 +7,8 @@
 #   churn      scale-out convergence, instance-kill recovery
 #   chatter    the seeded apps' own random calls complete
 # Traffic assertions ride a deterministic probe loop (wget once a second from
-# inside a's container). The apps' 2.5% random chatter is checked last, on its
-# own clock.
+# inside a's container). The apps' own chatter (one 20% roll per shared
+# 8-second wave) is checked last, on its own clock.
 # Leaves etcd, the klite0 network, and images in place.
 set -u
 
@@ -86,8 +86,8 @@ wl_logs() { # this stack's instances only: workload labels repeat across cluster
   done
 }
 
-# The seeded apps chat at random (a 2.5% roll per second, see examples/seed/apps),
-# which is the wrong clock to hang assertions on. The script runs its own
+# The seeded apps chat at random (one 20% roll per 8-second wave, see
+# examples/seed/apps), which is the wrong clock to hang assertions on. The script runs its own
 # probe loop instead: one wget per second to b's service, executed inside
 # a's container so it rides the same kdns -> VIP -> Envoy path. Each probe
 # appends one line to PROBE_FILE: the served body ("<cid> is b") or FAILED.

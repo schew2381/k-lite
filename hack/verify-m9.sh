@@ -10,7 +10,7 @@
 #   WAN         a WAN-shaped advertise address keeps traffic flowing
 #   release     killing an instance releases its port
 # Traffic assertions ride a deterministic probe loop (wget to b once a second
-# from inside a's container). The seeded apps' 2.5% chatter is too sparse to
+# from inside a's container). The seeded apps' wave chatter is too sparse to
 # gate on. Leaves etcd, the klite0 network, images, and ~/.klite/server in
 # place.
 set -u
