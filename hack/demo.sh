@@ -241,17 +241,19 @@ mkdir -p "$DEV_DIR"
 pass "previous playgrounds torn down, ~/.klite/{server,agent,dev} and etcd data gone"
 
 kill_port 7080 # a stale facade would shadow the one we launch at the end
-kill_port 5173 # a stale Vite would grab the port and serve an old bundle
-for p in 7443 7445 7080 5173; do
+for p in 7443 7445 7080; do
   lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 && die "port $p is still in use"
 done
 for p in $(seq $INGRESS_BASE $((INGRESS_BASE + 4 * INGRESS_PER_NODE - 1))); do
   lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 && die "ingress port $p is already in use"
 done
-pass "canonical ports free (7443, 7445, 7080, 5173, ingress $INGRESS_BASE-$((INGRESS_BASE + 4 * INGRESS_PER_NODE - 1)))"
+pass "canonical ports free (7443, 7445, 7080, ingress $INGRESS_BASE-$((INGRESS_BASE + 4 * INGRESS_PER_NODE - 1)))"
 
 STEP=build
 make build >/dev/null 2>&1 && pass "built klited, klite, klite-agent" || die "make build"
+go build -o bin/klite-facade ./cmd/klite-facade >/dev/null 2>&1 && pass "built klite-facade" || die "build klite-facade"
+command -v bun >/dev/null 2>&1 || die "the board build needs bun (https://bun.sh)"
+make ui >/dev/null 2>&1 && pass "built the board (frontend/dist)" || die "make ui"
 if ! docker image inspect klite-net:dev >/dev/null 2>&1; then
   make net-image >/dev/null 2>&1 && pass "built the klite-net:dev image" || die "make net-image"
 fi
@@ -642,33 +644,24 @@ docker logs "$(a_ctr)" 2>/dev/null | grep '^->' | tail -4 | sed 's/^/  /'
 echo
 stop_probes
 
-go run ./cmd/klite-facade >"$DEV_DIR/facade.log" 2>&1 &
+# One process serves board and API: the dist built at STEP=build boots
+# straight into live mode at the bare URL, so Vite stays retired here.
+bin/klite-facade --ui-dir frontend/dist >"$DEV_DIR/facade.log" 2>&1 &
 echo $! >"$DEV_DIR/facade.pid"
 disown
 facade_up() { curl -s --max-time 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:7080/api/topology" | grep -q 200; }
 wait_for 60 facade_up \
-  && pass "klite-facade on :7080, dialing klited over CA-pinned TLS with the admin token" \
+  && pass "klite-facade on :7080 serving board + API, dialing klited over CA-pinned TLS" \
   || { tail -5 "$DEV_DIR/facade.log"; die "facade never answered on :7080 (see $DEV_DIR/facade.log)"; }
 
-kill_port 5173 # nothing may squat the port, or Vite silently takes 5174
-# NO_COLOR keeps the startup banner grep-able. The probe uses localhost
-# because Vite may bind the IPv6 loopback only.
-(cd frontend && NO_COLOR=1 exec bun run dev) >"$DEV_DIR/vite.log" 2>&1 &
-echo $! >"$DEV_DIR/vite.pid"
-disown
-vite_up() { curl -s --max-time 2 -o /dev/null "http://localhost:5173/"; }
-wait_for 60 vite_up || { tail -5 "$DEV_DIR/vite.log"; die "Vite never answered on :5173 (see $DEV_DIR/vite.log)"; }
-grep -q "localhost:5173/" "$DEV_DIR/vite.log" || die "Vite came up on the wrong port (see $DEV_DIR/vite.log)"
-pass "Vite dev server on :5173, /api proxied to the facade"
-
-open "http://localhost:5173/#/?mode=live"
+open "http://127.0.0.1:7080/"
 pass "opened the board in live mode"
 
 # ============================================================
 banner "THE CLUSTER IS YOURS"
 echo "
-  board       http://localhost:5173/#/?mode=live   (the MOCK|LIVE toggle in the header swaps the data source)
-  processes   2x klited (7443/7445), 4 agents, facade (7080), vite (5173) — pidfiles in $DEV_DIR
+  board       http://127.0.0.1:7080/   (served by the facade; the MOCK|LIVE toggle swaps the data source)
+  processes   2x klited (7443/7445), 4 agents, facade (7080) — pidfiles in $DEV_DIR
   logs        $DEV_DIR/*.log
 
   poke at it:

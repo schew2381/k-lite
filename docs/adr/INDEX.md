@@ -48,4 +48,6 @@ Each record gets one line. The track column says where a decision came from: the
 | [0042](0042-apply-preserves-server-status.md)      | Apply can't write status, heartbeats restore a lost node index | build | accepted                                                        |
 | [0043](0043-internet-clusters-ride-an-overlay.md)  | Internet clusters ride an overlay, not port maps | build | accepted                                                        |
 | [0044](0044-kdns-attributes-callers.md)            | kdns attributes callers for the traffic feed | build | accepted                                                        |
+| [0045](0045-dev-down-all-forgets-the-cluster.md)   | dev-down --all forgets the cluster | build | accepted                                                        |
+| [0046](0046-the-playground-serves-the-board.md)    | The playground serves the board | build | accepted                                                        |
 | [0042](0042-the-agent-earns-a-face.md)             | The agent earns a face on the node card | build | accepted                                                        |

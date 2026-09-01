@@ -80,17 +80,24 @@ hack/dev-down.sh >/dev/null 2>&1 || true
 
 # --- build ---
 if [[ -z "$SKIP_BUILD" ]]; then
-  say "building klited, klite, klite-agent"
+  say "building klited, klite, klite-agent, klite-facade"
   go build -o "$BIN/klited" ./cmd/klited
   go build -o "$BIN/klite" ./cmd/klite
   go build -o "$BIN/klite-agent" ./cmd/klite-agent
+  go build -o "$BIN/klite-facade" ./cmd/klite-facade
   if [[ -f build/klite-net.Dockerfile ]]; then
     say "building klite-net:dev image"
     make net-image >/dev/null 2>&1 || echo "note: make net-image failed, continuing without it"
   fi
+  if command -v bun >/dev/null 2>&1; then
+    say "building the board (make ui)"
+    make ui >/dev/null 2>&1 || echo "note: make ui failed, continuing without the board"
+  else
+    echo "note: bun not installed, continuing without the board (https://bun.sh)"
+  fi
 else
   say "KLITE_DEV_SKIP_BUILD set, using existing bin/ binaries"
-  for b in klited klite klite-agent; do
+  for b in klited klite klite-agent klite-facade; do
     [[ -x "$BIN/$b" ]] || die "missing $BIN/$b (unset KLITE_DEV_SKIP_BUILD to build)"
   done
 fi
@@ -157,14 +164,39 @@ say "applying examples/seed/apps"
 wait_for 90 instances_running || die "instances not all Running (try: $KLITE get instances; logs in $DEV_DIR)"
 say "all instances Running"
 
+# --- the board ---
+# klite-facade serves the built UI and its API as one loopback-bound process.
+# Loopback is the trust boundary: the facade holds the admin token and has no
+# auth of its own (the UI session's ADR 0040), so LAN viewing goes through the
+# frontend's explicit `bun run dev:lan` instead.
+BOARD_URL=""
+facade_up() {
+  curl -s --max-time 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:7080/api/topology" | grep -q 200
+}
+if [[ -d frontend/dist ]]; then
+  say "starting klite-facade (board + API) on 127.0.0.1:7080"
+  "$BIN/klite-facade" --cluster "127.0.0.1:$KLITED_PORT" --ui-dir frontend/dist >"$DEV_DIR/facade.log" 2>&1 &
+  echo $! >"$DEV_DIR/facade.pid"
+  disown $! 2>/dev/null || true
+  if wait_for 15 facade_up; then
+    BOARD_URL="http://127.0.0.1:7080"
+  else
+    echo "note: facade never answered on :7080 (see $DEV_DIR/facade.log), continuing without the board"
+  fi
+else
+  echo "note: no frontend/dist, so no board (bun + make ui produce it)"
+fi
+
 # --- cheat sheet ---
 A_INST="$("$KLITE" get instances 2>/dev/null | awk 'NR>1 && $2=="a" {print $1; exit}')"
 A_INST="${A_INST:-<instance>}"
 echo
 echo "playground is up"
+[[ -n "$BOARD_URL" ]] && echo "board: $BOARD_URL  (loopback only; LAN viewing: cd frontend && bun run dev:lan)"
 echo
 echo "processes:"
 echo "  klited      pid $(cat "$KLITED_PIDFILE")  127.0.0.1:$KLITED_PORT  log $KLITED_LOG"
+[[ -n "$BOARD_URL" ]] && echo "  facade      pid $(cat "$DEV_DIR/facade.pid")  $BOARD_URL  log $DEV_DIR/facade.log"
 for n in "${NODES[@]}"; do
   echo "  agent $n  pid $(cat "$DEV_DIR/agent-$n.pid")  log $DEV_DIR/agent-$n.log"
 done

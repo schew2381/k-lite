@@ -13,6 +13,11 @@ DATA_ROOT="${HOME}/.klite/etcd"
 if [[ "${1:-up}" == "down" ]]; then
   docker rm -f "$PREFIX-1" "$PREFIX-2" "$PREFIX-3" 2>/dev/null || true
   docker network rm "$NET" 2>/dev/null || true
+  # Data survives a plain down (the containers bind-mount it), so a later
+  # up resumes the same cluster. --wipe removes it for a genuinely new one.
+  if [[ "${2:-}" == "--wipe" ]]; then
+    rm -rf "$DATA_ROOT/$PREFIX-1" "$DATA_ROOT/$PREFIX-2" "$DATA_ROOT/$PREFIX-3"
+  fi
   exit 0
 fi
 
