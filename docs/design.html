@@ -941,6 +941,12 @@ curl -sfL https://github.com/…/releases/latest/download/join.sh | \
           Register RPC, same CSR, same NetBootstrap. The bootstrap also pins the infra-pod image
           cluster-wide, so every node runs the same donor.
         </p>
+        <p>
+          One prerequisite sits on the cluster side: the local playground boots klited on loopback, so an
+          off-machine join needs it listening on <code>0.0.0.0:7443</code>. That costs one flag and no
+          certificate work — the serving certificate re-mints at every boot and bakes each interface
+          address into its SANs, so the machine's LAN IP is already valid for TLS.
+        </p>
       </div>
       <div>
         <p class="filetag">why the swap is boring, by construction</p>
@@ -1020,6 +1026,25 @@ curl -sfL https://github.com/…/releases/latest/download/join.sh | \
       <li><b>The source side still decides everything.</b> EDS names the exact endpoint, so balancing and draining stay in the calling proxy. The ingress listener is a dumb, authenticated funnel to one instance.</li>
     </ul>
 
+    <h3 class="sub">Who must reach whom</h3>
+    <p>
+      Reachability is two separate questions, because the two kinds of traffic point different ways.
+    </p>
+    <table class="addr">
+      <thead><tr><th>traffic</th><th>direction</th><th>who must be reachable</th></tr></thead>
+      <tbody>
+        <tr><td>control<br><span class="who">join, heartbeats, desired state, logs</span></td>
+            <td>agent → klited, always outward</td>
+            <td>Only klited's machine, on one port. A node behind three layers of hotel NAT joins and stays joined, because nothing ever dials into a node for control.</td></tr>
+        <tr><td>data<br><span class="who">instance calls crossing machines</span></td>
+            <td>Envoy → Envoy, peer to peer</td>
+            <td>Every machine that hosts instances, on its advertise address and its 32-port slice. There's no server side to hide behind — the caller opens a fresh inbound connection to whoever owns the endpoint.</td></tr>
+      </tbody>
+    </table>
+    <p>
+      NAT breaks exactly the second row, and it breaks it quietly: joining only ever proved the first.
+    </p>
+
     <h3 class="sub">Mixed clusters, and the asymmetry worth knowing</h3>
     <p>
       Can local Mac nodes and real internet nodes share a cluster? On the control plane, completely —
@@ -1051,9 +1076,20 @@ curl -sfL https://github.com/…/releases/latest/download/join.sh | \
       IP), but remote→local dies: the internet node can't resolve the name, and your Mac is behind home
       NAT anyway. Worse than an error, it's a <em>quiet</em> failure — joining never proved anyone could dial
       in, so the NATed node registers, heartbeats, and looks healthy while traffic aimed at it dies.
-      ADR 0034 accepts this and writes it down: keep callable services on reachable nodes. The recorded
-      escape hatch is a WireGuard mesh (<code>research/overlay-wan.md</code>'s option B), which buys
-      encryption and NAT traversal at the price of key lifecycles, MTU care, and a rendezvous story.
+      A real Linux box carries its own version of the trap: the agent's address self-detection can land
+      on the Docker bridge (<code>172.17.0.1</code>), which only that machine can reach — the reason
+      <code>join.sh</code> refuses to guess when it finds only private addresses, and the reason
+      <code>--advertise-address</code> is effectively mandatory on real nodes.
+    </p>
+    <p>
+      Within one network, the whole asymmetry dissolves with the same flag. Give every node an
+      <code>--advertise-address</code> the others can dial (for local nodes, the Mac's own LAN IP — the
+      donors already publish their port slices on <code>0.0.0.0</code>, so LAN&nbsp;IP + ingress port
+      reaches a local instance through Docker's port mapping exactly as it would on a real node), and
+      traffic flows both directions. For the true open internet, ADR 0034 accepts the constraint and
+      writes it down: keep callable services on reachable nodes. The recorded escape hatch is a WireGuard
+      mesh (<code>research/overlay-wan.md</code>'s option B), which buys encryption and NAT traversal at
+      the price of key lifecycles, MTU care, and a rendezvous story.
     </p>
   </div>
 </section>
