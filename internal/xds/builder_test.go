@@ -286,6 +286,153 @@ func TestBuildSnapshotZeroInstanceService(t *testing.T) {
 	}
 }
 
+// A departed node decays to an empty NetDesired, which must still build a
+// valid, empty snapshot. The endpoints engine keeps pushing it.
+func TestBuildSnapshotEmptyNet(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		net  *klitev1.NetDesired
+	}{
+		{name: "empty message", net: &klitev1.NetDesired{}},
+		{name: "nil message", net: nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			snap, err := xds.BuildSnapshot("node-gone", "9", tt.net)
+			if err != nil {
+				t.Fatalf("BuildSnapshot: %v", err)
+			}
+			for _, typ := range []string{resourcev3.ListenerType, resourcev3.ClusterType, resourcev3.EndpointType} {
+				if got := len(snap.GetResources(typ)); got != 0 {
+					t.Errorf("resource count for %s = %d, want 0", typ, got)
+				}
+			}
+		})
+	}
+}
+
+// Garbage that Consistent() can't see (bad IPs, bad ports, colliding names)
+// must fail BuildSnapshot rather than ride out to Envoy as a NACK.
+func TestBuildSnapshotRejectsGarbage(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		mutate  func(net *klitev1.NetDesired)
+		wantErr string
+	}{
+		{
+			name: "empty service name",
+			mutate: func(net *klitev1.NetDesired) {
+				net.Services[0].Service = ""
+			},
+			wantErr: "empty name",
+		},
+		{
+			name: "duplicate service",
+			mutate: func(net *klitev1.NetDesired) {
+				net.Services = append(net.Services, &klitev1.ServiceVIP{
+					Service: "a", Vip: "10.44.64.3", Port: 81,
+				})
+			},
+			wantErr: "listed twice",
+		},
+		{
+			name: "vip not an ip",
+			mutate: func(net *klitev1.NetDesired) {
+				net.Services[0].Vip = "nope"
+			},
+			wantErr: "vip",
+		},
+		{
+			name: "listener port zero",
+			mutate: func(net *klitev1.NetDesired) {
+				net.Services[0].Port = 0
+			},
+			wantErr: "port 0",
+		},
+		{
+			name: "listener port negative",
+			mutate: func(net *klitev1.NetDesired) {
+				net.Services[0].Port = -80
+			},
+			wantErr: "outside 1-65535",
+		},
+		{
+			name: "listener port too big",
+			mutate: func(net *klitev1.NetDesired) {
+				net.Services[0].Port = 70000
+			},
+			wantErr: "outside 1-65535",
+		},
+		{
+			name: "duplicate endpoint group",
+			mutate: func(net *klitev1.NetDesired) {
+				net.Endpoints = append(net.Endpoints, &klitev1.EndpointGroup{Service: "a"})
+			},
+			wantErr: "listed twice",
+		},
+		{
+			name: "endpoint ip garbage",
+			mutate: func(net *klitev1.NetDesired) {
+				net.Endpoints[0].Endpoints[0].Ip = "10.88.0.999"
+			},
+			wantErr: "ip",
+		},
+		{
+			name: "endpoint port out of range",
+			mutate: func(net *klitev1.NetDesired) {
+				net.Endpoints[0].Endpoints[0].Port = 65536
+			},
+			wantErr: "outside 1-65535",
+		},
+		{
+			name: "ip_identity key garbage",
+			mutate: func(net *klitev1.NetDesired) {
+				net.IpIdentity["not-an-ip"] = "a"
+			},
+			wantErr: "ip_identity",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			net := testNet()
+			tc.mutate(net)
+			_, err := xds.BuildSnapshot("node-1", "1", net)
+			if err == nil {
+				t.Fatal("BuildSnapshot accepted garbage")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error = %q, want it to mention %q", err, tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), "node-1") {
+				t.Errorf("error = %q, want it to name the node", err)
+			}
+		})
+	}
+}
+
+// A v6 source gets a /128 principal. A /32 over v6 would match a whole /32
+// of address space instead of one host.
+func TestRBACPrincipalV6(t *testing.T) {
+	t.Parallel()
+	net := testNet(deny("v6svc", "b"))
+	net.IpIdentity["fd00::9"] = "v6svc"
+	snap, err := xds.BuildSnapshot("node-1", "1", net)
+	if err != nil {
+		t.Fatalf("BuildSnapshot: %v", err)
+	}
+	_, rbacs, _ := decodeFilters(t, getListener(t, snap, "svc/b"))
+	if len(rbacs) != 1 {
+		t.Fatalf("got %d rbac filters, want 1", len(rbacs))
+	}
+	want := [][]string{{"fd00::9/128"}}
+	if !slices.EqualFunc(rbacs[0].principals, want, slices.Equal) {
+		t.Errorf("principals = %v, want %v", rbacs[0].principals, want)
+	}
+}
+
 func TestBuildSnapshotInconsistent(t *testing.T) {
 	t.Parallel()
 	net := testNet()

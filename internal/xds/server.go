@@ -45,11 +45,29 @@ func (c *Cache) SetNodeSnapshot(ctx context.Context, node, version string, net *
 // RegisterADS mounts the xDS services on klited's existing gRPC server. The
 // context bounds the lifetime of the xDS stream handlers.
 func (c *Cache) RegisterADS(ctx context.Context, grpcServer *grpc.Server) {
-	srv := serverv3.NewServer(ctx, c.SnapshotCache, nil)
+	srv := serverv3.NewServer(ctx, c.SnapshotCache, adsCallbacks())
 	discoveryservice.RegisterAggregatedDiscoveryServiceServer(grpcServer, srv)
 	clusterservice.RegisterClusterDiscoveryServiceServer(grpcServer, srv)
 	endpointservice.RegisterEndpointDiscoveryServiceServer(grpcServer, srv)
 	listenerservice.RegisterListenerDiscoveryServiceServer(grpcServer, srv)
+}
+
+// adsCallbacks surfaces NACKs. Neither go-control-plane's server nor its
+// cache logs them, so a node whose Envoy rejects a snapshot would otherwise
+// sit on stale config with no trace on the control plane.
+func adsCallbacks() serverv3.CallbackFuncs {
+	return serverv3.CallbackFuncs{
+		StreamRequestFunc: func(_ int64, req *discoveryservice.DiscoveryRequest) error {
+			if detail := req.GetErrorDetail(); detail != nil {
+				slog.Warn("envoy rejected snapshot (NACK)",
+					"node", req.GetNode().GetId(),
+					"type", req.GetTypeUrl(),
+					"version", req.GetVersionInfo(),
+					"err", detail.GetMessage())
+			}
+			return nil
+		},
+	}
 }
 
 // slogAdapter satisfies go-control-plane's log.Logger with slog.

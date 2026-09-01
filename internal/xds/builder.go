@@ -4,6 +4,7 @@ package xds
 
 import (
 	"fmt"
+	"net/netip"
 	"slices"
 	"time"
 
@@ -37,6 +38,9 @@ const (
 // version strings per change are the caller's job (pass the desired-state
 // revision), since Envoy ignores a snapshot whose version it already ACKed.
 func BuildSnapshot(node, version string, net *klitev1.NetDesired) (*cachev3.Snapshot, error) {
+	if err := validateNet(net); err != nil {
+		return nil, fmt.Errorf("node %s: %w", node, err)
+	}
 	listeners, err := buildListeners(net)
 	if err != nil {
 		return nil, fmt.Errorf("node %s: %w", node, err)
@@ -53,6 +57,55 @@ func BuildSnapshot(node, version string, net *klitev1.NetDesired) (*cachev3.Snap
 		return nil, fmt.Errorf("node %s: inconsistent snapshot: %w", node, err)
 	}
 	return snap, nil
+}
+
+// validateNet screens the wire input before any resource is built. Bad IPs
+// and ports pass snapshot.Consistent() (it checks name cross-references, not
+// values) and blow up later as an Envoy NACK, which nothing used to log. The
+// node just sat on its last ACKed config. Rejecting here keeps the previous
+// snapshot serving and puts the reason in klited's log. Duplicate names are
+// rejected too, because snapshot indexing is last-wins and would drop the
+// earlier resource.
+func validateNet(net *klitev1.NetDesired) error {
+	seenSvc := make(map[string]bool, len(net.GetServices()))
+	for _, svc := range net.GetServices() {
+		name := svc.GetService()
+		if name == "" {
+			return fmt.Errorf("service with empty name (vip %q)", svc.GetVip())
+		}
+		if seenSvc[name] {
+			return fmt.Errorf("service %q listed twice", name)
+		}
+		seenSvc[name] = true
+		if _, err := netip.ParseAddr(svc.GetVip()); err != nil {
+			return fmt.Errorf("service %s: vip: %w", name, err)
+		}
+		if p := svc.GetPort(); p < 1 || p > 65535 {
+			return fmt.Errorf("service %s: port %d outside 1-65535", name, p)
+		}
+	}
+	seenGroup := make(map[string]bool, len(net.GetEndpoints()))
+	for _, group := range net.GetEndpoints() {
+		svc := group.GetService()
+		if seenGroup[svc] {
+			return fmt.Errorf("endpoint group %q listed twice", svc)
+		}
+		seenGroup[svc] = true
+		for _, ep := range group.GetEndpoints() {
+			if _, err := netip.ParseAddr(ep.GetIp()); err != nil {
+				return fmt.Errorf("endpoint for %s: ip: %w", svc, err)
+			}
+			if p := ep.GetPort(); p < 1 || p > 65535 {
+				return fmt.Errorf("endpoint for %s: port %d outside 1-65535", svc, p)
+			}
+		}
+	}
+	for ip := range net.GetIpIdentity() {
+		if _, err := netip.ParseAddr(ip); err != nil {
+			return fmt.Errorf("ip_identity key %q: %w", ip, err)
+		}
+	}
+	return nil
 }
 
 func buildListeners(net *klitev1.NetDesired) ([]types.Resource, error) {
@@ -170,11 +223,17 @@ func principalsFor(from string, ipIdentity map[string]string) []*rbaccfgv3.Princ
 	slices.Sort(ips)
 	principals := make([]*rbaccfgv3.Principal, 0, len(ips))
 	for _, ip := range ips {
+		addr, err := netip.ParseAddr(ip)
+		if err != nil {
+			continue // validateNet already rejected configs carrying these
+		}
+		// The prefix length must follow the address family: /32 over a v6
+		// address would match a whole /32 of v6 space, not one host.
 		principals = append(principals, &rbaccfgv3.Principal{
 			Identifier: &rbaccfgv3.Principal_DirectRemoteIp{
 				DirectRemoteIp: &corev3.CidrRange{
 					AddressPrefix: ip,
-					PrefixLen:     wrapperspb.UInt32(32),
+					PrefixLen:     wrapperspb.UInt32(uint32(addr.BitLen())),
 				},
 			},
 		})

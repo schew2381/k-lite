@@ -44,6 +44,21 @@ func TestCacheSetNodeSnapshotRejectsInconsistent(t *testing.T) {
 	}
 }
 
+// ClearSnapshot comes promoted from the embedded SnapshotCache. The
+// integration side needs it when a Node object is deleted, or the cache
+// holds departed nodes forever.
+func TestCacheClearSnapshot(t *testing.T) {
+	t.Parallel()
+	c := xds.NewCache()
+	if err := c.SetNodeSnapshot(t.Context(), "node-1", "1", testNet()); err != nil {
+		t.Fatalf("SetNodeSnapshot: %v", err)
+	}
+	c.ClearSnapshot("node-1")
+	if _, err := c.GetSnapshot("node-1"); err == nil {
+		t.Error("snapshot survived ClearSnapshot")
+	}
+}
+
 func TestRegisterADS(t *testing.T) {
 	t.Parallel()
 	c := xds.NewCache()
