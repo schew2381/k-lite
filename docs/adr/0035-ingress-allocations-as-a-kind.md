@@ -14,3 +14,4 @@ Cross-machine ingress (0034) needed a port per local endpoint from each node's p
 - Remote endpoints render as `machineAddress:ingressPort` against a constant `transport_socket_matches` pair. Regenerating the match list from live endpoints would churn CDS and drain connections mid-rollout.
 - A remote endpoint without its allocation is omitted from EDS entirely. The flat-bridge path is dead, not a fallback.
 - The kind registration surfaced a codec gap (a forged YAML could nil-panic klited through the envelope switch), now closed and pinned by tests.
+- Ports burn per (service, instance), not per instance: an instance selected by N services takes N of its node's 32 slots, and surplus endpoints past exhaustion silently lose remote reachability. Acceptable at demo scale, and the first knob to revisit if real clusters arrive.
