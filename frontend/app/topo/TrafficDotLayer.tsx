@@ -69,8 +69,8 @@ function easeTravel(k: number): number {
 
 // The bow grows with distance: a cross-board flight arcs visibly, while a
 // hop between neighboring sub-boxes stays flat enough to read as straight.
-const BOW_PER_PX = 0.06
-const BOW_MAX = 36
+const BOW_PER_PX = 0.09
+const BOW_MAX = 52
 
 function bowFor(a: Point, b: Point): number {
   return Math.min(Math.hypot(b.x - a.x, b.y - a.y) * BOW_PER_PX, BOW_MAX)
