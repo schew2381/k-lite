@@ -19,7 +19,7 @@ spec:
           - >-
             trap "exit 0" TERM; mkdir -p /www;
             echo "$(hostname) is b" > /www/index.html;
-            (httpd -f -vv -p 80 -h /www &);
+            (httpd -f -vv -p 80 -h /www 2>&1 | while read l; do case "$l" in *"response:200"*) i="${l#*\[}"; i="${i#::ffff:}"; i="${i%%]*}"; echo "receive ($i) ok";; *"response:"*) i="${l#*\[}"; i="${i#::ffff:}"; i="${i%%]*}"; echo "receive ($i) ${l##*response:}";; esac; done &);
             while :; do sleep $((10 - $(date +%s) % 10)) & wait $!;
             r=$(head -c2 /dev/urandom | od -An -tu2 | tr -d " ");
             [ "$r" -lt 16384 ] || continue;
