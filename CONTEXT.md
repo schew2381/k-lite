@@ -19,6 +19,14 @@ A stable name and port that routes to the ready Instances selected by a label.
 The virtual IP a Service resolves to on a given Node. Each Node's proxy owns its own VIP per Service, and it stays fixed for the Service's lifetime.
 _Avoid_: ClusterIP
 
+**Ingress port**:
+The host port through which other Nodes reach one Endpoint on this Node over mTLS. Each Endpoint gets its own from the Node's fixed slice, held for the Instance's whole life.
+_Avoid_: NodePort
+
+**Advertise address**:
+The machine IP a Node announces for its ingress ports. Every other machine must be able to reach it.
+_Avoid_: external IP, public IP
+
 **Node**:
 A machine that runs Instances. Today each Node is simulated by one local agent process, and later it's real hardware running the same agent.
 _Avoid_: host, worker

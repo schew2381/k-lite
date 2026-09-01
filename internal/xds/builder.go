@@ -48,7 +48,7 @@ const (
 	rawSocketName = "envoy.transport_sockets.raw_buffer"
 
 	// transportMatchMetadataKey is Envoy's fixed filter-metadata namespace
-	// for endpoint transport selection; ingressMatchKey/Value is our one
+	// for endpoint transport selection, and ingressMatchKey/Value is our one
 	// entry in it. Remote endpoints carry it, local ones don't, and the
 	// cluster's match list turns that into mTLS-or-raw. The list is static
 	// so CDS never churns when endpoints move — churn would drain the
@@ -132,8 +132,9 @@ func validateNet(net *klitev1.NetDesired) error {
 	return nil
 }
 
-// validateEndpointGroups extends the screen to the cross-node rider fields:
-// a machine address must be a literal IP because it lands in EDS.
+// validateEndpointGroups screens each group: base ips and ports, duplicated
+// group names, and the cross-node riders, where a machine address must be a
+// literal IP because it lands in EDS.
 func validateEndpointGroups(net *klitev1.NetDesired) error {
 	seenGroup := make(map[string]bool, len(net.GetEndpoints()))
 	for _, group := range net.GetEndpoints() {
@@ -164,9 +165,9 @@ func validateEndpointGroups(net *klitev1.NetDesired) error {
 
 // validateIngressListeners rejects listeners that would NACK (bad addresses,
 // bad ports) or silently drop each other: two entries on one port become two
-// same-named-or-colliding listeners, and snapshot indexing is last-wins.
-// Allocator repair fixes the store within a pass, and the node serves its
-// previous snapshot until then.
+// listeners that share a name or an address, and snapshot indexing is
+// last-wins. Allocator repair fixes the store within a pass, and the node
+// serves its previous snapshot until then.
 func validateIngressListeners(net *klitev1.NetDesired) error {
 	seen := map[int32]bool{}
 	for _, ing := range net.GetIngressListeners() {
@@ -372,8 +373,8 @@ func buildCluster(service string, matches []*clusterv3.Cluster_TransportSocketMa
 }
 
 // transportSocketMatches lets one EDS cluster mix plain local endpoints with
-// mTLS remote ones (ADR 0024): endpoints tagged ingress-mtls dial with the
-// node identity, and the trailing empty match pins everything else to a raw
+// mTLS remote ones (ADR 0024). Endpoints tagged ingress-mtls dial with the
+// node identity. The trailing empty match pins everything else to a raw
 // socket explicitly rather than leaning on fallback-to-default semantics.
 func transportSocketMatches() ([]*clusterv3.Cluster_TransportSocketMatch, error) {
 	mtls, err := upstreamMTLSSocket()
@@ -461,8 +462,9 @@ func buildEndpoints(node string, net *klitev1.NetDesired) []types.Resource {
 }
 
 // buildLoadAssignment renders one group for the consuming node. Endpoints on
-// the node itself stay raw pod addresses; endpoints elsewhere become mTLS
-// dials to machineAddress:ingressPort, the only cross-node path (ADR 0024).
+// the node itself stay raw pod addresses, while endpoints elsewhere become
+// mTLS dials to machineAddress:ingressPort, the only cross-node path
+// (ADR 0024).
 // A remote endpoint whose allocation or machine address hasn't landed yet is
 // left out: no ingress rider means no reachable path, and the flat-bridge
 // shortcut is gone. Health carries over unchanged either way, so DRAINING
@@ -527,14 +529,14 @@ func socketAddress(host string, port uint32) *corev3.Address {
 
 // buildIngress emits the destination half of ADR 0024 from the node's
 // allocation-driven listener list: one listener on 0.0.0.0:<ingressPort>
-// inside the donor's published slice, terminating TLS with the node identity
-// and requiring a client cert that chains to the cluster CA, tcp-proxying to
-// a one-endpoint static cluster at the local pod. The list stands from
-// instance birth through draining, so consumers never route at a port whose
-// listener hasn't committed yet. No RBAC here: policy runs where the
-// connection originates, on the source node's VIP listener, and admission at
-// this layer is deliberately node-level. No freebind either — unlike VIPs,
-// 0.0.0.0 always exists.
+// inside the donor's published slice. Each terminates TLS with the node
+// identity, requires a client cert that chains to the cluster CA, and
+// tcp-proxies to a one-endpoint static cluster at the local instance. The
+// list stands from instance birth through draining, so consumers never
+// route at a port whose listener hasn't committed yet. No RBAC here: policy
+// runs where the connection originates, on the source node's VIP listener,
+// and admission at this layer is deliberately node-level. These also skip
+// freebind, unlike the VIP listeners, because 0.0.0.0 always exists.
 func buildIngress(net *klitev1.NetDesired) (listeners, clusters []types.Resource, err error) {
 	for _, ing := range net.GetIngressListeners() {
 		lst, cl, err := buildIngressPair(ing)
@@ -565,7 +567,7 @@ func buildIngressPair(ing *klitev1.IngressListener) (*listenerv3.Listener, *clus
 	downstream, err := anypb.New(&tlsv3.DownstreamTlsContext{
 		CommonTlsContext: commonNodeTLS(),
 		// The whole point: a plaintext dial or a foreign-CA cert dies in
-		// the handshake, before any byte reaches the pod.
+		// the handshake, before any byte reaches the instance.
 		RequireClientCertificate: wrapperspb.Bool(true),
 	})
 	if err != nil {
