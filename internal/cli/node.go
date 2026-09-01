@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
@@ -105,24 +106,53 @@ func nodeYAML(name string, labels map[string]string, maxInstances int32) ([]byte
 
 // printJoinBlock renders the two ways onto the cluster: the release-based
 // one-liner join.sh serves, and the copy-the-binary fallback for machines
-// (or times) the releases don't cover. Both embed the minted token.
+// (or times) the releases don't cover. Both embed the minted token. A tailnet
+// join URL switches the one-liner into join.sh's KLITE_VPN=tailscale mode,
+// since a machine that can dial it must be on the tailnet itself.
 func printJoinBlock(out io.Writer, name, url, token string) {
+	tailnet := tailnetHost(hostOf(url))
 	fmt.Fprintf(out, "\njoin from the new machine (Linux with systemd, as root):\n\n")
 	fmt.Fprintf(out, "  curl -sfL https://github.com/schew2381/k-lite/releases/latest/download/join.sh | \\\n")
-	fmt.Fprintf(out, "    KLITE_URL=%s KLITE_TOKEN='%s' KLITE_NODE=%s sh -\n\n", url, token, name)
+	if tailnet {
+		fmt.Fprintf(out, "    KLITE_URL=%s KLITE_TOKEN='%s' KLITE_NODE=%s \\\n", url, token, name)
+		fmt.Fprintf(out, "    KLITE_VPN=tailscale KLITE_TS_AUTHKEY='tskey-auth-…' KLITE_YES=1 sh -\n\n")
+	} else {
+		fmt.Fprintf(out, "    KLITE_URL=%s KLITE_TOKEN='%s' KLITE_NODE=%s sh -\n\n", url, token, name)
+	}
 	fmt.Fprintf(out, "until a public release exists (or off Linux), copy bin/klite-agent to the\nmachine and run it by hand:\n\n")
 	fmt.Fprintf(out, "  sudo ./klite-agent --node %s --server %s \\\n", name, url)
 	fmt.Fprintf(out, "    --token '%s' \\\n", token)
 	fmt.Fprintf(out, "    --advertise-address <address other machines dial>\n\n")
-	fmt.Fprintf(out, "on a real Linux machine --advertise-address is not optional: the default\n"+
-		"resolves to the Docker bridge gateway there, usually 172.17.0.1, and every\n"+
-		"other node would dial its own bridge. join.sh detects the public IPv4 and\n"+
-		"refuses to guess when it only finds private addresses.\n")
+	if tailnet {
+		fmt.Fprintf(out, "%s is a tailnet address, so the new machine has to join the tailnet\n"+
+			"before it can dial klited. The one-liner does that during install.\n"+
+			"Replace the KLITE_TS_AUTHKEY placeholder with a key minted at\n"+
+			"https://login.tailscale.com/admin/settings/keys. KLITE_YES=1 consents\n"+
+			"to installing Docker and tailscale via their official scripts. The agent\n"+
+			"then advertises the machine's own tailnet IP. With the manual fallback,\n"+
+			"pass --advertise-address \"$(tailscale ip -4)\" (docs/real-nodes.md).\n", hostOf(url))
+	} else {
+		fmt.Fprintf(out, "on a real Linux machine --advertise-address is not optional: the default\n"+
+			"resolves to the Docker bridge gateway there, usually 172.17.0.1, and every\n"+
+			"other node would dial its own bridge. join.sh detects the public IPv4 and\n"+
+			"refuses to guess when it only finds private addresses.\n")
+	}
 	if h := hostOf(url); localOnlyHost(h) {
 		fmt.Fprintf(out, "\nnote: the new machine cannot dial %s. re-run with --url set to an\n"+
 			"address it can reach, and make sure klited listens there\n"+
 			"(bin/klited --listen 0.0.0.0:7443).\n", url)
 	}
+}
+
+// cgnatRange is the shared address space (RFC 6598), which doubles as the
+// range Tailscale assigns every tailnet IPv4 from.
+var cgnatRange = netip.MustParsePrefix("100.64.0.0/10")
+
+// tailnetHost reports whether the join URL points into a tailnet, which flips
+// the printed one-liner into join.sh's tailscale mode.
+func tailnetHost(h string) bool {
+	ip, err := netip.ParseAddr(h)
+	return err == nil && cgnatRange.Contains(ip)
 }
 
 // localOnlyHost reports whether the join URL's host only works from this

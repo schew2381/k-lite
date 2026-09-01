@@ -97,6 +97,64 @@ func TestNodeAddAppliesAndPrintsJoinBlock(t *testing.T) {
 	if strings.Contains(got, "note: the new machine cannot dial") {
 		t.Errorf("local-only note printed for a routable URL:\n%s", got)
 	}
+	if strings.Contains(got, "KLITE_VPN") {
+		t.Errorf("tailscale mode printed for a public URL:\n%s", got)
+	}
+}
+
+// A tailnet join URL (100.64.0.0/10) must flip the one-liner into join.sh's
+// tailscale mode: the machine can only dial that address from inside the
+// tailnet, so the plain line would leave it advertising an unreachable IP.
+func TestNodeAddTailnetURLPrintsTailscaleMode(t *testing.T) {
+	t.Parallel()
+	fake := &fakeNodeAddClient{token: testJoinToken}
+	var out strings.Builder
+	err := runNodeAdd(context.Background(), fake, &out, &nodeAddOpts{
+		name: "node-5",
+		url:  "100.64.7.1:7443",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"KLITE_URL=100.64.7.1:7443 KLITE_TOKEN='K10abc::node:s3cret' KLITE_NODE=node-5",
+		"KLITE_VPN=tailscale",
+		"KLITE_TS_AUTHKEY=",
+		"login.tailscale.com/admin/settings/keys",
+		`--advertise-address "$(tailscale ip -4)"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "note: the new machine cannot dial") {
+		t.Errorf("local-only note printed for a tailnet URL:\n%s", got)
+	}
+}
+
+func TestTailnetHost(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"100.64.0.0", true},
+		{"100.100.100.100", true},
+		{"100.127.255.255", true},
+		{"100.63.255.255", false},
+		{"100.128.0.0", false},
+		{"203.0.113.7", false},
+		{"cp.example.com", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			if got := tailnetHost(tt.host); got != tt.want {
+				t.Errorf("tailnetHost(%q) = %v, want %v", tt.host, got, tt.want)
+			}
+		})
+	}
 }
 
 // Bare defaults must produce a minimal manifest (server defaulting owns

@@ -138,6 +138,7 @@ Declare a node and get its join command in one step.
 klite node add laptop-1
 klite node add laptop-1 --labels zone=sfo --max-instances 16
 klite node add laptop-1 --url 203.0.113.7:7443
+klite node add lte-box --url 100.101.102.103:7443   # tailnet URL, prints the tailscale-mode line
 ```
 
 `node add` applies the Node object, mints a join token, and prints two paste-ready blocks. The first is the one-command join for a fresh Linux box, which fetches `join.sh` from the latest GitHub release and leaves the agent running under systemd. The second is the manual fallback for machines the releases don't cover yet: copy `bin/klite-agent` over and run it with `--server`, `--token`, and `--advertise-address`. Re-running the command is safe. Apply reports the node unchanged and the join block prints again.
@@ -145,6 +146,8 @@ klite node add laptop-1 --url 203.0.113.7:7443
 The printed join line dials `--url`, which defaults to this CLI's own server endpoint. When that endpoint is loopback the output flags it and asks for an address the new machine can reach, one a klited actually listens on (`bin/klited --listen 0.0.0.0:7443`).
 
 On a real Linux machine `--advertise-address` is not optional. The agent's default resolves to the Docker bridge gateway there, usually `172.17.0.1`, and advertising that makes every other node dial its own bridge. `join.sh` detects the machine's public IPv4 and refuses to guess when it only finds private addresses. The full real-machine story, firewall step included, lives in [real-nodes.md](real-nodes.md).
+
+A `--url` inside `100.64.0.0/10` means the control plane lives on a tailnet, so the printed one-liner switches to `join.sh`'s `KLITE_VPN=tailscale` mode. That mode installs tailscale (`KLITE_YES=1` consents), joins the tailnet with the `KLITE_TS_AUTHKEY` you mint in the Tailscale admin console, and advertises the machine's own tailnet IP. Internet-wide clusters are that mode's whole point — [real-nodes.md](real-nodes.md)'s "Over the open internet" section walks through it.
 
 ## The knobs behind the commands
 
