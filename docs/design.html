@@ -487,11 +487,6 @@ spec:
   <div class="wrap">
     <p class="eyebrow"><b>07</b>a node joins</p>
     <h2>From declared to Ready, on either home</h2>
-    <p class="lede">
-      A Node is declared first, and its card waits NotReady until a machine claims it. Only the start
-      differs by home — everything after the dial is byte-for-byte identical.
-    </p>
-
     <div class="split">
       <div>
         <p class="filetag">on this machine — one button in the UI</p>
@@ -547,7 +542,7 @@ klite-agent --node node-5 --token K10…</div>
       <li>the recorded costs: no revocation short of rotating the CA, and the dialer verifies the chain, not the specific node's name</li>
     </ul>
     <div class="boardbox">
-      <svg id="board-mtls" role="img" aria-label="One node certificate used both ways: as the client certificate for the agent's gRPC and Envoy's xDS stream to klited, and as the server certificate on the node's mTLS ingress listeners that other nodes dial."></svg>
+      <svg id="board-mtls" role="img" aria-label="Two mTLS handshake ladders. Left: node to node — Envoy A dials Envoy B, B presents its certificate, A verifies it against its local CA file, B demands and verifies A's certificate the same way, then both sides agree on session keys. Right: node to control plane — the same exchange against klited, ending with the xDS streams flowing."></svg>
     </div>
   </div>
 </section>
@@ -556,7 +551,7 @@ klite-agent --node node-5 --token K10…</div>
 <section id="wan">
   <div class="wrap">
     <p class="eyebrow"><b>09</b>crossing machines</p>
-    <h2>Remote endpoints become machine:port, behind proxy mTLS</h2>
+    <h2>Connection to nodes over open internet</h2>
     <p class="lede">
       Cross-machine traffic was deliberately deferred, then landed as the smallest honest
       design: when the picked endpoint lives elsewhere, EDS hands over
@@ -997,34 +992,50 @@ function makeScene(svgId, vw, vh){
   sc.txt(720, 306, "VIP, so the last hop is a raw dial", { size:10.5, cls:"lbl soft" });
 })();
 
-/* ---------- 08 · one cert, both directions ---------- */
+/* ---------- 08 · the two mTLS handshakes, ladder style ---------- */
 (function mtls(){
-  const sc = makeScene("board-mtls", 1000, 250);
+  const sc = makeScene("board-mtls", 1000, 420);
 
-  sc.rect(40, 40, 340, 170, { rx:11, sw:2.3 });
-  sc.txt(60, 68, "node-5", { size:13.5, weight:750, cls:"mono" });
-  sc.rect(58, 84, 304, 66, { rx:8, sw:1.8 });
-  sc.txt(74, 106, "node.crt — CN=klite:node:node-5", { size:10.5, cls:"mono" });
-  sc.txt(74, 124, "ClientAuth + ServerAuth · key never traveled", { size:9.5, cls:"mono soft" });
-  sc.txt(60, 172, "minted once: token → CSR → cert", { size:9.5, cls:"mono soft" });
-  sc.txt(60, 190, "agent and envoy share it", { size:9.5, cls:"mono soft" });
+  function ladder(x0, w, title, leftName, rightName, rows, finale, finaleColor){
+    const xa = x0 + 80, xb = x0 + w - 80;
+    sc.txt(x0 + w/2, 34, title, { size:12.5, anchor:"middle", weight:750, cls:"mono" });
+    sc.rect(xa - 70, 48, 140, 36, { rx:8, sw:2 });
+    sc.txt(xa, 70, leftName, { size:11, anchor:"middle", weight:650, cls:"mono" });
+    sc.rect(xb - 70, 48, 140, 36, { rx:8, sw:2 });
+    sc.txt(xb, 70, rightName, { size:11, anchor:"middle", weight:650, cls:"mono" });
+    sc.line(`M ${xa} 84 L ${xa} 356`, { sw:1.4, dash:"3 5", stroke:C.ghost });
+    sc.line(`M ${xb} 84 L ${xb} 356`, { sw:1.4, dash:"3 5", stroke:C.ghost });
+    let y = 116;
+    for (const [dir, label, note, noteSide] of rows){
+      if (dir === ">") sc.arrow(`M ${xa} ${y} L ${xb - 6} ${y}`, { sw:1.9, dash:null });
+      else             sc.arrow(`M ${xb} ${y} L ${xa + 6} ${y}`, { sw:1.9, dash:null });
+      sc.txt((xa + xb) / 2, y - 8, label, { size:9.6, anchor:"middle", cls:"mono" });
+      if (note){
+        const nx = noteSide === "l" ? xa + 10 : xb - 10;
+        sc.txt(nx, y + 16, note, { size:8.8, anchor: noteSide === "l" ? "start" : "end", cls:"mono", fill:C.data });
+      }
+      y += 52;
+    }
+    sc.line(`M ${xa} ${y} L ${xb} ${y}`, { sw:2.4, stroke:finaleColor, dash:"2 4" });
+    sc.txt((xa + xb) / 2, y - 8, finale, { size:9.8, anchor:"middle", cls:"mono", fill:finaleColor, weight:700 });
+  }
 
-  sc.rect(660, 34, 310, 88, { rx:10, sw:2.2 });
-  sc.txt(680, 62, "klited", { size:13, weight:750, cls:"mono" });
-  sc.txt(680, 82, "CA inside · deny-by-default gate", { size:9.8, cls:"mono soft" });
-  sc.txt(680, 100, "certs = agents + xDS · bearer = admin", { size:9.8, cls:"mono soft" });
+  ladder(14, 470, "node → node (ingress)", "envoy A", "envoy B", [
+    [">", "TLS dial — advertise:ingressPort", null, null],
+    ["<", "B's node.crt", "✓ chains to my ca.crt", "l"],
+    ["<", "your cert too (mTLS required)", null, null],
+    [">", "A's node.crt", "✓ chains to my ca.crt", "r"],
+  ], "session keys from the node.key files — encrypted from here", C.data);
 
-  sc.rect(660, 150, 310, 66, { rx:10, sw:2, dash:"6 5" });
-  sc.txt(680, 176, "any other node's envoy", { size:11.5, weight:650, cls:"mono" });
-  sc.txt(680, 196, "dials this node's ingress ports", { size:9.5, cls:"mono soft" });
-
-  sc.arrow("M 384 92 C 500 74, 560 70, 654 74", { sw:2.1, label:"gRPC + xDS — this cert as the client", lx:404, ly:52, lsize:9.5 });
-  sc.lock(520, 66);
-  sc.arrow("M 654 184 C 560 190, 480 176, 386 140", { sw:2.1, stroke:C.data, label:"mTLS ingress — this cert as the server", lx:420, ly:214, lsize:9.5, lcolor:C.data });
-  sc.lock(520, 172, C.data);
+  ladder(516, 470, "node → control plane", "agent · envoy", "klited", [
+    [">", "dial :7443 — gRPC over TLS", null, null],
+    ["<", "klited's serving cert", "✓ not a rogue control plane", "l"],
+    ["<", "your cert too", null, null],
+    [">", "node.crt", "✓ chains + CN=klite:node:…", "r"],
+  ], "desired state + xDS stream down: LDS · CDS · EDS", C.ctrl);
 })();
 
-/* ---------- 10 · the WAN hop ---------- *//* ---------- 10 · the WAN hop ---------- */
+/* ---------- 10 · the WAN hop ---------- *//* ---------- 10 · the WAN hop ---------- *//* ---------- 10 · the WAN hop ---------- */
 (function wan(){
   const sc = makeScene("board-wan", 1000, 480);
 
