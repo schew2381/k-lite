@@ -39,6 +39,10 @@ type Config struct {
 	// bind-mounts it into Envoy. Empty renders a plaintext xDS bootstrap,
 	// which only unit tests should ever see.
 	TLSDir string
+	// AdvertiseAddress is what other machines dial for this node's ingress
+	// ports (ADR 0024): an IP, or a hostname the agent resolves before
+	// reporting (advertise.go). Empty advertises nothing.
+	AdvertiseAddress string
 	// CommandDial opens a connection pinned to one endpoint. The command
 	// plane needs it: output pushes must reach the exact klited holding the
 	// command stream, which Client's round-robin channel cannot promise.
@@ -49,14 +53,15 @@ type Config struct {
 // Agent is the per-node loop. All mutable state sits behind mu. The reconcile
 // loop is the only writer of states, and the report loop reads them.
 type Agent struct {
-	node        string
-	token       string
-	rt          runtime.Runtime
-	client      klitev1.AgentServiceClient
-	serverAddrs []string
-	stateDir    string
-	tlsDir      string
-	now         func() time.Time
+	node          string
+	token         string
+	rt            runtime.Runtime
+	client        klitev1.AgentServiceClient
+	serverAddrs   []string
+	stateDir      string
+	tlsDir        string
+	advertiseFlag string
+	now           func() time.Time
 
 	// lockedDonor and lockAttempt belong to the netLoop goroutine alone:
 	// which donor container already got the admin-port lockdown, and when
@@ -81,6 +86,7 @@ type Agent struct {
 	appliedNet   *klitev1.NetDesired           // last config klite-net acked
 	probeReady   map[string]bool               // instance name -> latest probe verdict
 	netHealthy   bool                          // klite-net DNS answering
+	advertiseIP  string                        // resolved advertise address (advertise.go)
 	commands     map[string]context.CancelFunc // running server commands by id (commands.go)
 
 	cmdWG sync.WaitGroup // one entry per running command handler
@@ -100,6 +106,8 @@ func New(cfg *Config) *Agent {
 		serverAddrs:   cfg.ServerAddrs,
 		stateDir:      cfg.StateDir,
 		tlsDir:        cfg.TLSDir,
+		advertiseFlag: cfg.AdvertiseAddress,
+		advertiseIP:   literalAdvertiseIP(cfg.AdvertiseAddress),
 		cmdDial:       cfg.CommandDial,
 		now:           time.Now,
 		desired:       map[string]*klitev1.Instance{},
@@ -142,7 +150,9 @@ func (a *Agent) Run(ctx context.Context) error {
 func (a *Agent) register(ctx context.Context) error {
 	backoff := time.Second
 	for {
-		resp, err := a.client.Register(ctx, &klitev1.RegisterRequest{Node: a.node, ClusterToken: a.token})
+		resp, err := a.client.Register(ctx, &klitev1.RegisterRequest{
+			Node: a.node, ClusterToken: a.token, AdvertiseAddress: a.currentAdvertiseIP(),
+		})
 		if err == nil {
 			a.mu.Lock()
 			a.net = resp.GetNet()
@@ -294,7 +304,10 @@ func (a *Agent) reportLoop(ctx context.Context) {
 }
 
 func (a *Agent) report(ctx context.Context) {
-	req := &klitev1.ReportStatusRequest{Node: a.node, Instances: a.statusUpdates(), KliteNet: a.kliteNetStatus()}
+	req := &klitev1.ReportStatusRequest{
+		Node: a.node, Instances: a.statusUpdates(), KliteNet: a.kliteNetStatus(),
+		AdvertiseAddress: a.currentAdvertiseIP(),
+	}
 	rctx, cancel := context.WithTimeout(ctx, reportTimeout)
 	defer cancel()
 	if _, err := a.client.ReportStatus(rctx, req); err != nil && ctx.Err() == nil {

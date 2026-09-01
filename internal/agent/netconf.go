@@ -39,6 +39,9 @@ func (a *Agent) netLoop(ctx context.Context) {
 			slog.Warn("infra pod not converged", "err", err)
 			a.setNetHealthy(false)
 		} else {
+			// The donor exists now, so a hostname advertise address has
+			// its /etc/hosts to resolve against (advertise.go).
+			a.ensureAdvertiseIP(ctx)
 			a.syncNet(ctx, admin)
 		}
 		select {

@@ -27,7 +27,8 @@ type fakeRuntime struct {
 	removes  []string // container IDs
 	stopWait []time.Duration
 
-	infra []runtime.InfraInfo // ListInfra's canned answer
+	infra     []runtime.InfraInfo // ListInfra's canned answer
+	hostsFile []byte              // ReadContainerFile's canned /etc/hosts
 }
 
 func newFakeRuntime() *fakeRuntime {
@@ -52,6 +53,15 @@ func (f *fakeRuntime) ListInfra(context.Context, string) ([]runtime.InfraInfo, e
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return slices.Clone(f.infra), nil
+}
+
+func (f *fakeRuntime) ReadContainerFile(context.Context, string, string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.hostsFile == nil {
+		return nil, errors.New("no such container")
+	}
+	return slices.Clone(f.hostsFile), nil
 }
 
 func (f *fakeRuntime) RunInstance(_ context.Context, inst *klitev1.Instance, _, _ string) (string, error) {

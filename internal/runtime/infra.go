@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"archive/tar"
 	"context"
 	"fmt"
 	"io"
@@ -132,6 +133,32 @@ func splitHostBind(addr string) (netip.Addr, string, error) {
 		return netip.Addr{}, "", fmt.Errorf("host bind %q: %w", addr, err)
 	}
 	return ap.Addr(), fmt.Sprintf("%d", ap.Port()), nil
+}
+
+// ReadContainerFile pulls one file out of a container through the archive
+// API, which works on scratch images where exec can't.
+func (d *Docker) ReadContainerFile(ctx context.Context, name, path string) ([]byte, error) {
+	res, err := d.cli.CopyFromContainer(ctx, name, client.CopyFromContainerOptions{SourcePath: path})
+	if err != nil {
+		return nil, fmt.Errorf("copy %s from %s: %w", path, name, err)
+	}
+	defer res.Content.Close()
+	tr := tar.NewReader(res.Content)
+	for {
+		hdr, err := tr.Next()
+		if err != nil {
+			// io.EOF here means the archive held no regular file entry.
+			return nil, fmt.Errorf("read %s from %s: %w", path, name, err)
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		b, err := io.ReadAll(io.LimitReader(tr, 1<<20))
+		if err != nil {
+			return nil, fmt.Errorf("read %s from %s: %w", path, name, err)
+		}
+		return b, nil
+	}
 }
 
 // ListInfra lists infra containers carrying the given role label.

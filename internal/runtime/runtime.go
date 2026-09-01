@@ -142,4 +142,10 @@ type Runtime interface {
 	// stream open until the container exits or ctx ends. The caller closes
 	// the reader.
 	Logs(ctx context.Context, containerID string, follow bool, tail int32) (io.ReadCloser, error)
+	// ReadContainerFile returns one file's bytes from a container's
+	// filesystem, running or not. The agent reads the donor's /etc/hosts
+	// with it: dockerd writes the resolved host-gateway address there at
+	// create time, and on a Mac that file is the only place the
+	// container-reachable host address exists (ADR 0024).
+	ReadContainerFile(ctx context.Context, name, path string) ([]byte, error)
 }

@@ -187,8 +187,33 @@ func (a *Agent) netContainerSpec(nb *klitev1.NetBootstrap) *runtime.InfraContain
 		},
 		Labels: a.infraLabels(nb, runtime.RoleNet),
 	}
+	// The whole ingress slice publishes at creation — Docker can't add
+	// ports to a running container — on every interface, because remote
+	// machines dial these (ADR 0024). Envoy binds them one listener per
+	// local endpoint as allocations arrive. The map feeds the config hash,
+	// so donors from before this range recreate exactly once.
+	lo, hi := ingressPortRange(nb)
+	for p := lo; p < hi; p++ {
+		spec.Ports[fmt.Sprintf("%d/tcp", p)] = fmt.Sprintf("0.0.0.0:%d", p)
+	}
 	spec.Labels[runtime.LabelConfigHash] = configHash(spec)
 	return spec
+}
+
+// ingressPortRange is the node's half-open published slice [lo, hi),
+// derived from NetBootstrap exactly like the allocator derives it server
+// side. A pre-M9 server sends no base, and the slice stays empty.
+func ingressPortRange(nb *klitev1.NetBootstrap) (lo, hi int) {
+	base, per, idx := int(nb.GetIngressPortBase()), int(nb.GetIngressPortsPerNode()), int(nb.GetNodeIndex())
+	if base <= 0 || per <= 0 || idx < 1 {
+		return 0, 0
+	}
+	lo = base + per*(idx-1)
+	hi = lo + per
+	if hi > 65536 {
+		return 0, 0
+	}
+	return lo, hi
 }
 
 func (a *Agent) ensureNetContainer(ctx context.Context, nb *klitev1.NetBootstrap) (*runtime.InfraStatus, error) {

@@ -35,6 +35,8 @@ func main() {
 	clusterToken := flag.String("cluster-token", "", "deprecated alias for --token")
 	stateDir := flag.String("state-dir", "", "root for per-node files, identity included (default ~/.klite/agent)")
 	dockerHost := flag.String("docker-host", "", "Docker daemon address, overriding DOCKER_HOST and socket autodetection")
+	advertise := flag.String("advertise-address", "host.docker.internal",
+		"address other machines dial for this node's ingress ports (ADR 0024); hostnames resolve via the donor, and the default reaches this machine's Docker host")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -45,13 +47,13 @@ func main() {
 	if *token == "" {
 		*token = *clusterToken
 	}
-	if err := run(*node, *server, *token, *stateDir, *dockerHost); err != nil && !errors.Is(err, context.Canceled) {
+	if err := run(*node, *server, *token, *stateDir, *dockerHost, *advertise); err != nil && !errors.Is(err, context.Canceled) {
 		slog.Error("klite-agent exited", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(node, server, token, stateDir, dockerHost string) error {
+func run(node, server, token, stateDir, dockerHost, advertise string) error {
 	// SIGTERM just ends the process. Containers stay up for the next agent
 	// run to adopt (see agent.Run).
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -82,13 +84,14 @@ func run(node, server, token, stateDir, dockerHost string) error {
 
 	slog.Info("klite-agent starting", "node", node, "servers", strings.Join(endpoints, ","), "identity", ident.Dir)
 	a := agent.New(&agent.Config{
-		Node:        node,
-		Token:       token,
-		Runtime:     rt,
-		Client:      klitev1.NewAgentServiceClient(conn),
-		ServerAddrs: endpoints,
-		StateDir:    stateDir,
-		TLSDir:      ident.Dir,
+		Node:             node,
+		Token:            token,
+		Runtime:          rt,
+		Client:           klitev1.NewAgentServiceClient(conn),
+		ServerAddrs:      endpoints,
+		StateDir:         stateDir,
+		TLSDir:           ident.Dir,
+		AdvertiseAddress: advertise,
 		// The command plane pins one endpoint per stream life: output
 		// pushes only route on the klited that sent the command.
 		CommandDial: func(endpoint string) (*grpc.ClientConn, error) {

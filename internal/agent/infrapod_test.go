@@ -38,6 +38,43 @@ func TestNetContainerSpecHonorsBasesAndClusterLabel(t *testing.T) {
 	}
 }
 
+// The donor publishes its whole ingress slice on every interface at
+// creation (ADR 0024), and adding the slice moves the config hash so
+// pre-M9 donors recreate exactly once.
+func TestNetContainerSpecPublishesIngressRange(t *testing.T) {
+	t.Parallel()
+	a := New(&Config{Node: "node-2"})
+	bare := &klitev1.NetBootstrap{KliteNetIp: "10.44.0.12", NodeIndex: 2}
+	withRange := &klitev1.NetBootstrap{
+		KliteNetIp: "10.44.0.12", NodeIndex: 2,
+		IngressPortBase: 20000, IngressPortsPerNode: 32,
+	}
+	a.net = withRange
+	spec := a.netContainerSpec(withRange)
+	// Node index 2 owns [20032, 20064): 2 admin ports + 32 ingress ports.
+	if len(spec.Ports) != 34 {
+		t.Fatalf("published ports = %d, want 34", len(spec.Ports))
+	}
+	for _, p := range []string{"20032/tcp", "20063/tcp"} {
+		want := "0.0.0.0:" + p[:5]
+		if got := spec.Ports[p]; got != want {
+			t.Fatalf("port %s bound to %q, want %q (all interfaces)", p, got, want)
+		}
+	}
+	if _, ok := spec.Ports["20064/tcp"]; ok {
+		t.Fatal("published past the node's slice")
+	}
+
+	a.net = bare
+	old := a.netContainerSpec(bare)
+	if _, ok := old.Ports["20032/tcp"]; ok {
+		t.Fatal("a pre-M9 bootstrap must publish no ingress ports")
+	}
+	if old.Labels[runtime.LabelConfigHash] == spec.Labels[runtime.LabelConfigHash] {
+		t.Fatal("config hash must move when the range appears, forcing one donor recreate")
+	}
+}
+
 func TestEvictNetSquattersGuardsForeignClusters(t *testing.T) {
 	t.Parallel()
 	rt := newFakeRuntime()
