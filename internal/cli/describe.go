@@ -16,7 +16,7 @@ import (
 	"github.com/schew2381/k-lite/internal/object"
 )
 
-func newDescribeCmd(server *string) *cobra.Command {
+func newDescribeCmd(cfg *connCfg) *cobra.Command {
 	return &cobra.Command{
 		Use:   "describe <kind> <name>",
 		Short: "Show one object's spec and status in full",
@@ -26,7 +26,7 @@ func newDescribeCmd(server *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			conn, client, err := dial(*server)
+			conn, client, err := dial(cfg)
 			if err != nil {
 				return err
 			}

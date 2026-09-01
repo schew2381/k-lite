@@ -11,7 +11,7 @@ import (
 
 // newPolicyCmd builds `klite policy check <from> <to>`, which asks the server
 // for the verdict its own data plane enforces.
-func newPolicyCmd(server *string) *cobra.Command {
+func newPolicyCmd(cfg *connCfg) *cobra.Command {
 	policy := &cobra.Command{
 		Use:   "policy",
 		Short: "Inspect NetworkPolicy behavior",
@@ -21,7 +21,7 @@ func newPolicyCmd(server *string) *cobra.Command {
 		Short: "Report whether traffic from one service to another is allowed",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			conn, client, err := dial(*server)
+			conn, client, err := dial(cfg)
 			if err != nil {
 				return err
 			}

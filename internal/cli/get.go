@@ -16,7 +16,7 @@ import (
 	"github.com/schew2381/k-lite/internal/object"
 )
 
-func newGetCmd(server *string) *cobra.Command {
+func newGetCmd(cfg *connCfg) *cobra.Command {
 	var output string
 	var watch bool
 	cmd := &cobra.Command{
@@ -32,7 +32,7 @@ func newGetCmd(server *string) *cobra.Command {
 			if len(args) == 2 {
 				name = args[1]
 			}
-			conn, client, err := dial(*server)
+			conn, client, err := dial(cfg)
 			if err != nil {
 				return err
 			}

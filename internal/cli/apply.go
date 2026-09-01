@@ -14,7 +14,7 @@ import (
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
 )
 
-func newApplyCmd(server *string) *cobra.Command {
+func newApplyCmd(cfg *connCfg) *cobra.Command {
 	var files []string
 	cmd := &cobra.Command{
 		Use:   "apply -f <file|dir|->",
@@ -25,7 +25,7 @@ func newApplyCmd(server *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			conn, client, err := dial(*server)
+			conn, client, err := dial(cfg)
 			if err != nil {
 				return err
 			}

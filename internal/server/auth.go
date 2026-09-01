@@ -108,9 +108,9 @@ func (a *Auth) authorize(ctx context.Context, fullMethod string) (context.Contex
 
 func denied(p principal, want string) error {
 	if p.kind == principalNone {
-		return status.Errorf(codes.Unauthenticated, "authentication required: present a %s", want)
+		return status.Errorf(codes.Unauthenticated, "authentication required: present the %s", want)
 	}
-	return status.Errorf(codes.PermissionDenied, "this method requires a %s", want)
+	return status.Errorf(codes.PermissionDenied, "this method requires the %s", want)
 }
 
 // principalOf inspects the TLS session first: a verified client cert with the

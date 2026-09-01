@@ -11,7 +11,7 @@ import (
 	"github.com/schew2381/k-lite/internal/object"
 )
 
-func newDeleteCmd(server *string) *cobra.Command {
+func newDeleteCmd(cfg *connCfg) *cobra.Command {
 	var files []string
 	cmd := &cobra.Command{
 		Use:   "delete (-f <file|dir|-> | <kind> <name>)",
@@ -39,7 +39,7 @@ func newDeleteCmd(server *string) *cobra.Command {
 				return fmt.Errorf("provide -f, or a kind and a name")
 			}
 
-			conn, client, err := dial(*server)
+			conn, client, err := dial(cfg)
 			if err != nil {
 				return err
 			}
@@ -58,7 +58,7 @@ func newDeleteCmd(server *string) *cobra.Command {
 	return cmd
 }
 
-func newScaleCmd(server *string) *cobra.Command {
+func newScaleCmd(cfg *connCfg) *cobra.Command {
 	var replicas int32
 	cmd := &cobra.Command{
 		Use:   "scale workload <name> --replicas N",
@@ -72,7 +72,7 @@ func newScaleCmd(server *string) *cobra.Command {
 			if replicas < 0 {
 				return fmt.Errorf("--replicas must be >= 0, got %d", replicas)
 			}
-			conn, client, err := dial(*server)
+			conn, client, err := dial(cfg)
 			if err != nil {
 				return err
 			}

@@ -10,14 +10,14 @@ import (
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
 )
 
-func newDrainCmd(server *string) *cobra.Command {
+func newDrainCmd(cfg *connCfg) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "drain <node>",
 		Short: "Cordon a node and move its instances elsewhere, surge-first",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			conn, client, err := dial(*server)
+			conn, client, err := dial(cfg)
 			if err != nil {
 				return err
 			}
