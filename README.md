@@ -32,7 +32,7 @@ klite uncordon node-2
 make down                                 # everything off: cluster, facade, frontend
 ```
 
-Joining another machine is two commands: `klite apply` the node's YAML, then run the agent with a token from `klite node token`. What that takes on a real machine on the open internet is written up in [`docs/real-nodes.md`](docs/real-nodes.md), packaging gaps included.
+Joining another machine is one command on each side: `klite node add node-4` declares the node, mints its token, and prints the join line, and pasting that line on a fresh Linux box fetches `join.sh` from the latest release, installs the agent, and leaves it running under systemd. How that works on a real machine on the open internet, and the two moves still yours to make (repo visibility, the first tag), is written up in [`docs/real-nodes.md`](docs/real-nodes.md).
 
 ## Architecture
 
@@ -108,7 +108,7 @@ The build gates are `make test` (vet + `-race -shuffle=on`), `make lint`, and `m
 
 ## Seeing it
 
-- [`frontend/`](frontend/README.md) is the live board: topology with traced calls, an etcd browser, tables, logs, policies. `make demo` opens it wired to the real cluster, and its MOCK mode runs a full in-browser simulator of the same ADRs (ADR 0023).
+- [`frontend/`](frontend/README.md) is the live board: topology with traced calls, an etcd browser, tables, logs, policies. `make demo` opens it wired to the real cluster, and its MOCK mode runs a full in-browser simulator of the same ADRs (ADR 0023). Releases attach the built board as `klite-ui-<tag>.tar.gz`, and `klite-facade --ui-dir <extracted dir>` serves it with no dev server involved.
 - [`docs/design.html`](docs/design.html) is the interactive design walkthrough from before any code existed.
 
 ## The decision trail
