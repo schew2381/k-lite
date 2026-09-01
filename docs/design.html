@@ -535,11 +535,17 @@ klite-agent --node node-5 --token K10…</div>
 <section id="identity">
   <div class="wrap">
     <p class="eyebrow"><b>08</b>identity</p>
-    <h2>One certificate, both directions</h2>
+    <h2>mTLS to communicate between nodes &amp; the control plane</h2>
     <p class="lede">
-      The join token buys each node one CA-signed certificate, and that identity authenticates
-      everything after it.
+      A token buys each node a certificate: the agent sends a CSR, klited's CA signs it, and the
+      result lives on the machine's disk (<code>~/.klite/agent/&lt;node&gt;/tls</code>).
     </p>
+    <ul class="plain">
+      <li>no list of valid certs is stored anywhere — not on disk, not in etcd</li>
+      <li>"valid" means the cert chains to the cluster CA, checked at every handshake</li>
+      <li>peer-to-peer ingress needs only the <code>ca.crt</code> file each Envoy already holds — any node cert the CA signed passes</li>
+      <li>the recorded costs: no revocation short of rotating the CA, and the dialer verifies the chain, not the specific node's name</li>
+    </ul>
     <div class="boardbox">
       <svg id="board-mtls" role="img" aria-label="One node certificate used both ways: as the client certificate for the agent's gRPC and Envoy's xDS stream to klited, and as the server certificate on the node's mTLS ingress listeners that other nodes dial."></svg>
     </div>
