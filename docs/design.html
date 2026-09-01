@@ -429,7 +429,7 @@ spec:
     <div class="codepane" style="margin-top:16px">/klite/v1/workloads/b            <span class="b">spec.replicas: 2</span>
 /klite/v1/instances/b-7da4       <span class="b">spec.node: node-1</span>
 /klite/v1/services/b             <span class="b">8080 → 80</span>
-/klite/v1/vipallocations/b.node-1     <span class="g">10.44.64.4</span>
+/klite/v1/vipallocations/b.node-1     <span class="g">10.44.64.5</span>
 /klite/v1/ingressallocations/b.b-7da4 <span class="g">:20002</span>
 /klite/leader                    <span class="y">★ 5s lease — controllers</span></div>
   </div>
@@ -476,6 +476,14 @@ spec:
       <svg id="board-call" role="img" aria-label="One call, numbered: the resolver appends svc.klite; kdns answers this node's VIP with TTL 5s; TCP lands on Envoy's VIP listener; the RBAC filter allows or resets; round-robin picks a Ready endpoint; Envoy dials the instance raw; the reply returns through the proxy."></svg>
     </div>
 
+    <h3 class="sub">Who creates a VIP</h3>
+    <ul class="plain">
+      <li>only Services have VIPs — one per (Service, Node) pair, so every node owns its own address for every service</li>
+      <li>klited's vip controller allocates it the moment the Service and the Node both exist: first free address in 10.44.64.0/18, stored as a <code>VIPAllocation</code> object (<code>b.node-1 → 10.44.64.5</code>)</li>
+      <li>the node's klite-net binds it as a /32 on the infra pod's interface, and the node's Envoy opens the listener on VIP:port</li>
+      <li>kdns hands it out — the same name resolves to a different VIP on every node, and the address never moves for the Service's lifetime</li>
+      <li>nothing else gets a VIP: instances have real bridge IPs Docker assigns, the infra pod has a formula-assigned static (10.44.0.10+n), and the machine itself has an advertise address</li>
+    </ul>
   </div>
 </section>
 
@@ -952,13 +960,13 @@ function makeScene(svgId, vw, vh){
 
   sc.rect(318, 100, 324, 64, { rx:8, sw:1.7 });
   sc.txt(334, 122, "kdns", { size:11.5, weight:650, cls:"mono" });
-  sc.txt(334, 140, "b.svc.klite → A 10.44.64.4 (TTL 5s)", { size:10, cls:"mono", fill:C.data });
+  sc.txt(334, 140, "b.svc.klite → A 10.44.64.5 (TTL 5s)", { size:10, cls:"mono", fill:C.data });
   sc.stepDot(304, 116, 3);
 
   sc.rect(318, 182, 324, 240, { rx:8, sw:1.7 });
   sc.txt(334, 204, "envoy", { size:11.5, weight:650, cls:"mono" });
   sc.rect(332, 216, 296, 48, { rx:7, sw:1.5 });
-  sc.txt(346, 235, "listener svc/b — 10.44.64.4:8080", { size:9.8, cls:"mono" });
+  sc.txt(346, 235, "listener svc/b — 10.44.64.5:8080", { size:9.8, cls:"mono" });
   sc.txt(346, 251, "freebind · chain: [rbac] [tcp_proxy]", { size:8.8, cls:"mono soft" });
   sc.stepDot(304, 234, 4);
   sc.rect(332, 274, 296, 44, { rx:7, sw:1.5 });
@@ -975,7 +983,7 @@ function makeScene(svgId, vw, vh){
 
   sc.arrow("M 152 130 C 230 120, 260 122, 314 128", { stroke:C.data, sw:1.9, dash:"5 5", label:"UDP :53", lx:210, ly:110, lsize:9.5 });
   sc.stepDot(240, 132, 2, C.data);
-  sc.arrow("M 150 160 C 240 210, 270 220, 328 240", { stroke:C.data, sw:2, label:"TCP 10.44.64.4:8080", lx:150, ly:230, lsize:9.5 });
+  sc.arrow("M 150 160 C 240 210, 270 220, 328 240", { stroke:C.data, sw:2, label:"TCP 10.44.64.5:8080", lx:150, ly:230, lsize:9.5 });
   sc.arrow("M 328 358 C 240 380, 190 376, 156 368", { stroke:C.data, sw:2, label:"raw: 10.44.128.6:80", lx:180, ly:412, lsize:9.5 });
   sc.stepDot(240, 372, 7, C.data);
 
