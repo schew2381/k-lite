@@ -33,7 +33,7 @@ const LIVE_FLIGHT_CAP = 24 // beyond this, extra calls stay rail-only
 const SVGNS = 'http://www.w3.org/2000/svg'
 
 type Phase =
-  | { kind: 'pause'; anchorId: string; stepIndex: number; short: string }
+  | { kind: 'pause'; anchorId: string; stepIndex: number; short: string; quick?: boolean }
   | {
       kind: 'travel'
       fromId: string
@@ -128,7 +128,13 @@ function phasesOf(trace: Trace, flow: FlowMode): Phase[] {
           label: `${trace.event.fromService}→${trace.event.toService}`,
         })
       }
-      phases.push({ kind: 'pause', anchorId, stepIndex: i, short: step.short })
+      phases.push({
+        kind: 'pause',
+        anchorId,
+        stepIndex: i,
+        short: step.short,
+        quick: step.pace === 'short',
+      })
     }
     prevAnchor = anchorId
   })
@@ -243,7 +249,14 @@ export function TrafficDotLayer({
 
     const stepFlight = (f: Flight, now: number, anchors: Record<string, Point>) => {
       const phase = f.phases[f.phase]
-      let dur = phase.kind === 'settle' ? (phase.hold ? pace.pause * 0.9 : pace.settle) : pace.pause
+      let dur =
+        phase.kind === 'settle'
+          ? phase.hold
+            ? pace.pause * 0.9
+            : pace.settle
+          : phase.kind === 'pause' && phase.quick
+            ? pace.pause * 0.55
+            : pace.pause
       if (phase.kind === 'travel') {
         if (phase.stepIndex !== undefined) dur = phase.zoom ? pace.stepTravel * 0.75 : pace.stepTravel
         else {

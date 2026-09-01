@@ -13,8 +13,9 @@ export interface TraceStep {
   at: 'caller' | 'kdns' | 'lds' | 'rbac' | 'eds' | 'targetInfra' | 'target'
   // 'travel': the step is told while the dot moves to `at`, not parked there
   motion?: 'travel'
-  // 'long': this travel is the story's headline, so it crosses fast and holds
-  pace?: 'long'
+  // 'long': this travel is the story's headline, so it crosses fast and
+  // holds. 'short': this pause reads quickly and shouldn't linger.
+  pace?: 'long' | 'short'
   // short label riding on the dot, e.g. "kdns: 10.44.64.7"
   short: string
   // one glanceable line for the trace panel

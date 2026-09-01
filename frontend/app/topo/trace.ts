@@ -50,6 +50,8 @@ export function buildTrace(e: TrafficEvent, s: Snapshot): Trace {
     },
   ]
 
+  const remote = targetNode !== undefined && targetNode !== e.viaNode
+
   if (e.verdict === 'denied' && e.reason === 'policy') {
     steps.push({
       at: 'rbac',
@@ -62,6 +64,8 @@ export function buildTrace(e: TrafficEvent, s: Snapshot): Trace {
 
   steps.push({
     at: 'rbac',
+    // the cross-node story is long already, and this line reads in a moment
+    ...(remote && { pace: 'short' as const }),
     short: e.matchedRule ? `RBAC ✓ ${e.matchedRule.policy}` : 'RBAC ✓ allow',
     detail: e.matchedRule
       ? `RBAC (${callerIp} = ${e.fromService}): ${e.matchedRule.policy} allows ${e.fromService} → ${e.toService}.`
@@ -79,7 +83,6 @@ export function buildTrace(e: TrafficEvent, s: Snapshot): Trace {
     return { event: e, steps, targetNode }
   }
 
-  const remote = targetNode !== undefined && targetNode !== e.viaNode
   if (!remote) {
     steps.push({
       at: 'eds',
@@ -118,6 +121,7 @@ export function buildTrace(e: TrafficEvent, s: Snapshot): Trace {
   })
   steps.push({
     at: 'targetInfra',
+    pace: 'short',
     short: ingress ? `DNAT :${ingress} → envoy` : 'DNAT → envoy ingress',
     detail: `The machine's published port lands the connection inside ${targetNode}'s infra pod (the DNAT hop), where Envoy terminates the mTLS.`,
     tone: 'info',
