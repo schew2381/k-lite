@@ -589,88 +589,46 @@ spec:
 <section id="reach">
   <div class="wrap">
     <p class="eyebrow"><b>10</b>reachability</p>
-    <h2>Joining needs one reachable machine. Traffic needs all of them.</h2>
+    <h2>Control vs Data plane communication</h2>
 
     <table class="addr" style="margin-top:22px">
       <thead><tr><th>traffic</th><th>direction</th><th>who must be reachable</th></tr></thead>
       <tbody>
-        <tr><td>control</td><td class="who">agent → klited, always outward</td><td>only klited's machine, on one port — a node behind hotel NAT joins and stays joined</td></tr>
-        <tr><td>data</td><td class="who">Envoy → Envoy, peer to peer</td><td>every machine hosting instances, on its advertise address + 32-port slice</td></tr>
+        <tr><td>control</td><td class="who">node → klited, outbound only</td><td>only klited's machine must be reachable — nodes never accept control connections, so any NAT is fine</td></tr>
+        <tr><td>data</td><td class="who">node ⇄ node, both directions</td><td>every machine running instances must be reachable at its advertise address</td></tr>
       </tbody>
     </table>
-    <p class="takeaway">NAT breaks exactly the second row, and quietly — joining only ever proved the first</p>
+    <p class="takeaway">NAT breaks the second row quietly: a NATed node joins fine, but traffic sent to it dies</p>
 
-    <div class="split">
-      <div>
-        <table class="truth">
-          <thead><tr><th>caller ↓ / callee →</th><th>reachable node<br>(routable IP)</th><th>NATed node<br>(or offline fallback)</th></tr></thead>
-          <tbody>
-            <tr><th>reachable node</th><td class="ok">✓</td><td class="bad">✕ blackhole</td></tr>
-            <tr><th>NATed node</th><td class="ok">✓</td><td class="ok">✓ same machine</td></tr>
-          </tbody>
-        </table>
-        <p class="takeaway">on one network this never bites: every node advertises the best address it has — tailnet IP first when one exists, else the Mac's LAN IP (<code>host.docker.internal</code> is the offline fallback, <code>KLITE_LAN=0</code> forces it). the blackhole is the raw open-internet case — a NATed node registers and looks healthy while traffic toward it dies</p>
-      </div>
-      <div>
-        <p class="filetag">joining a real machine — printed by <code>klite node add</code></p>
-        <div class="codepane"><span class="c"># fresh Linux box: curl + root</span>
-curl -sfL https://…/join.sh | \
-  KLITE_URL=<span class="g">203.0.113.7:7443</span> \
-  KLITE_TOKEN='K10…' KLITE_NODE=node-5 sh -
-
-<span class="c"># fetches the right binary, installs a systemd</span>
-<span class="c"># unit, joins — byte-for-byte the local flow.</span>
-<span class="c"># the infra image arrives from ghcr via the</span>
-<span class="c"># join bootstrap: nothing is built on the box</span></div>
-        <p class="takeaway">the playground already listens on <code>0.0.0.0:7443</code> whenever the Mac has a LAN address (the serving cert re-mints its SANs each boot) · real nodes still need <code>--advertise-address</code>, since self-detection would find the Docker bridge — join.sh refuses to guess</p>
-      </div>
-    </div>
   </div>
+</section>
+
+<!-- ============ 11 · THE OPEN INTERNET ============ -->  </div>
 </section>
 
 <!-- ============ 11 · THE OPEN INTERNET ============ -->
 <section id="overlay">
   <div class="wrap">
     <p class="eyebrow"><b>11</b>the open internet</p>
-    <h2>Internet clusters ride an overlay, not port maps</h2>
-    <p class="lede">
-      Control made the dial-out bet — one inbound address in the whole system. The data plane
-      reintroduced inbound, and across the open internet "every node dialable" fails per network:
-      a router rule per node, and carrier-grade NAT offers no inbound at all.
-    </p>
-
+    <h2>Mesh VPNs for peer-to-peer communication</h2>
     <div class="decs">
-      <div class="dec no"><span class="opt">port forwarding + dynamic DNS</span><span class="why">a rule and a stable address per network, nothing behind CGNAT — kept as the raw path for all-static-IP setups</span><span class="tag">rejected as default</span></div>
-      <div class="dec no"><span class="opt">self-hosted headscale</span><span class="why">drops the account, but the coordinator needs exactly the public endpoint whose absence motivates this</span><span class="tag">rejected as default</span></div>
-      <div class="dec no"><span class="opt">single-hub WireGuard</span><span class="why">no account, one udp/51820 forward total — spoke traffic hairpins through the hub, keys move by hand</span><span class="tag">recorded variant</span></div>
-      <div class="dec no"><span class="opt">IPv6 end to end</span><span class="why">no NAT, no traversal — and no cluster has run it; an unexercised raw path</span><span class="tag">recorded</span></div>
-      <div class="dec no"><span class="opt">native reverse tunnels</span><span class="why">klited is already everyone's dial target — but that's a relay in the data path, the one thing the design refuses</span><span class="tag">future</span></div>
-      <div class="dec yes"><span class="opt">a Tailscale tailnet</span><span class="why">both ends dial out, DERP relays carry what hole-punching can't, and k-lite changes zero lines — the tailnet IP is simply what nodes advertise and what klited serves. k3s ships the same integration shape, marked experimental</span><span class="tag">chosen</span></div>
+      <div class="dec no"><span class="opt">port forwarding</span><span class="why">needs router access and a public IP — impossible behind carrier-grade NAT</span><span class="tag">rejected</span></div>
+      <div class="dec no"><span class="opt">self-hosted headscale</span><span class="why">no account needed, but the server itself needs a public address</span><span class="tag">rejected</span></div>
+      <div class="dec no"><span class="opt">single-hub WireGuard</span><span class="why">works, but all traffic detours through one hub machine</span><span class="tag">rejected</span></div>
+      <div class="dec no"><span class="opt">IPv6 end to end</span><span class="why">no NAT to fight, but most networks don't have it</span><span class="tag">rejected</span></div>
+      <div class="dec no"><span class="opt">build our own tunnels</span><span class="why">we'd be writing and running our own relay system</span><span class="tag">future</span></div>
+      <div class="dec yes"><span class="opt">a Tailscale tailnet</span><span class="why">every machine dials out, NAT is solved for us, and k-lite changes zero lines of code</span><span class="tag">chosen</span></div>
     </div>
 
-    <div class="split">
-      <div>
-        <ul class="plain">
-          <li>The tailnet sits in the <b>coordination path, never the trust path</b> — the cluster CA still signs everything, so cross-node traffic is our mTLS inside their WireGuard. Encrypted twice, deliberately: an overlay misconfiguration can't downgrade the cluster's own authentication.</li>
-          <li><b>Install order matters once</b>: tailscale first, then restart klited — the serving cert walks interface addresses at boot, and skipping the restart is the documented x509-mismatch loop.</li>
-          <li><b>join.sh treats 100.64.0.0/10 three ways</b> on purpose: detection refuses it, explicit values pass, and <code>KLITE_VPN=tailscale</code> derives one deliberately.</li>
-          <li><b>Disable key expiry</b> for cluster machines — an expired tailnet node key (180-day default) looks exactly like a dead network.</li>
-          <li><b>Mixed clusters need no rule anymore</b>: when a tailnet exists, every node advertises its tailnet IP automatically — the Mac's local agents included. Tailscale keeps same-LAN peers on the direct local path, which is what makes tailnet-first safe.</li>
-        </ul>
-      </div>
-      <div>
-        <p class="filetag">joining across the internet — printed by klite node add</p>
-        <div class="codepane">curl -sfL https://…/join.sh | \
-  KLITE_URL=<span class="g">100.69.43.39:7443</span> \
-  KLITE_TOKEN='K10…' KLITE_NODE=laptop-1 \
-  KLITE_VPN=<span class="y">tailscale</span> \
-  KLITE_TS_AUTHKEY='tskey-auth-…' KLITE_YES=1 sh -
-<span class="c"># installs tailscale (consented), joins the</span>
-<span class="c"># tailnet, advertises tailscale ip -4, and</span>
-<span class="c"># proceeds as any other join</span></div>
-      </div>
-    </div>
+    <ul class="plain" style="margin-top:16px">
+      <li>every machine joins the tailnet and gets a stable <code>100.x</code> address, reachable from anywhere it can dial out</li>
+      <li>the tailnet only moves packets — k-lite's own CA and mTLS still authenticate everything, so cross-node traffic is encrypted twice</li>
+      <li>nodes advertise their tailnet IP automatically, so local and internet nodes mix freely</li>
+    </ul>
   </div>
+</section>
+
+<!-- ============ 12 · THE UI ============ -->  </div>
 </section>
 
 <!-- ============ 12 · THE UI ============ -->
