@@ -1,6 +1,7 @@
 package policy_test
 
 import (
+	"slices"
 	"testing"
 
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
@@ -207,6 +208,62 @@ func TestEvaluate(t *testing.T) {
 			from:     "ghost", to: "c",
 			want: policy.Decision{Allowed: false, MatchedPolicy: "deny-all-to-c", Reason: "denied by deny-all-to-c rule 1"},
 		},
+
+		// With from and to both wildcarded, the only opening is the excepted destination.
+		{
+			name:     "deny star to star except b blocks a to c",
+			policies: []*klitev1.NetworkPolicy{pol("deny-all", deny, rule("*", "*", "b"))},
+			from:     "a", to: "c",
+			want: policy.Decision{Allowed: false, MatchedPolicy: "deny-all", Reason: "denied by deny-all rule 1"},
+		},
+		{
+			name:     "deny star to star except b lets a to b through",
+			policies: []*klitev1.NetworkPolicy{pol("deny-all", deny, rule("*", "*", "b"))},
+			from:     "a", to: "b",
+			want: policy.Decision{Allowed: true, Reason: "no ALLOW targets b, default allow"},
+		},
+
+		// Names are opaque bytes, so Unicode compares exactly.
+		{
+			name:     "unicode names match exactly",
+			policies: []*klitev1.NetworkPolicy{pol("deny-emoji", deny, rule("café", "日本"))},
+			from:     "café", to: "日本",
+			want: policy.Decision{Allowed: false, MatchedPolicy: "deny-emoji", Reason: "denied by deny-emoji rule 1"},
+		},
+		{
+			name:     "unicode near-miss stays open",
+			policies: []*klitev1.NetworkPolicy{pol("deny-emoji", deny, rule("café", "日本"))},
+			from:     "cafe", to: "日本",
+			want: policy.Decision{Allowed: true, Reason: "no ALLOW targets 日本, default allow"},
+		},
+
+		// Empty query strings only ever match wildcards.
+		{
+			name:     "empty from matches only wildcard",
+			policies: []*klitev1.NetworkPolicy{pol("deny-a-to-b", deny, rule("a", "b"))},
+			from:     "", to: "b",
+			want: policy.Decision{Allowed: true, Reason: "no ALLOW targets b, default allow"},
+		},
+		{
+			name:     "wildcard deny catches empty strings",
+			policies: []*klitev1.NetworkPolicy{pol("deny-everything", deny, rule("*", "*"))},
+			from:     "", to: "",
+			want: policy.Decision{Allowed: false, MatchedPolicy: "deny-everything", Reason: "denied by deny-everything rule 1"},
+		},
+
+		// Degenerate inputs must not panic: nil entries and empty specs are skipped.
+		{
+			name:     "nil policy entry ignored",
+			policies: []*klitev1.NetworkPolicy{nil, denyAtoC},
+			from:     "a", to: "c",
+			want: policy.Decision{Allowed: false, MatchedPolicy: "deny-a-to-c", Reason: "denied by deny-a-to-c rule 1"},
+		},
+		{
+			name:     "policy without spec ignored",
+			policies: []*klitev1.NetworkPolicy{{Meta: &klitev1.Meta{Name: "hollow"}}, denyAtoC},
+			from:     "a", to: "c",
+			want: policy.Decision{Allowed: false, MatchedPolicy: "deny-a-to-c", Reason: "denied by deny-a-to-c rule 1"},
+		},
 	}
 
 	for _, tt := range tests {
@@ -273,4 +330,68 @@ func TestCompileDoesNotAliasExcept(t *testing.T) {
 	if src.Spec.Rules[0].Except[0] != "b" {
 		t.Error("Compile() aliased the source except slice")
 	}
+}
+
+// FuzzEvaluate holds the evaluator to three invariants on arbitrary names:
+//  1. same inputs give the same decision regardless of policy order
+//  2. a matching DENY rule forces a denial
+//  3. every decision carries a reason
+func FuzzEvaluate(f *testing.F) {
+	policies := []*klitev1.NetworkPolicy{
+		pol("deny-a-to-c", deny, rule("a", "c")),
+		pol("lockdown-a", deny, rule("a", "*", "b")),
+		pol("allow-only-a-to-b", allow, rule("a", "b")),
+		pol("allow-broad", allow, rule("*", "*", "c")),
+	}
+	reversed := make([]*klitev1.NetworkPolicy, len(policies))
+	for i, p := range policies {
+		reversed[len(policies)-1-i] = p
+	}
+
+	f.Add("a", "c")
+	f.Add("a", "b")
+	f.Add("", "")
+	f.Add("*", "*")
+	f.Add("café", "日本")
+	f.Fuzz(func(t *testing.T, from, to string) {
+		got := policy.Evaluate(policies, from, to)
+		if again := policy.Evaluate(policies, from, to); got != again {
+			t.Errorf("Evaluate(%q, %q) unstable: %+v then %+v", from, to, got, again)
+		}
+		if flipped := policy.Evaluate(reversed, from, to); got != flipped {
+			t.Errorf("Evaluate(%q, %q) depends on input order: %+v vs %+v", from, to, got, flipped)
+		}
+		if deniesNaively(policies, from, to) && got.Allowed {
+			t.Errorf("Evaluate(%q, %q) allowed despite a matching DENY: %+v", from, to, got)
+		}
+		if got.Reason == "" {
+			t.Errorf("Evaluate(%q, %q) returned an empty reason", from, to)
+		}
+	})
+}
+
+// deniesNaively is the fuzz oracle, a straight scan for any DENY rule
+// matching from->to.
+func deniesNaively(policies []*klitev1.NetworkPolicy, from, to string) bool {
+	for _, p := range policies {
+		if p.GetSpec().GetAction() != deny {
+			continue
+		}
+		for _, r := range p.GetSpec().GetRules() {
+			if denyRuleMatches(r, from, to) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func denyRuleMatches(r *klitev1.PolicyRule, from, to string) bool {
+	if r.GetFrom() != "*" && r.GetFrom() != from {
+		return false
+	}
+	if r.GetTo() == to {
+		return true
+	}
+	return r.GetTo() == "*" && !slices.Contains(r.GetExcept(), to)
 }
