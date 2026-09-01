@@ -54,7 +54,7 @@ STEP=preflight
 # laptop -> local-node traffic rides the published ingress ports. The
 # donor image comes from ghcr so remote joiners can pull it. No en0
 # address, or KLITE_LAN=0, keeps everything on loopback.
-LAN_NET_IMAGE=ghcr.io/schew2381/klite-net:v0.1.0
+LAN_NET_IMAGE=ghcr.io/schew2381/klite-net:v0.1.1
 MAC_IP=""
 [[ "${KLITE_LAN:-}" == 0 ]] || MAC_IP="$(ipconfig getifaddr en0 2>/dev/null || true)"
 LISTEN_HOST="127.0.0.1"

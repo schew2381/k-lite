@@ -20,7 +20,7 @@ KLITE_CLUSTER_TOKEN="${KLITE_CLUSTER_TOKEN:-dev-token}"
 DEV_DIR="${KLITE_DEV_DIR:-$HOME/.klite/dev}"
 SKIP_BUILD="${KLITE_DEV_SKIP_BUILD:-}"
 KLITE_LAN="${KLITE_LAN:-}"
-LAN_NET_IMAGE=ghcr.io/schew2381/klite-net:v0.1.0
+LAN_NET_IMAGE=ghcr.io/schew2381/klite-net:v0.1.1
 
 # LAN mode: with a Wi-Fi address on en0, klited listens on 0.0.0.0 so a
 # laptop on the same network can join the live playground. The exposure is
