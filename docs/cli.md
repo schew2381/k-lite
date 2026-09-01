@@ -128,7 +128,7 @@ Mint a join credential.
 klite node token
 ```
 
-`node token` prints the `K10<ca-hash>::node:<secret>` token a new node's agent presents once. The hash pins the cluster CA, so the joining machine needs no pre-shared files: apply the node's YAML and run the agent with `--token`. `node add` below does both steps and prints the command to paste.
+`node token` prints the `K10<ca-hash>::node:<secret>` token a new node's agent presents once. The hash pins the cluster CA, so the joining machine needs no pre-shared files: apply the node's YAML and run the agent with `--token`. `node add` below declares the node, mints the token, and prints the command to paste.
 
 ### klite node add
 
@@ -140,9 +140,9 @@ klite node add node-4 --labels zone=sfo --max-instances 16
 klite node add node-4 --url 203.0.113.7:7443
 ```
 
-`node add` applies the Node object, mints a join token, and prints two paste-ready blocks. The first is the one-command join for a fresh Linux box, which fetches `join.sh` from the latest GitHub release and leaves the agent running under systemd. The second is the manual fallback for machines the releases don't cover yet: copy `bin/klite-agent` over and run it with `--server`, `--token`, and `--advertise-address`. Re-running the command is safe and prints a fresh token for the same node.
+`node add` applies the Node object, mints a join token, and prints two paste-ready blocks. The first is the one-command join for a fresh Linux box, which fetches `join.sh` from the latest GitHub release and leaves the agent running under systemd. The second is the manual fallback for machines the releases don't cover yet: copy `bin/klite-agent` over and run it with `--server`, `--token`, and `--advertise-address`. Re-running the command is safe. Apply reports the node unchanged and the join block prints again.
 
-The printed join line dials `--url`, which defaults to this CLI's own server endpoint. When that endpoint is loopback the output says so and asks for an address the new machine can reach, served by a klited listening beyond loopback (`bin/klited --listen 0.0.0.0:7443`).
+The printed join line dials `--url`, which defaults to this CLI's own server endpoint. When that endpoint is loopback the output flags it and asks for an address the new machine can reach, one a klited actually listens on (`bin/klited --listen 0.0.0.0:7443`).
 
 On a real Linux machine `--advertise-address` is not optional. The agent's default resolves to the Docker bridge gateway there, usually `172.17.0.1`, and advertising that makes every other node dial its own bridge. `join.sh` detects the machine's public IPv4 and refuses to guess when it only finds private addresses. The full real-machine story, firewall step included, lives in [real-nodes.md](real-nodes.md).
 

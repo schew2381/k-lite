@@ -86,7 +86,7 @@ func runNodeAdd(ctx context.Context, client klitev1.ClusterServiceClient, out io
 }
 
 // nodeYAML builds the Node manifest node add applies. Zero maxInstances is
-// omitted so the server's default (32) applies.
+// omitted so the server's default (32) wins.
 func nodeYAML(name string, labels map[string]string, maxInstances int32) ([]byte, error) {
 	meta := map[string]any{"name": name}
 	if len(labels) > 0 {
@@ -118,16 +118,16 @@ func printJoinBlock(out io.Writer, name, url, token string) {
 		"resolves to the Docker bridge gateway there, usually 172.17.0.1, and every\n"+
 		"other node would dial its own bridge. join.sh detects the public IPv4 and\n"+
 		"refuses to guess when it only finds private addresses.\n")
-	if h := hostOf(url); isLoopback(h) {
-		fmt.Fprintf(out, "\nnote: %s is this machine's loopback, which the new machine cannot dial.\n"+
-			"re-run with --url set to an address it can reach, and make sure klited\n"+
-			"listens there (bin/klited --listen 0.0.0.0:7443).\n", url)
+	if h := hostOf(url); localOnlyHost(h) {
+		fmt.Fprintf(out, "\nnote: the new machine cannot dial %s. re-run with --url set to an\n"+
+			"address it can reach, and make sure klited listens there\n"+
+			"(bin/klited --listen 0.0.0.0:7443).\n", url)
 	}
 }
 
-// isLoopback reports whether the join URL's host would point the new machine
-// at itself.
-func isLoopback(h string) bool {
+// localOnlyHost reports whether the join URL's host only works from this
+// machine: loopback, or an unspecified bind address.
+func localOnlyHost(h string) bool {
 	if h == "localhost" || h == "0.0.0.0" || h == "::" {
 		return true
 	}

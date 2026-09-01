@@ -15,7 +15,7 @@ import (
 const testJoinToken = "K10abc::node:s3cret" // #nosec G101 -- made-up test fixture, not a credential
 
 // fakeNodeAddClient stubs the two RPCs node add uses. The embedded interface
-// panics on anything else, which is exactly the guard we want.
+// panics on anything else, which is the guard we want.
 type fakeNodeAddClient struct {
 	klitev1.ClusterServiceClient
 	appliedYAML []byte
@@ -94,8 +94,8 @@ func TestNodeAddAppliesAndPrintsJoinBlock(t *testing.T) {
 			t.Errorf("output missing %q:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "loopback") {
-		t.Errorf("loopback note printed for a routable URL:\n%s", got)
+	if strings.Contains(got, "note: the new machine cannot dial") {
+		t.Errorf("local-only note printed for a routable URL:\n%s", got)
 	}
 }
 
@@ -120,7 +120,7 @@ func TestNodeAddDefaultsAndLoopbackNote(t *testing.T) {
 	if err != nil || len(objs) != 1 || objs[0].GetNode() == nil {
 		t.Fatalf("bare manifest does not decode to a Node: %v\n%s", err, y)
 	}
-	if !strings.Contains(out.String(), "loopback") {
+	if !strings.Contains(out.String(), "note: the new machine cannot dial 127.0.0.1:7443") {
 		t.Errorf("loopback URL must carry the reachability note:\n%s", out.String())
 	}
 }

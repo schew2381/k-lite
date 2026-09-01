@@ -24,9 +24,9 @@ import (
 // rejects those options alongside --network container:.
 const (
 	// defaultKliteNetImage is what donors run when NetBootstrap carries no
-	// net_image: dev clusters, where `make net-image` loads this tag into
-	// the local daemon. klited's --net-image overrides it cluster-wide
-	// (ADR 0038).
+	// net_image, which in practice means dev clusters, where `make net-image`
+	// loads this tag into the local daemon. klited's --net-image overrides it
+	// cluster-wide (ADR 0038).
 	defaultKliteNetImage = "klite-net:dev"
 	envoyImage           = "envoyproxy/envoy:v1.31.5"
 

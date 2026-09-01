@@ -32,7 +32,7 @@ klite uncordon node-2
 make down                                 # everything off: cluster, facade, frontend
 ```
 
-Joining another machine is one command on each side: `klite node add node-4` declares the node, mints its token, and prints the join line, and pasting that line on a fresh Linux box fetches `join.sh` from the latest release, installs the agent, and leaves it running under systemd. How that works on a real machine on the open internet, and the two moves still yours to make (repo visibility, the first tag), is written up in [`docs/real-nodes.md`](docs/real-nodes.md).
+Joining another machine is one command on each side: `klite node add node-4` declares the node, mints its token, and prints the join line. Pasting that line on a fresh Linux box fetches `join.sh` from the latest release, installs the agent, and leaves it running under systemd. [`docs/real-nodes.md`](docs/real-nodes.md) covers how that works on the open internet, plus the two moves still yours to make: repo visibility and the first tag.
 
 ## Architecture
 

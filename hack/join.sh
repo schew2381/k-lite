@@ -12,7 +12,7 @@
 #   KLITE_TOKEN      --token      join token from `klite node token` (required)
 #   KLITE_NODE       --node       declared node name (required)
 #   KLITE_ADVERTISE  --advertise  address other nodes dial for this node's
-#                                 ingress ports; defaults to the detected
+#                                 ingress ports. Defaults to the detected
 #                                 public IPv4, and detection refuses private
 #                                 addresses rather than guessing
 #   KLITE_VERSION    --version    release tag to install (default: latest)
@@ -36,7 +36,7 @@ fatal() {
 }
 
 usage() {
-    sed -n '2,23p' "$0" 2>/dev/null || info "see the header of join.sh for usage"
+    sed -n '2,22p' "$0" 2>/dev/null || info "see the header of join.sh for usage"
     exit "${1:-0}"
 }
 
@@ -66,7 +66,7 @@ check_platform() {
     [ "$(uname -s)" = "Linux" ] || fatal "this script targets Linux with systemd. On other machines, copy the
 right klite-agent release binary over and run it by hand:
   sudo ./klite-agent --node $KLITE_NODE --server $KLITE_URL --token '...' --advertise-address <routable address>"
-    command -v systemctl >/dev/null 2>&1 || fatal "systemd not found; run klite-agent under your own supervisor instead"
+    command -v systemctl >/dev/null 2>&1 || fatal "systemd not found. Run klite-agent under your own supervisor instead"
     command -v curl >/dev/null 2>&1 || fatal "curl is required"
     if [ "$(id -u)" -ne 0 ]; then
         command -v sudo >/dev/null 2>&1 || fatal "run as root, or install sudo"
@@ -76,13 +76,13 @@ right klite-agent release binary over and run it by hand:
 ensure_docker() {
     if command -v docker >/dev/null 2>&1; then
         as_root docker info >/dev/null 2>&1 ||
-            fatal "docker is installed but the daemon is not answering; start it (systemctl start docker) and re-run"
+            fatal "docker is installed but the daemon isn't answering. Start it (systemctl start docker) and re-run"
         return
     fi
     if [ "${KLITE_YES:-0}" = "1" ]; then
         info "installing Docker via get.docker.com"
         curl -fsSL https://get.docker.com | as_root sh -
-        as_root docker info >/dev/null 2>&1 || fatal "Docker installed but its daemon is not answering"
+        as_root docker info >/dev/null 2>&1 || fatal "Docker installed but its daemon isn't answering"
         return
     fi
     fatal "docker is missing. Install it yourself:
@@ -96,8 +96,8 @@ is_ipv4() {
 
 # RFC1918, loopback, link-local, and CGNAT (100.64/10, tailnets live there).
 # The Docker bridge gateway 172.17.0.1 falls in the 172.16/12 arm, and that
-# address is precisely the trap: advertised, it makes every remote node dial
-# its own bridge.
+# address is the trap: advertised, it makes every remote node dial its own
+# bridge.
 is_private_ipv4() {
     case "$1" in
     10.* | 192.168.* | 127.* | 169.254.*) return 0 ;;
@@ -128,7 +128,7 @@ Set KLITE_ADVERTISE to the address other nodes actually dial. Never use
 the Docker bridge gateway (172.17.0.1): every remote node would dial itself."
     fi
     KLITE_ADVERTISE="$addr"
-    info "advertising $addr (detected public IPv4; override with KLITE_ADVERTISE)"
+    info "advertising $addr (detected public IPv4, override with KLITE_ADVERTISE)"
 }
 
 download_agent() {
@@ -146,11 +146,11 @@ download_agent() {
     info "downloading $url"
     if ! curl -fL --max-time 300 -o "$TMP/klite-agent" "$url"; then
         fatal "download failed: $url
-The likely cause: the repo (or its releases) is still private, and release
-assets on a private repo need credentials this script does not carry. Also
-possible: no release has been published yet, or KLITE_VERSION names a tag
-that does not exist. Until a public release exists, clone the repo on this
-box and 'go build ./cmd/klite-agent' instead."
+Most likely the repo (or its releases) is still private, and release assets
+on a private repo need credentials this script doesn't carry. It's also
+possible no release exists yet, or KLITE_VERSION names a tag that doesn't.
+Until a public release exists, clone the repo on this box and
+'go build ./cmd/klite-agent' instead."
     fi
     # rm first: install over a running binary would fail with 'text file busy'.
     as_root rm -f "$AGENT_BIN"
@@ -200,7 +200,7 @@ EOF
 
 start_service() {
     as_root systemctl daemon-reload
-    as_root systemctl enable klite-agent >/dev/null 2>&1
+    as_root systemctl enable klite-agent
     as_root systemctl restart klite-agent
     info "klite-agent enabled and started as node $KLITE_NODE"
     info "watch from the control plane: klite get nodes -w"

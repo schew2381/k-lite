@@ -2,7 +2,7 @@
 
 Every node this cluster has ever run was an agent process on one Mac, all of them sharing colima's Docker daemon (ADR 0003). What actually stands between that and a real Ubuntu box joining from across the internet?
 
-Less than you'd guess, because the design never assumed local. Agents only dial out (ADR 0004), a join needs one token and an outbound connection (ADR 0013), and M9 already routes cross-node traffic to advertised machine addresses behind mTLS (ADR 0034). The gaps were distribution rather than design, and M11 built the machinery to close them (ADR 0038): `make release` cross-builds every binary, a tag-triggered workflow publishes releases and a multi-arch `klite-net` image, and `klite node add` plus `hack/join.sh` collapse the join to one pasted line. Two moves remain, and they're the operator's: make the repo (or at least its releases and packages) public, and push the first `v*` tag.
+Less than you'd guess, because the design never assumed local. Agents only dial out (ADR 0004), a join needs one token and an outbound connection (ADR 0013), and M9 already routes cross-node traffic to advertised machine addresses behind mTLS (ADR 0034). The gaps were distribution rather than design. M11 built the machinery to close them (ADR 0038): `make release` cross-builds every binary, a tag-triggered workflow publishes releases and a multi-arch `klite-net` image, and `klite node add` plus `hack/join.sh` collapse the join to one pasted line. Two moves remain, and they're the operator's: make the repo (or at least its releases and packages) public, and push the first `v*` tag.
 
 The walkthrough below joins a real box by hand, using nothing beyond the repo itself. It stays the fallback while no public release exists, and it's what join.sh automates. After it comes the gap list with what closed each entry, then the one-command join as it now works.
 
@@ -40,7 +40,7 @@ bin/klite node token
 
 ### Step 3: cross-build and copy (Mac)
 
-`make build` compiles for the host alone (`Makefile:18`), darwin/arm64 on this machine. `make release` cross-builds every binary for linux/amd64, linux/arm64, and darwin/arm64 into `dist/` with checksums (`Makefile:26`), so with a release checkout you can skip the hand-rolled lines below and `scp` from `dist/` instead. The recipe is the same either way. Every dependency is pure Go, so a linux build with CGO off comes out statically linked:
+`make build` compiles for the host alone (`Makefile:18`), darwin/arm64 on this machine. `make release` cross-builds every binary for linux/amd64, linux/arm64, and darwin/arm64 into `dist/` with checksums (`Makefile:26`), so on a current checkout you can skip the hand-rolled lines below and `scp` from `dist/` instead. The recipe is the same either way. Every dependency is pure Go, so a linux build with CGO off comes out statically linked:
 
 ```sh
 mkdir -p /tmp/wan
@@ -59,7 +59,7 @@ curl -fsSL https://get.docker.com | sudo sh
 
 The agent finds the socket without configuration here, because the probe checks `/var/run/docker.sock` first (`internal/runtime/docker.go:62`) and that's exactly where a stock install puts it. Run the agent as root or put the user in the `docker` group. Rootless Docker is the one layout the probe misses, and `DOCKER_HOST` or `--docker-host` covers it (`cmd/klite-agent/main.go:37`).
 
-The agent's default infra image name is `klite-net:dev` (`internal/agent/infrapod.go:30`), and the daemon-side pull of a bare tag like that resolves against Docker Hub (`infrapod.go:325`, `internal/runtime/docker.go:141`), which doesn't have it, so the infra pod never starts. Once a release exists, the fix is one klited flag: `--net-image ghcr.io/schew2381/klite-net:<tag>` hands every node a pullable image through NetBootstrap (ADR 0038). Until then, build the image on the box from the binary you just copied:
+The agent's default infra image name is `klite-net:dev` (`internal/agent/infrapod.go:30`), and the daemon-side pull of a bare tag like that resolves against Docker Hub (`infrapod.go:325`, `internal/runtime/docker.go:141`). Docker Hub doesn't have it, so the infra pod never starts. Once a release exists, the fix is one klited flag: `--net-image ghcr.io/schew2381/klite-net:<tag>` hands every node a pullable image through NetBootstrap (ADR 0038). Until then, build the image on the box from the binary you just copied:
 
 ```sh
 mkdir klite-net-img && mv klite-net klite-net-img/ && cd klite-net-img
@@ -117,13 +117,13 @@ For calibration, verify-m8 already rehearsed the join half of this on one machin
 
 ## The gap list
 
-What M11 closed, and what remains.
+The table now tracks what M11 closed and what remains.
 
 | Gap                                            | Where                                                                 | Status                                                                                                                       |
 | ---------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `make build` compiles for the host only        | `Makefile:26`                                                          | closed: `make release` cross-builds every binary for linux/amd64, linux/arm64, darwin/arm64, checksums included                |
 | no release artifacts, and the repo is private  | `.github/workflows/release.yml`                                        | wiring done: a `v*` tag builds and attaches everything. Making the repo (or its releases) public and pushing the first tag remain the operator's moves |
-| `klite-net` image name is a compile-time const | `internal/agent/infrapod.go:30`                                        | closed: `net_image` rides NetBootstrap, set by klited's `--net-image`; empty keeps `klite-net:dev` (ADR 0038)                  |
+| `klite-net` image name is a compile-time const | `internal/agent/infrapod.go:30`                                        | closed: `net_image` rides NetBootstrap, set by klited's `--net-image`, and empty keeps `klite-net:dev` (ADR 0038)              |
 | `klite-net` image is arm64-only, never pushed  | `build/klite-net.Dockerfile`, `.github/workflows/release.yml`          | closed: TARGETARCH-parameterized COPY, and the release pushes a multi-arch manifest to `ghcr.io/schew2381/klite-net:<tag>`     |
 | socket probe misses rootless Docker            | `internal/runtime/docker.go:62`                                        | open by choice: rootless hosts set `DOCKER_HOST` by hand, stock Ubuntu already works                                            |
 | addresses the server doesn't own miss the SANs | `--tls-san` exists, `cmd/klited/main.go:65`                            | still documentation: the flag exists, step 1 shows it                                                                           |
@@ -151,17 +151,17 @@ join from the new machine (Linux with systemd, as root):
     KLITE_URL=203.0.113.7:7443 KLITE_TOKEN='K10…' KLITE_NODE=node-4 sh -
 ```
 
-klited doesn't know which address agents should dial (`sanHosts` collects every interface, not the chosen one), which is why the `--url` flag exists. It defaults to the CLI's own server endpoint, and a loopback value makes the printout say so and ask for one the new machine can reach.
+klited doesn't know which address agents should dial (`sanHosts` collects every interface, not the chosen one), which is why the `--url` flag exists. It defaults to the CLI's own server endpoint, and a loopback value makes the printout flag it and ask for one the new machine can reach.
 
 ### Node side: join.sh
 
 The script (`hack/join.sh`) is five ordered moves.
 
-1. Check for Docker. When it's missing, install via get.docker.com only under an explicit `KLITE_YES=1`; otherwise print that exact command and exit.
+1. Check for Docker. When it's missing, install via get.docker.com only under an explicit `KLITE_YES=1`. Otherwise print that exact command and exit.
 2. Pick the release binary by `uname -m` (`KLITE_VERSION` pins a tag, latest otherwise), drop it at `/usr/local/bin/klite-agent`. A failed download names the likely cause: the repo or its releases still private, or no release published yet.
-3. Default `KLITE_ADVERTISE` to the detected public IPv4, and refuse to proceed when detection only finds a private or Docker-bridge address, since the agent's own default is wrong on Linux (step 5 above) and a silently-advertised `172.17.0.1` poisons every consumer.
+3. Default `KLITE_ADVERTISE` to the detected public IPv4, and refuse to proceed when detection only finds a private or Docker-bridge address. The agent's own default is wrong on Linux (step 5 above), and a silently-advertised `172.17.0.1` poisons every node that dials it.
 4. Write `/etc/klite/agent.env` (0600, the token lives there) and the unit below.
-5. `systemctl enable` and start `klite-agent`, then point at the watch: `klite get nodes -w` from the control plane.
+5. `systemctl enable` and start `klite-agent`, then print the watch to run from the control plane: `klite get nodes -w`.
 
 ```ini
 [Unit]
