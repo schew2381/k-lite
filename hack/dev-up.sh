@@ -22,24 +22,27 @@ SKIP_BUILD="${KLITE_DEV_SKIP_BUILD:-}"
 KLITE_LAN="${KLITE_LAN:-}"
 LAN_NET_IMAGE=ghcr.io/schew2381/klite-net:v0.1.1
 
-# LAN mode: with a Wi-Fi address on en0, klited listens on 0.0.0.0 so a
-# laptop on the same network can join the live playground. The exposure is
-# deliberate. The listener speaks nothing but the cluster's TLS, and M8's
-# deny-by-default auth gate turns away anyone without the admin token or a
-# node identity. Local agents advertise the Mac's LAN address (instead of
-# host.docker.internal) so laptop -> local-node traffic rides the same
-# published ingress ports. The donor image comes from ghcr so remote
-# joiners can pull it. No en0 address, or KLITE_LAN=0, keeps everything on
-# loopback.
+# Open mode: with a routable address, klited listens on 0.0.0.0 so another
+# machine can join the live playground. The exposure is deliberate. The
+# listener speaks nothing but the cluster's TLS, and M8's deny-by-default
+# auth gate turns away anyone without the admin token or a node identity.
+# The donor image comes from ghcr so remote joiners can pull it. No
+# routable address, or KLITE_LAN=0, keeps everything on loopback.
 MAC_IP=""
 [[ "$KLITE_LAN" == 0 ]] || MAC_IP="$(ipconfig getifaddr en0 2>/dev/null || true)"
+# The tailnet address wins the advertise (ADR 0049): a hotspot machine can
+# reach 100.64/10 and never the Wi-Fi address, while a tailnet-joined
+# machine on this Wi-Fi reaches the tailnet address regardless.
+TS_IP=""
+[[ "$KLITE_LAN" == 0 ]] || TS_IP="$(ifconfig 2>/dev/null | awk '$1 == "inet" && $2 ~ /^100\./ { split($2, o, "."); if (o[2] >= 64 && o[2] <= 127) { print $2; exit } }')"
+ADVERTISE_IP="${TS_IP:-$MAC_IP}"
 LISTEN_HOST="127.0.0.1"
 KLITED_LAN_FLAGS="" # tokens carry no spaces, so unquoted expansion is safe
 AGENT_LAN_FLAGS=""
-if [[ -n "$MAC_IP" ]]; then
+if [[ -n "$ADVERTISE_IP" ]]; then
   LISTEN_HOST="0.0.0.0"
   KLITED_LAN_FLAGS="--net-image $LAN_NET_IMAGE"
-  AGENT_LAN_FLAGS="--advertise-address $MAC_IP"
+  AGENT_LAN_FLAGS="--advertise-address $ADVERTISE_IP"
 fi
 
 BIN=bin
@@ -101,8 +104,8 @@ else
     [[ -x "$BIN/$b" ]] || die "missing $BIN/$b (unset KLITE_DEV_SKIP_BUILD to build)"
   done
 fi
-if [[ -n "$MAC_IP" ]]; then
-  say "LAN mode: klited on 0.0.0.0:$KLITED_PORT, nodes advertise $MAC_IP (KLITE_LAN=0 for loopback only)"
+if [[ -n "$ADVERTISE_IP" ]]; then
+  say "open mode: klited on 0.0.0.0:$KLITED_PORT, nodes advertise $ADVERTISE_IP${TS_IP:+ (tailnet)} (KLITE_LAN=0 for loopback only)"
   docker image inspect "$LAN_NET_IMAGE" >/dev/null 2>&1 \
     || docker pull "$LAN_NET_IMAGE" >/dev/null 2>&1 \
     || die "cannot pull $LAN_NET_IMAGE for LAN mode (KLITE_LAN=0 falls back to loopback)"
@@ -207,7 +210,7 @@ echo "  export KLITE_SERVER=127.0.0.1:$KLITED_PORT"
 echo "  $KLITE get nodes"
 echo "  $KLITE get workloads"
 echo "  $KLITE get instances --watch"
-echo "  $KLITE logs -f $A_INST     # a's chatter: '-> b ok' when a wave's roll hits"
+echo "  $KLITE logs -f $A_INST     # a's chatter: 'send -> b ok' when a wave's roll hits"
 echo "  $KLITE describe instance $A_INST"
 echo "  $KLITE describe workload b"
 echo "  $KLITE scale workload b --replicas 5"
@@ -217,10 +220,10 @@ echo "  $KLITE apply -f examples/demo-policies/deny-a-to-c.yaml"
 echo "  $KLITE delete -f examples/demo-policies/deny-a-to-c.yaml"
 echo "  docker ps --filter label=io.klite.role=workload"
 echo "  tail -f $KLITED_LOG"
-if [[ -n "$MAC_IP" ]]; then
+if [[ -n "$ADVERTISE_IP" ]]; then
   echo
-  echo "join a laptop on this Wi-Fi:"
-  echo "  $KLITE node add laptop-1 --url $MAC_IP:$KLITED_PORT   # prints the paste-ready join block"
+  echo "join another machine:"
+  echo "  $KLITE node add laptop-1 --url $ADVERTISE_IP:$KLITED_PORT   # prints the paste-ready join block"
   echo "  (macOS may ask to allow incoming connections for klited: allow it)"
 fi
 echo

@@ -46,24 +46,29 @@ INGRESS_PER_NODE=32
 BEAT="${KLITE_DEMO_BEAT:-2}"
 STEP=preflight
 
-# LAN mode: with a Wi-Fi address on en0, both klited replicas listen on
-# 0.0.0.0 so a laptop on the same network can join mid-demo. The exposure
-# is deliberate. The listeners speak nothing but the cluster's TLS, and
-# M8's deny-by-default auth gate turns away anyone without the admin token
-# or a node identity. Local agents advertise the Mac's LAN address so
-# laptop -> local-node traffic rides the published ingress ports. The
-# donor image comes from ghcr so remote joiners can pull it. No en0
-# address, or KLITE_LAN=0, keeps everything on loopback.
+# Open mode: with a routable address, both klited replicas listen on
+# 0.0.0.0 so another machine can join mid-demo. The exposure is deliberate.
+# The listeners speak nothing but the cluster's TLS, and M8's
+# deny-by-default auth gate turns away anyone without the admin token
+# or a node identity. The donor image comes from ghcr so remote joiners
+# can pull it. No routable address, or KLITE_LAN=0, keeps everything on
+# loopback. The tailnet address wins the advertise (ADR 0049): a hotspot
+# machine can reach 100.64/10 and never the Wi-Fi address, while a
+# tailnet-joined machine on this Wi-Fi reaches the tailnet address
+# regardless.
 LAN_NET_IMAGE=ghcr.io/schew2381/klite-net:v0.1.1
 MAC_IP=""
 [[ "${KLITE_LAN:-}" == 0 ]] || MAC_IP="$(ipconfig getifaddr en0 2>/dev/null || true)"
+TS_IP=""
+[[ "${KLITE_LAN:-}" == 0 ]] || TS_IP="$(ifconfig 2>/dev/null | awk '$1 == "inet" && $2 ~ /^100\./ { split($2, o, "."); if (o[2] >= 64 && o[2] <= 127) { print $2; exit } }')"
+ADVERTISE_IP="${TS_IP:-$MAC_IP}"
 LISTEN_HOST="127.0.0.1"
 KLITED_LAN_FLAGS="" # tokens carry no spaces, so unquoted expansion is safe
 AGENT_LAN_FLAGS=""
-if [[ -n "$MAC_IP" ]]; then
+if [[ -n "$ADVERTISE_IP" ]]; then
   LISTEN_HOST="0.0.0.0"
   KLITED_LAN_FLAGS="--net-image $LAN_NET_IMAGE"
-  AGENT_LAN_FLAGS="--advertise-address $MAC_IP"
+  AGENT_LAN_FLAGS="--advertise-address $ADVERTISE_IP"
 fi
 
 # Reachability at rest, under the two seed policies (examples/seed/policies):
@@ -201,10 +206,10 @@ docker image inspect busybox:1.36 >/dev/null 2>&1 || docker pull busybox:1.36 >/
   || die "image busybox:1.36 missing and the pull failed (run: make bootstrap)"
 pass "colima up, docker answering, base images present"
 
-if [[ -n "$MAC_IP" ]]; then
+if [[ -n "$ADVERTISE_IP" ]]; then
   docker image inspect "$LAN_NET_IMAGE" >/dev/null 2>&1 || docker pull "$LAN_NET_IMAGE" >/dev/null 2>&1 \
-    || die "cannot pull $LAN_NET_IMAGE for LAN mode (KLITE_LAN=0 falls back to loopback)"
-  pass "LAN mode: klited will listen on 0.0.0.0, nodes advertise $MAC_IP, donors run $LAN_NET_IMAGE"
+    || die "cannot pull $LAN_NET_IMAGE for open mode (KLITE_LAN=0 falls back to loopback)"
+  pass "open mode: klited will listen on 0.0.0.0, nodes advertise $ADVERTISE_IP${TS_IP:+ (tailnet)}, donors run $LAN_NET_IMAGE"
 else
   info "no en0 address (or KLITE_LAN=0): loopback demo, joins from this machine only"
 fi
@@ -472,8 +477,8 @@ grep -q 'allowed' <<<"$OUT" && pass "and a -> b stays open: $OUT" || die "policy
 # The deny must bite the apps' own chatter as well as the probes. Chatter
 # is sparse, so denials appear only when a wave's roll hits c. Completions
 # must sit at zero from the moment of the apply.
-CHAT_OK="$(docker logs "$(a_ctr)" --since "$CHAT_MARK" 2>/dev/null | grep -c '^-> c ok')"
-CHAT_FAIL="$(docker logs "$(a_ctr)" --since "$CHAT_MARK" 2>/dev/null | grep -c '^-> c FAILED')"
+CHAT_OK="$(docker logs "$(a_ctr)" --since "$CHAT_MARK" 2>/dev/null | grep -c '^send -> c ok')"
+CHAT_FAIL="$(docker logs "$(a_ctr)" --since "$CHAT_MARK" 2>/dev/null | grep -c '^send -> c FAILED')"
 [[ "$CHAT_OK" == 0 ]] \
   && pass "a's chatter to c since the deny: $CHAT_FAIL denied, 0 completed" \
   || die "$CHAT_OK chatty a -> c call(s) slipped past the policy"
@@ -615,7 +620,7 @@ wl_logs() { # this stack's instances only: workload labels repeat across cluster
 chatty_flowing() {
   local wl
   for wl in a b c d; do
-    wl_logs "$wl" | grep -Eq "^-> [$(allowed_of "$wl")] ok$" || return 1
+    wl_logs "$wl" | grep -Eq "^send -> [$(allowed_of "$wl")] ok$" || return 1
   done
 }
 wait_for 180 chatty_flowing \
@@ -624,7 +629,7 @@ wait_for 180 chatty_flowing \
 LEAKS=""
 for wl in b c; do
   for t in $(denied_of "$wl"); do
-    n="$(wl_logs "$wl" | grep -c "^-> $t ok$")"
+    n="$(wl_logs "$wl" | grep -c "^send -> $t ok$")"
     [[ "$n" == 0 ]] || LEAKS="$LEAKS $wl->$t:$n"
   done
 done
@@ -632,15 +637,15 @@ done
   && pass "no denied pair ever completed a call (b->d, c->b, c->d all at zero)" \
   || die "policy leak in the chatter:$LEAKS"
 DENIED_TRIES="$(for wl in b c; do
-  for t in $(denied_of "$wl"); do wl_logs "$wl" | grep -c "^-> $t FAILED$"; done
+  for t in $(denied_of "$wl"); do wl_logs "$wl" | grep -c "^send -> $t FAILED$"; done
 done | awk '{s+=$1} END {print s+0}')"
 [[ "$DENIED_TRIES" -ge 1 ]] \
   && pass "and the seeds visibly bite: $DENIED_TRIES denied roll(s) logged FAILED" \
   || die "no chatty roll toward a denied pair has FAILED yet, and this far in that means the deny isn't enforcing"
 info "a's chatter so far:"
 echo
-echo "  \$ docker logs $(a_ctr) | grep '^->' | tail -4"
-docker logs "$(a_ctr)" 2>/dev/null | grep '^->' | tail -4 | sed 's/^/  /'
+echo "  \$ docker logs $(a_ctr) | grep '^send ->' | tail -4"
+docker logs "$(a_ctr)" 2>/dev/null | grep '^send ->' | tail -4 | sed 's/^/  /'
 echo
 stop_probes
 
@@ -667,7 +672,7 @@ echo "
   poke at it:
     export KLITE_SERVER=$KLITE_SERVER
     $KLITE get instances --watch
-    $KLITE logs -f $A_INST                              # a's chatter: '-> b ok'
+    $KLITE logs -f $A_INST                              # a's chatter: 'send -> b ok'
     $KLITE scale workload b --replicas 3
     $KLITE policy check b d                              # denied at rest: only a reaches d
     $KLITE apply -f examples/demo-policies/deny-a-to-c.yaml   # watch the board turn
@@ -679,9 +684,9 @@ echo "
   tear down (everything, frontend included):
     make down
 "
-if [[ -n "$MAC_IP" ]]; then
-  echo "  join a laptop on this Wi-Fi:"
-  echo "    $KLITE node add laptop-1 --url $MAC_IP:7443   # prints the paste-ready join block"
+if [[ -n "$ADVERTISE_IP" ]]; then
+  echo "  join another machine:"
+  echo "    $KLITE node add laptop-1 --url $ADVERTISE_IP:7443   # prints the paste-ready join block"
   echo "    (macOS may ask to allow incoming connections for klited: allow it)"
   echo
 fi

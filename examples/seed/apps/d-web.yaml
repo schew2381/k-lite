@@ -19,7 +19,7 @@ spec:
           - >-
             trap "exit 0" TERM; mkdir -p /www;
             echo "$(hostname) is d" > /www/index.html;
-            httpd -p 80 -h /www;
+            (httpd -f -vv -p 80 -h /www &);
             while :; do sleep $((10 - $(date +%s) % 10)) & wait $!;
             r=$(head -c2 /dev/urandom | od -An -tu2 | tr -d " ");
             [ "$r" -lt 16384 ] || continue;
@@ -27,7 +27,7 @@ spec:
             [ "$n" -gt 0 ] || continue;
             k=$(( ($(head -c2 /dev/urandom | od -An -tu2 | tr -d " ") % n) + 1 ));
             i=0; for t in $TARGETS; do i=$((i+1)); [ "$i" = "$k" ] && pick=$t; done;
-            wget -q -T 2 -O- "http://$pick:8080" >/dev/null 2>&1 && echo "-> $pick ok" || echo "-> $pick FAILED";
+            wget -q -T 2 -O- "http://$pick:8080" >/dev/null 2>&1 && echo "send -> $pick ok" || echo "send -> $pick FAILED";
             done
         env:
           - name: TARGETS

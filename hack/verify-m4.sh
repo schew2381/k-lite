@@ -254,16 +254,16 @@ wait_for 30 b_answers_again \
 chatty_flowing() {
   local wl
   for wl in a b c d; do
-    wl_logs "$wl" | grep -Eq "^-> [$(allowed_of "$wl")] ok$" || return 1
+    wl_logs "$wl" | grep -Eq "^send -> [$(allowed_of "$wl")] ok$" || return 1
   done
 }
 wait_for 180 chatty_flowing \
-  && pass "chatty traffic flows: a, b, c, and d each logged an allowed '-> <target> ok'" \
+  && pass "chatty traffic flows: a, b, c, and d each logged an allowed 'send -> <target> ok'" \
   || die "a workload (a, b, c, or d) never completed an allowed chatty call"
 LEAKS=""
 for wl in b c; do
   for t in $(denied_of "$wl"); do
-    n="$(wl_logs "$wl" | grep -c "^-> $t ok$")"
+    n="$(wl_logs "$wl" | grep -c "^send -> $t ok$")"
     [[ "$n" == 0 ]] || LEAKS="$LEAKS $wl->$t:$n"
   done
 done

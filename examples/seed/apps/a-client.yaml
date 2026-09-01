@@ -16,7 +16,9 @@ spec:
         # This is the chatty shape, shared byte-for-byte with dialog-created
         # services (frontend/app/lib/yamlgen.ts chattyContainer). Each
         # instance serves its hostname on :80 and calls one random name from
-        # TARGETS through the real data path (kdns, VIP, Envoy). Calls fire
+        # TARGETS through the real data path (kdns, VIP, Envoy). httpd runs
+        # verbose in the background, so a served request logs as a receive
+        # line beside the send lines the loop prints. Calls fire
         # in waves: every instance sleeps to the same 10-second wall-clock
         # boundary, then rolls one die. 16384 of 65536 is 25%, the per-wave
         # equivalent of the old 2.5% per second. sh as pid 1 drops SIGTERM by
@@ -29,7 +31,7 @@ spec:
           - >-
             trap "exit 0" TERM; mkdir -p /www;
             echo "$(hostname) is a" > /www/index.html;
-            httpd -p 80 -h /www;
+            (httpd -f -vv -p 80 -h /www &);
             while :; do sleep $((10 - $(date +%s) % 10)) & wait $!;
             r=$(head -c2 /dev/urandom | od -An -tu2 | tr -d " ");
             [ "$r" -lt 16384 ] || continue;
@@ -37,7 +39,7 @@ spec:
             [ "$n" -gt 0 ] || continue;
             k=$(( ($(head -c2 /dev/urandom | od -An -tu2 | tr -d " ") % n) + 1 ));
             i=0; for t in $TARGETS; do i=$((i+1)); [ "$i" = "$k" ] && pick=$t; done;
-            wget -q -T 2 -O- "http://$pick:8080" >/dev/null 2>&1 && echo "-> $pick ok" || echo "-> $pick FAILED";
+            wget -q -T 2 -O- "http://$pick:8080" >/dev/null 2>&1 && echo "send -> $pick ok" || echo "send -> $pick FAILED";
             done
         env:
           - name: TARGETS

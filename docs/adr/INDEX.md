@@ -52,3 +52,5 @@ Each record gets one line. The track column says where a decision came from: the
 | [0046](0046-the-playground-serves-the-board.md)    | The playground serves the board | build | accepted                                                        |
 | [0047](0047-the-agent-earns-a-face.md)             | The agent earns a face on the node card | build | accepted                                                        |
 | [0048](0048-chatty-waves-stretch-to-ten-seconds.md) | Chatty waves stretch to ten seconds | build | accepted                                                        |
+| [0049](0049-advertise-rides-the-overlay.md)        | The advertise address rides the overlay when one exists | build | accepted                                                        |
+| [0050](0050-instance-logs-name-their-direction.md) | Instance logs name their direction | build | accepted                                                        |
