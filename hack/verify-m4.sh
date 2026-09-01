@@ -72,6 +72,20 @@ all_ready() {
   [[ "$("$KLITE" get instances | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == 2 ]]
 }
 
+# Reachability at rest, under the seed policies (examples/seed/policies):
+# only-a-reaches-d flips d to allowlist mode and deny-c-to-b closes one more
+# pair, so b->d, c->b, and c->d are denied by design while every other pair
+# stays open.
+allowed_of() { case "$1" in a) echo "bcd" ;; b) echo "ac" ;; c) echo "a" ;; d) echo "abc" ;; esac; }
+denied_of()  { case "$1" in b) echo "d" ;; c) echo "b d" ;; esac; }
+wl_logs() { # this stack's instances only: workload labels repeat across clusters
+  local n
+  for n in node-1 node-2 node-3 node-4; do
+    docker ps --filter "label=io.klite.workload=$1" --filter "label=io.klite.node=$n" \
+      --format '{{.Names}}' | xargs -I{} docker logs {} 2>/dev/null
+  done
+}
+
 # The seeded apps chat at random (a 2.5% roll per second, see examples/seed/apps),
 # which is the wrong clock to hang assertions on. The script runs its own
 # probe loop instead: one wget per second to b's service, executed inside
@@ -131,7 +145,11 @@ wait_for 60 infra_up \
   && pass "infra pods up on all nodes (klite.<n>.net + klite.<n>.envoy)" \
   || die "infra pods up on all nodes"
 
-# --- workloads a, b, c, d ------------------------------------------------------
+# --- seed policies, then workloads a, b, c, d -----------------------------------
+# Policies land first so every instance is born under the seeded baseline.
+"$KLITE" apply -f examples/seed/policies >/dev/null || die "apply examples/seed/policies"
+pass "applied the seed policies (only-a-reaches-d, deny-c-to-b)"
+
 for app in a-client b-whoami c-whoami d-web; do
   "$KLITE" apply -f "examples/seed/apps/$app.yaml" >/dev/null || die "apply $app.yaml"
 done
@@ -190,11 +208,23 @@ echo "$DUMP" | grep -q '"svc/b"' \
   && pass "envoy config_dump on $A_NODE contains the svc/b listener" \
   || die "envoy config_dump contains the svc/b listener"
 
-# --- policy check -------------------------------------------------------------
+# --- policy check: open pairs and the seeded denials ---------------------------
 CHECK="$("$KLITE" policy check a b 2>&1)"
 echo "$CHECK" | grep -q 'allowed' \
   && pass "klite policy check a b prints allowed ($CHECK)" \
   || { echo "$CHECK"; die "klite policy check a b prints allowed"; }
+CHECK="$("$KLITE" policy check a d 2>&1)"
+echo "$CHECK" | grep -q 'allowed' && echo "$CHECK" | grep -q 'only-a-reaches-d' \
+  && pass "a -> d allowed by the seed ALLOW ($CHECK)" \
+  || { echo "$CHECK"; die "policy check a d should allow by only-a-reaches-d"; }
+CHECK="$("$KLITE" policy check b d 2>&1)"
+echo "$CHECK" | grep -q 'denied' && echo "$CHECK" | grep -q 'allowlist' \
+  && pass "b -> d denied at rest, d being allowlist-mode ($CHECK)" \
+  || { echo "$CHECK"; die "policy check b d should deny in allowlist mode"; }
+CHECK="$("$KLITE" policy check c b 2>&1)"
+echo "$CHECK" | grep -q 'denied' && echo "$CHECK" | grep -q 'deny-c-to-b' \
+  && pass "c -> b denied at rest by the seed DENY ($CHECK)" \
+  || { echo "$CHECK"; die "policy check c b should deny by deny-c-to-b"; }
 
 # --- scale out: third endpoint appears in traffic ----------------------------
 "$KLITE" scale workload b --replicas 3 >/dev/null \
@@ -217,18 +247,29 @@ wait_for 30 b_answers_again \
   || { tail -n 8 "$PROBE_FILE"; die "probes recover after kill"; }
 
 # --- the seeded chatter itself ------------------------------------------------
-# The apps also call each other on their own 2.5% roll. By this point the run
-# is minutes old, so every workload should have landed at least one call.
+# The apps still roll against the full TARGETS mesh, so the seeded denials
+# must show up as absent completions. By this point the run is minutes old:
+# every workload has landed a call inside its allowed row, and a completed
+# call on a denied pair is a policy leak.
 chatty_flowing() {
   local wl
   for wl in a b c d; do
-    docker ps --filter "label=io.klite.workload=$wl" --format '{{.Names}}' \
-      | xargs -I{} docker logs {} 2>/dev/null | grep -q '^-> [abcd] ok$' || return 1
+    wl_logs "$wl" | grep -Eq "^-> [$(allowed_of "$wl")] ok$" || return 1
   done
 }
 wait_for 180 chatty_flowing \
-  && pass "chatty traffic flows: a, b, c, and d each logged a '-> <target> ok' call" \
-  || die "a workload (a, b, c, or d) never completed a chatty call"
+  && pass "chatty traffic flows: a, b, c, and d each logged an allowed '-> <target> ok'" \
+  || die "a workload (a, b, c, or d) never completed an allowed chatty call"
+LEAKS=""
+for wl in b c; do
+  for t in $(denied_of "$wl"); do
+    n="$(wl_logs "$wl" | grep -c "^-> $t ok$")"
+    [[ "$n" == 0 ]] || LEAKS="$LEAKS $wl->$t:$n"
+  done
+done
+[[ -z "$LEAKS" ]] \
+  && pass "no denied pair completed a call (b->d, c->b, c->d all at zero)" \
+  || die "policy leak in the chatter:$LEAKS"
 
 echo
 echo "verify-m4: all steps passed (etcd, klite0, and images left in place)"

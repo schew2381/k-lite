@@ -10,7 +10,7 @@
 #   WAN         a WAN-shaped advertise address keeps traffic flowing
 #   release     killing an instance releases its port
 # Traffic assertions ride a deterministic probe loop (wget to b once a second
-# from inside a's container). The seeded apps' 5% chatter is too sparse to
+# from inside a's container). The seeded apps' 2.5% chatter is too sparse to
 # gate on. Leaves etcd, the klite0 network, images, and ~/.klite/server in
 # place.
 set -u
@@ -192,6 +192,9 @@ pass "all 4 nodes advertise a resolved literal IP (default host.docker.internal 
 
 # ============================================================
 STEP=3-apps
+# The seed policies land first, matching a real dev-up. The probe loop
+# rides a -> b, which the seeded matrix leaves open.
+"$KLITE" apply -f examples/seed/policies >/dev/null || die "apply examples/seed/policies"
 # Fast drain knobs (m5's move): demo pace lives in YAML, outside the
 # template, so the hash and the choreography stay untouched.
 patch_drain() { # patch_drain <src> <dst>

@@ -1,0 +1,11 @@
+# The seed's plain DENY: calls from c to b die at the source node's Envoy.
+# A DENY flips no allowlist, so b stays open to every other caller.
+apiVersion: klite/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-c-to-b
+spec:
+  action: DENY
+  rules:
+    - from: c
+      to: b

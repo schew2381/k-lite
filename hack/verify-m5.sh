@@ -199,7 +199,12 @@ wait_for 15 nodes_ready 4 \
 wait_for 60 infra_up \
   && pass "infra pods up on all nodes" || die "infra pods up on all nodes"
 
-# --- workloads a, b, c, d with fast drain knobs ---------------------------------
+# --- seed policies, then workloads a, b, c, d with fast drain knobs -------------
+# Policies land first so the fixture matches a real dev-up. The probe loops
+# ride a -> b and a -> c, which the seeded matrix leaves open.
+"$KLITE" apply -f examples/seed/policies >/dev/null || die "apply examples/seed/policies"
+pass "applied the seed policies (only-a-reaches-d, deny-c-to-b)"
+
 # The example apps get the 4s/4s drain knobs (ADR 0010: demo pace lives in
 # YAML) and are applied once, so every instance is born with the fast drains.
 for app in a-client b-whoami c-whoami d-web; do

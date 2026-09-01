@@ -221,6 +221,9 @@ pass "infra containers labeled io.klite.cluster=$CLUSTER_ID"
 
 # ============================================================
 STEP=6-envoy-mtls
+# The seed policies land first, matching a real dev-up. The probes below
+# ride a -> b, which the seeded matrix leaves open.
+"$KLITE" --server "$BOTH" apply -f examples/seed/policies >/dev/null || die "apply examples/seed/policies"
 for app in a-client b-whoami c-whoami d-web; do
   "$KLITE" --server "$BOTH" apply -f "examples/seed/apps/$app.yaml" >/dev/null || die "apply $app.yaml"
 done

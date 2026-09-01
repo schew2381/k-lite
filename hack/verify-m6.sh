@@ -266,7 +266,7 @@ pass "m6 control-plane ports free (6443 5379 5381 5383)"
 # Pick two node indexes whose donor host ports (19000+i, 19500+i), donor IPs
 # (10.44.0.<10+i>), and M9 ingress slices (20000+32*(i-1) .. +31, ADR 0034,
 # donors publish the whole slice at creation) are unclaimed. Other stacks
-# hold 1..3, so start at 8.
+# hold 1..4, so start at 8.
 ingress_slice_busy() { # ingress_slice_busy <index>
   local lo=$((20000 + 32 * ($1 - 1))) p
   for p in $(seq "$lo" $((lo + 31))); do

@@ -1,0 +1,14 @@
+# The seed ships "nothing reaches d except a" as this single ALLOW. The
+# first ALLOW targeting d flips d into allowlist mode (ADR 0009), so every
+# caller the rules skip is denied by absence. Writing the intuitive pair
+# instead (DENY *->d plus this ALLOW) would deny a too: DENY always beats
+# ALLOW.
+apiVersion: klite/v1
+kind: NetworkPolicy
+metadata:
+  name: only-a-reaches-d
+spec:
+  action: ALLOW
+  rules:
+    - from: a
+      to: d
