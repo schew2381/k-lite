@@ -104,15 +104,18 @@ func (s *Cluster) markNodeDraining(ctx context.Context, name string) error {
 
 // forceDelete removes the draining instances on the node right away: their
 // replacements are READY (the controller only marks DRAINING after that), so
-// skipping the timeout only cuts in-flight connections.
+// skipping the timeout only cuts in-flight connections. Each delete is
+// pinned to the revision the narrator observed. An instance rewritten or
+// recreated since that poll survives the pass and gets re-observed on the
+// next one, where the controller's timeout still covers it.
 func (s *Cluster) forceDelete(ctx context.Context, n *narrator) []string {
 	var lines []string
 	for name, v := range n.prev {
 		if v.node != n.node || v.phase != klitev1.InstancePhase_INSTANCE_PHASE_DRAINING {
 			continue
 		}
-		if err := s.store.Delete(ctx, object.KindInstance, name); err != nil && !errors.Is(err, store.ErrNotFound) {
-			continue // the controller's timeout still covers it
+		if err := s.store.DeleteIfRevision(ctx, object.KindInstance, name, v.rev); err != nil {
+			continue
 		}
 		delete(n.prev, name)
 		lines = append(lines, "force-removed "+name)
@@ -127,6 +130,7 @@ type instView struct {
 	phase    klitev1.InstancePhase
 	message  string
 	drainSec int32
+	rev      int64 // mod revision at the observing poll, pinning force deletes
 }
 
 // narrator diffs successive instance listings into nomad-style progress
@@ -154,6 +158,7 @@ func (n *narrator) observe(objs []*klitev1.Object) (lines []string, remaining in
 			phase:    inst.GetStatus().GetPhase(),
 			message:  inst.GetStatus().GetMessage(),
 			drainSec: inst.GetSpec().GetDrain().GetDrainTimeoutSeconds(),
+			rev:      inst.GetMeta().GetResourceVersion(),
 		}
 		cur[inst.GetMeta().GetName()] = v
 		if v.node == n.node {

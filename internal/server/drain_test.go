@@ -196,3 +196,54 @@ func TestDrainNarratesCapacityFallback(t *testing.T) {
 	})
 	stream.recvContaining(t, "falling back to drain-first")
 }
+
+// forceDelete is pinned to the revision the narrator observed: an instance
+// rewritten since that poll survives the pass, stays tracked, and only the
+// re-observed revision goes through.
+func TestForceDeleteRespectsObservedRevision(t *testing.T) {
+	t.Parallel()
+	st := storetest.New()
+	ctx := context.Background()
+	seedInstance(t, st, "b-old", "b", "node-2", klitev1.InstancePhase_INSTANCE_PHASE_DRAINING)
+	_, staleRev, err := st.Get(ctx, object.KindInstance, "b-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The agent reports between the narrator's poll and the force pass.
+	setInstance(t, st, "b-old", func(inst *klitev1.Instance) {
+		inst.Status.Message = "container exited with code 1 while draining"
+	})
+	s := NewCluster(st, NewCommandHub(), nil)
+
+	observed := instView{
+		workload: "b", node: "node-2",
+		phase: klitev1.InstancePhase_INSTANCE_PHASE_DRAINING,
+		rev:   staleRev,
+	}
+	n := newNarrator("node-2")
+	n.prev["b-old"] = observed
+	if lines := s.forceDelete(ctx, n); len(lines) != 0 {
+		t.Fatalf("stale-view force delete produced %v, want nothing", lines)
+	}
+	if _, _, err := st.Get(ctx, object.KindInstance, "b-old"); err != nil {
+		t.Fatalf("instance must survive a stale-view delete: %v", err)
+	}
+	if _, still := n.prev["b-old"]; !still {
+		t.Fatal("a conflicted instance must stay tracked for the next poll")
+	}
+
+	// The next poll re-observes the current revision, and the delete lands.
+	_, freshRev, err := st.Get(ctx, object.KindInstance, "b-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed.rev = freshRev
+	n.prev["b-old"] = observed
+	lines := s.forceDelete(ctx, n)
+	if len(lines) != 1 || !strings.Contains(lines[0], "force-removed b-old") {
+		t.Fatalf("fresh-view force delete produced %v", lines)
+	}
+	if _, _, err := st.Get(ctx, object.KindInstance, "b-old"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("err = %v, want the instance gone", err)
+	}
+}

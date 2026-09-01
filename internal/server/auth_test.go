@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"io"
 	"net"
 	"testing"
@@ -400,5 +401,55 @@ func TestRegisterYieldsIndexCollision(t *testing.T) {
 	}
 	if idx := stored.GetNode().GetStatus().GetNodeIndex(); idx != 2 {
 		t.Fatalf("stored index = %d, want 2", idx)
+	}
+}
+
+// Two replicas racing two fresh registrations must never both keep the same
+// index: doubled indexes overlap ingress slices and donor addresses. The
+// deterministic interleaving lives in TestRegisterYieldsIndexCollision. This
+// one lets real goroutines race the same store.
+func TestRegisterConcurrentReplicasAssignDistinctIndexes(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	register := func(a *Agent, node string) error {
+		for range 100 {
+			_, err := a.Register(ctx, &klitev1.RegisterRequest{Node: node, ClusterToken: "join-me"})
+			if status.Code(err) == codes.Aborted {
+				continue // the agent's own loop retries this too
+			}
+			return err
+		}
+		return errors.New("register kept aborting")
+	}
+	for range 25 {
+		st := storetest.New()
+		seedNode(t, st, "node-a", klitev1.NodePhase_NODE_PHASE_UNSPECIFIED)
+		seedNode(t, st, "node-b", klitev1.NodePhase_NODE_PHASE_UNSPECIFIED)
+		replicaA := NewAgent(&AgentConfig{Store: st, ClusterToken: "join-me"})
+		replicaB := NewAgent(&AgentConfig{Store: st, ClusterToken: "join-me"})
+
+		errs := make(chan error, 2)
+		go func() { errs <- register(replicaA, "node-a") }()
+		go func() { errs <- register(replicaB, "node-b") }()
+		for range 2 {
+			if err := <-errs; err != nil {
+				t.Fatal(err)
+			}
+		}
+		byIndex := map[int32]string{}
+		for _, name := range []string{"node-a", "node-b"} {
+			obj, _, err := st.Get(ctx, object.KindNode, name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			idx := obj.GetNode().GetStatus().GetNodeIndex()
+			if idx < 1 {
+				t.Fatalf("%s registered with index %d, want >= 1", name, idx)
+			}
+			if other, dup := byIndex[idx]; dup {
+				t.Fatalf("%s and %s share index %d", other, name, idx)
+			}
+			byIndex[idx] = name
+		}
 	}
 }

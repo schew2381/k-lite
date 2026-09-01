@@ -260,9 +260,12 @@ func (s *Cluster) Delete(ctx context.Context, req *klitev1.DeleteRequest) (*klit
 	}, nil
 }
 
-// deleteOne deletes an object, except nodes: those are marked pending-delete
-// and drained first, and the node controller removes the record once the
-// last instance has left (ADR 0010).
+// deleteOne deletes an object, except nodes, which are marked pending-delete
+// and drained first. The node controller removes the record once the last
+// instance has left (ADR 0010). The delete stays unpinned on purpose. An
+// imperative `klite delete` names its target without ever reading it, so
+// there's no observed revision to hold it to. DeleteIfRevision fits
+// level-based loops like forceDelete instead, where a stale view can lie.
 func (s *Cluster) deleteOne(ctx context.Context, kind, name string) (string, error) {
 	if kind == object.KindNode {
 		return s.markNodeForDelete(ctx, name)
