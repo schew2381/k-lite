@@ -345,6 +345,20 @@ footer .mono{font-family:var(--mono);font-size:12px}
         <tr><td>ADS</td><td>the aggregated stream — all of the above over one gRPC connection, ordered so a listener never references a cluster that doesn't exist yet</td></tr>
       </tbody>
     </table>
+
+    <h3 class="sub">What crosses the ADS stream (Envoy ⇄ klited)</h3>
+    <ul class="plain">
+      <li>Envoy sends: its <code>node.id</code> once, then subscriptions per resource type</li>
+      <li>klited sends: a versioned snapshot per type — listeners (with RBAC), clusters, endpoints with health</li>
+      <li>Envoy answers every push with an ACK (applied) or a NACK (rejected, with the error) — klited logs NACKs</li>
+      <li>a new version pushes only when content actually changed; the swap is hitless</li>
+    </ul>
+    <div class="codepane" style="margin-top:12px"><span class="c"># abbreviated exchange</span>
+<span class="b">envoy →</span>  DiscoveryRequest  { node.id: <span class="g">"node-1"</span>, type: Cluster }
+<span class="g">klited →</span> DiscoveryResponse { version: <span class="y">"1214"</span>, resources: [cluster b — EDS, round-robin] }
+<span class="g">klited →</span> DiscoveryResponse { version: <span class="y">"1214"</span>, type: Endpoints,
+           b: [<span class="b">10.44.128.6:80</span> HEALTHY · <span class="b">203.0.113.7:20129</span> HEALTHY (mTLS)] }
+<span class="b">envoy →</span>  DiscoveryRequest  { version: <span class="y">"1214"</span>, nonce: 42 }   <span class="c"># ACK</span></div>
   </div>
 </section>
 
@@ -516,6 +530,23 @@ klite-agent --node node-5 --token K10…</div>
       <li>The agent builds the infra pod — klite-net owns the netns and the published port slice, Envoy joins it — then opens its streams: WatchDesired down, ReportStatus up every 5s.</li>
       <li>klited stamps the node Ready and the scheduler starts counting it. 15 quiet seconds would mark it NotReady, 30 more evacuate its instances.</li>
     </ol>
+
+    <h3 class="sub">klite-agent is the kubelet</h3>
+    <ul class="plain">
+      <li>holds the node's identity, builds the infra pod, drives Docker — create, stop, restart with backoff</li>
+      <li>owns readiness: reads klite-net's probe verdicts and turns them into instance phases</li>
+      <li>streams container logs up on request — klited can never dial a node</li>
+    </ul>
+    <ul class="plain" style="margin-top:10px">
+      <li><b>down</b> (WatchDesired stream): the node's full desired snapshot on every change — its instances, plus the net config (DNS table, VIPs, probe targets, ingress listeners)</li>
+      <li><b>up</b> (ReportStatus, every 5s + on change): every instance's phase, IP, and restart count — this is also the heartbeat</li>
+    </ul>
+    <div class="codepane" style="margin:12px 0 18px"><span class="c"># abbreviated exchange</span>
+<span class="g">klited →</span> DesiredState { revision: <span class="y">1214</span>,
+           instances: [ b-3f81 — busybox:1.36, node-1 ],
+           net: { b → vip <span class="b">10.44.64.5</span>, probe b-3f81 :80 } }
+<span class="b">agent →</span>  ReportStatus { node: node-1,
+           instances: [ b-3f81: <span class="g">Ready</span> · <span class="b">10.44.128.21</span> · ↻0 ] }</div>
 
     <table class="addr">
       <thead><tr><th>range</th><th>what</th><th>allocated by</th></tr></thead>
