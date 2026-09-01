@@ -32,6 +32,8 @@ export function TrafficRail() {
                   <span className="text-muted-foreground"> no endpoints</span>
                 ) : e.matchedRule ? (
                   <span className="text-deny"> blocked by {e.matchedRule.policy}</span>
+                ) : e.rbacPhase === 'deny' ? (
+                  <span className="text-deny"> blocked by a DENY policy</span>
                 ) : (
                   <span className="text-deny"> not on the allowlist</span>
                 )}

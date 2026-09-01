@@ -70,14 +70,17 @@ func TestJoinSpawnsAgent(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = syscall.Kill(out.Pid, syscall.SIGKILL) })
 
+	// Under full-suite load the stub can take seconds to get scheduled, so
+	// the wait is a deadline, not a fixed spin count.
 	argsPath := filepath.Join(filepath.Dir(bin), "args")
 	var args string
-	for range 50 {
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
 		if b, err := os.ReadFile(argsPath); err == nil {
 			args = strings.TrimSpace(string(b))
 			break
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
 	}
 	want := "--node node-9 --server 127.0.0.1:7443 --token tok-1"
 	if args != want {

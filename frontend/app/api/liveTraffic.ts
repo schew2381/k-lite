@@ -13,9 +13,11 @@ export interface TrafficDelta {
   unixMs: number
   node: string
   service: string
-  address: string
-  port: number
+  address?: string
+  port?: number
   count: number
+  verdict?: 'allowed' | 'denied'
+  rbacPhase?: 'deny' | 'allow'
 }
 
 // One delta row can cover several calls. More dots than this per row per
@@ -27,15 +29,18 @@ let seq = 0
 export function enrichTrafficDelta(raw: TrafficDelta, s: Snapshot): TrafficEvent[] {
   if (!s.services[raw.service]) return []
 
+  const denied = raw.verdict === 'denied'
   let toInstance: string | undefined
-  const byIp = Object.values(s.instances).find((i) => i.status.instanceIp === raw.address)
-  if (byIp) {
-    toInstance = byIp.metadata.name
-  } else {
-    const alloc = Object.values(s.ingressAllocations).find(
-      (a) => a.spec.port === raw.port && a.spec.service === raw.service,
-    )
-    toInstance = alloc?.spec.instance
+  if (!denied) {
+    const byIp = Object.values(s.instances).find((i) => i.status.instanceIp === raw.address)
+    if (byIp) {
+      toInstance = byIp.metadata.name
+    } else {
+      const alloc = Object.values(s.ingressAllocations).find(
+        (a) => a.spec.port === raw.port && a.spec.service === raw.service,
+      )
+      toInstance = alloc?.spec.instance
+    }
   }
 
   const events: TrafficEvent[] = []
@@ -47,7 +52,8 @@ export function enrichTrafficDelta(raw: TrafficDelta, s: Snapshot): TrafficEvent
       fromService: '',
       toService: raw.service,
       viaNode: raw.node,
-      verdict: 'allowed',
+      verdict: denied ? 'denied' : 'allowed',
+      ...(denied && { reason: 'policy' as const, rbacPhase: raw.rbacPhase }),
       toInstance,
     })
   }

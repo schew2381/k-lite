@@ -49,6 +49,19 @@ describe('enrichTrafficDelta', () => {
     )
   })
 
+  it('turns a denied delta into a policy denial with its RBAC phase', () => {
+    const s = liveSnapshot()
+    const svc = Object.keys(s.services)[0]
+    const [ev] = enrichTrafficDelta(
+      { ...base, service: svc, count: 1, verdict: 'denied', rbacPhase: 'deny' },
+      s,
+    )
+    expect(ev.verdict).toBe('denied')
+    expect(ev.reason).toBe('policy')
+    expect(ev.rbacPhase).toBe('deny')
+    expect(ev.toInstance).toBeUndefined()
+  })
+
   it('caps one delta row at a handful of events', () => {
     const s = liveSnapshot()
     const svc = Object.keys(s.services)[0]

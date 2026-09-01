@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,11 +28,13 @@ const trafficPollInterval = time.Second
 
 type trafficEvent struct {
 	UnixMs  int64  `json:"unixMs"`
-	Node    string `json:"node"`    // caller's node, whose Envoy counted the calls
-	Service string `json:"service"` // target service, the Envoy cluster name
-	Address string `json:"address"` // dial target: an instance IP or a machine address
-	Port    int    `json:"port"`
-	Count   int    `json:"count"` // calls since the previous poll
+	Node    string `json:"node"`             // caller's node, whose Envoy counted the calls
+	Service string `json:"service"`          // target service, the Envoy cluster name
+	Address string `json:"address,omitzero"` // dial target: an instance IP or a machine address
+	Port    int    `json:"port,omitzero"`
+	Count   int    `json:"count"`              // calls since the previous poll
+	Verdict string `json:"verdict"`            // allowed | denied
+	Phase   string `json:"rbacPhase,omitzero"` // denied only: deny | allow, which RBAC filter killed it
 }
 
 // trafficFeed fans Envoy counter deltas to SSE subscribers. The baselines
@@ -116,7 +120,9 @@ func (tf *trafficFeed) poll(ctx context.Context) {
 		if idx == 0 {
 			continue
 		}
-		events = append(events, tf.pollNode(ctx, node.GetMeta().GetName(), tf.adminURL(idx), now, seen)...)
+		name, admin := node.GetMeta().GetName(), tf.adminURL(idx)
+		events = append(events, tf.pollNode(ctx, name, admin, now, seen)...)
+		events = append(events, tf.pollRBAC(ctx, name, admin, now, seen)...)
 	}
 	tf.mu.Lock()
 	// Keys that vanished belong to removed instances, and dropping them
@@ -177,10 +183,14 @@ func (tf *trafficFeed) pollNode(ctx context.Context, node, adminURL string, now 
 
 	tf.mu.Lock()
 	prev := tf.prev
-	primed := false
 	prefix := node + "|"
+	// Each source primes alone: a node whose /clusters answered first must
+	// not treat its first sight of RBAC counters as movement, or the other
+	// way round. That's why the baseline check ignores the other source's
+	// keys.
+	primed := false
 	for k := range prev {
-		if strings.HasPrefix(k, prefix) {
+		if strings.HasPrefix(k, prefix) && !strings.Contains(k, "|#rbac|") {
 			primed = true
 			break
 		}
@@ -213,12 +223,65 @@ func (tf *trafficFeed) pollNode(ctx context.Context, node, adminURL string, now 
 			if delta := total - prev[key]; primed && delta > 0 {
 				events = append(events, trafficEvent{
 					UnixMs: now, Node: node, Service: c.Name,
-					Address: addr, Port: port, Count: int(delta),
+					Address: addr, Port: port, Count: int(delta), Verdict: "allowed",
 				})
 			}
 		}
 	}
 	tf.mu.Unlock()
+	return events
+}
+
+// rbacDeniedStat matches one denied counter of a per-listener RBAC filter.
+// The xds builder gives each phase its own stat prefix, <service>_deny and
+// <service>_allow, exactly so these counters never merge.
+var rbacDeniedStat = regexp.MustCompile(`(?m)^(?:[a-z_]+\.)?([A-Za-z0-9.-]+)_(deny|allow)\.rbac\.denied: (\d+)$`)
+
+// pollRBAC turns denied-counter movement into denied events. RBAC kills a
+// connection before the upstream cluster sees it, so these calls exist
+// nowhere in /clusters and earn their own poll.
+func (tf *trafficFeed) pollRBAC(ctx context.Context, node, adminURL string, now int64, seen map[string]int64) []trafficEvent {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, adminURL+"/stats?filter=rbac", nil)
+	if err != nil {
+		return nil
+	}
+	resp, err := tf.httpc.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil
+	}
+
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	prev := tf.prev
+	prefix := node + "|#rbac|"
+	primed := false
+	for k := range prev {
+		if strings.HasPrefix(k, prefix) {
+			primed = true
+			break
+		}
+	}
+	var events []trafficEvent
+	for _, m := range rbacDeniedStat.FindAllStringSubmatch(string(body), -1) {
+		service, phase := m[1], m[2]
+		total, err := strconv.ParseInt(m[3], 10, 64)
+		if err != nil {
+			continue
+		}
+		key := prefix + service + "|" + phase
+		seen[key] = total
+		if delta := total - prev[key]; primed && delta > 0 {
+			events = append(events, trafficEvent{
+				UnixMs: now, Node: node, Service: service,
+				Count: int(delta), Verdict: "denied", Phase: phase,
+			})
+		}
+	}
 	return events
 }
 

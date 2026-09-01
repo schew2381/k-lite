@@ -11,7 +11,7 @@ ADR 0024 reopened the facade for `GET /api/traffic` and sketched it over Envoy a
 ## Consequences
 
 - The caller's instance is unknown by construction, since one Envoy fronts every instance on its node. Live events carry an empty `fromInstance`, the trace starts at kdns instead of a chip, and the rail attributes the call to the node. The mock keeps instance attribution because the simulator genuinely knows it.
-- Counters count and do nothing else, so live events carry no latency and no policy verdicts yet. The rail prints latency only when it's known. Denials can join the feed once RBAC counters or access logs do.
+- Counters count and do nothing else, so live events carry no latency. The rail prints it only when it's known. Denials ride the same poll from each listener's RBAC filters, whose per-phase stat prefixes say whether the DENY phase or the allowlist killed the call, and the board flies a red mark that dies at the RBAC box.
 - A remote machine's admin is loopback on that machine, so its outbound calls are invisible here. Calls to it still appear, counted by the caller's Envoy. A multi-machine feed needs nodes to export their counters, which is future work.
 - The poll baseline lives only while subscribers exist and dies with the last one, so a fresh subscriber never gets history replayed as a burst.
 - ADR 0024 still names the route and its place in the facade. This record settles what finally feeds it.

@@ -83,6 +83,23 @@ describe('buildTrace locality', () => {
     expect(anchorIdFor(trace.steps[0].at, trace)).toBe(`kdns:${e.viaNode}`)
   })
 
+  it('ends an anonymous denial at the RBAC box', () => {
+    const c = new Cluster(seedObjects())
+    settle(c, 6000)
+    const e: TrafficEvent = {
+      ...eventFor(c, false),
+      fromInstance: '',
+      fromService: '',
+      verdict: 'denied',
+      reason: 'policy',
+      rbacPhase: 'deny',
+      toInstance: undefined,
+    }
+    const trace = buildTrace(e, snapshotFromCluster(c))
+    expect(trace.steps.map((s) => s.at)).toEqual(['kdns', 'lds', 'rbac'])
+    expect(trace.steps.at(-1)?.tone).toBe('deny')
+  })
+
   it('tells the internet story for a remote pick: mTLS leg, DNAT hop, raw hand-off', () => {
     const c = new Cluster(seedObjects())
     settle(c, 5000)

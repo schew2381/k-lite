@@ -202,6 +202,7 @@ export interface TrafficEvent {
   verdict: 'allowed' | 'denied'
   reason?: 'policy' | 'no-endpoints'
   matchedRule?: { policy: string; ruleIndex: number; action: 'ALLOW' | 'DENY' }
+  rbacPhase?: 'deny' | 'allow' // live feed: which RBAC filter killed it, when the rule itself is unknown
   toInstance?: string // which instance the call landed on (allowed only)
   latencyMs?: number
 }

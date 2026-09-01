@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,11 +26,18 @@ func (trafficFake) List(context.Context, *klitev1.ListRequest, ...grpc.CallOptio
 	}}}}}, nil
 }
 
-// fakeAdmin serves /clusters with a mutable rq_total for service b, plus an
-// ingress-side cluster the feed must not count.
-func fakeAdmin(t *testing.T, total *atomic.Int64) *httptest.Server {
+// fakeAdmin serves /clusters with a mutable rq_total for service b plus an
+// ingress-side cluster the feed must not count, and /stats with mutable
+// per-phase rbac denied counters.
+func fakeAdmin(t *testing.T, total, denied *atomic.Int64) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/stats") {
+			// Real filters emit bare per-phase prefixes (pinned against the
+			// reseeded cluster): <service>_deny / <service>_allow.
+			fmt.Fprintf(w, "b_deny.rbac.allowed: 12\nb_deny.rbac.denied: %d\nd_allow.rbac.denied: 0\n", denied.Load())
+			return
+		}
 		fmt.Fprintf(w, `{"cluster_statuses":[
 			{"name":"b","host_statuses":[{"address":{"socket_address":{"address":"10.44.128.6","port_value":80}},"stats":[{"name":"rq_total","value":"%d"},{"name":"cx_total","value":"1"}]}]},
 			{"name":"ingress/b/20037","host_statuses":[{"address":{"socket_address":{"address":"10.44.128.15","port_value":80}},"stats":[{"name":"rq_total","value":"999"}]}]}
@@ -40,9 +48,10 @@ func fakeAdmin(t *testing.T, total *atomic.Int64) *httptest.Server {
 }
 
 func TestTrafficFeedStreamsDeltas(t *testing.T) {
-	var total atomic.Int64
+	var total, denied atomic.Int64
 	total.Store(40)
-	admin := fakeAdmin(t, &total)
+	denied.Store(7)
+	admin := fakeAdmin(t, &total, &denied)
 
 	tf := newTrafficFeed(trafficFake{&fakeClient{}})
 	tf.interval = 20 * time.Millisecond
@@ -74,7 +83,7 @@ func TestTrafficFeedStreamsDeltas(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("no event after counters moved")
 	}
-	want := trafficEvent{Node: "node-1", Service: "b", Address: "10.44.128.6", Port: 80, Count: 3}
+	want := trafficEvent{Node: "node-1", Service: "b", Address: "10.44.128.6", Port: 80, Count: 3, Verdict: "allowed"}
 	ev.UnixMs = 0
 	if ev != want {
 		t.Fatalf("got %+v, want %+v", ev, want)
@@ -86,6 +95,24 @@ func TestTrafficFeedStreamsDeltas(t *testing.T) {
 	case b := <-ch:
 		t.Fatalf("unexpected extra event: %s", b)
 	case <-time.After(60 * time.Millisecond):
+	}
+
+	// A moving rbac denied counter becomes a denied event naming the phase.
+	// The starting total of 7 was baseline, so the count is the delta alone.
+	denied.Add(2)
+	ev = trafficEvent{}
+	select {
+	case b := <-ch:
+		if err := json.Unmarshal(b, &ev); err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no denied event after rbac counters moved")
+	}
+	wantDenied := trafficEvent{Node: "node-1", Service: "b", Count: 2, Verdict: "denied", Phase: "deny"}
+	ev.UnixMs = 0
+	if ev != wantDenied {
+		t.Fatalf("got %+v, want %+v", ev, wantDenied)
 	}
 }
 
