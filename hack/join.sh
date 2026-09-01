@@ -15,8 +15,14 @@
 #                                 ingress ports. Defaults to the detected
 #                                 public IPv4, and detection refuses private
 #                                 addresses rather than guessing
+#   KLITE_VPN        --vpn        "tailscale" puts the box on a tailnet and
+#                                 advertises its tailnet IP (docs/real-nodes.md)
+#   KLITE_TS_AUTHKEY --ts-authkey tailnet auth key for tailscale up; needed
+#                                 unless the box is already on the tailnet
 #   KLITE_VERSION    --version    release tag to install (default: latest)
-#   KLITE_YES=1      --yes        consent to installing Docker via get.docker.com
+#   KLITE_YES=1      --yes        consent to installing Docker (get.docker.com)
+#                                 and, in --vpn mode, tailscale
+#                                 (tailscale.com/install.sh)
 #
 # Everything below is wrapped in functions and dispatched from the last line,
 # so a truncated download runs nothing.
@@ -36,7 +42,7 @@ fatal() {
 }
 
 usage() {
-    sed -n '2,22p' "$0" 2>/dev/null || info "see the header of join.sh for usage"
+    sed -n '2,28p' "$0" 2>/dev/null || info "see the header of join.sh for usage"
     exit "${1:-0}"
 }
 
@@ -51,6 +57,8 @@ parse_flags() {
         --token) [ $# -ge 2 ] || fatal "--token needs a value"; KLITE_TOKEN="$2"; shift 2 ;;
         --node) [ $# -ge 2 ] || fatal "--node needs a value"; KLITE_NODE="$2"; shift 2 ;;
         --advertise) [ $# -ge 2 ] || fatal "--advertise needs a value"; KLITE_ADVERTISE="$2"; shift 2 ;;
+        --vpn) [ $# -ge 2 ] || fatal "--vpn needs a value"; KLITE_VPN="$2"; shift 2 ;;
+        --ts-authkey) [ $# -ge 2 ] || fatal "--ts-authkey needs a value"; KLITE_TS_AUTHKEY="$2"; shift 2 ;;
         --version) [ $# -ge 2 ] || fatal "--version needs a value"; KLITE_VERSION="$2"; shift 2 ;;
         --yes | -y) KLITE_YES=1; shift ;;
         --help | -h) usage 0 ;;
@@ -60,6 +68,10 @@ parse_flags() {
     [ -n "${KLITE_URL:-}" ] || fatal "KLITE_URL (or --url) is required: the klited address the agent dials"
     [ -n "${KLITE_TOKEN:-}" ] || fatal "KLITE_TOKEN (or --token) is required: mint one with 'klite node token'"
     [ -n "${KLITE_NODE:-}" ] || fatal "KLITE_NODE (or --node) is required: the name from 'klite node add'"
+    case "${KLITE_VPN:-}" in
+    "" | tailscale) ;;
+    *) fatal "KLITE_VPN=$KLITE_VPN is not supported (tailscale is the only mode)" ;;
+    esac
 }
 
 check_platform() {
@@ -94,23 +106,88 @@ is_ipv4() {
     echo "$1" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'
 }
 
-# RFC1918, loopback, link-local, and CGNAT (100.64/10, tailnets live there).
-# The Docker bridge gateway 172.17.0.1 falls in the 172.16/12 arm, and that
-# address is the trap: advertised, it makes every remote node dial its own
-# bridge.
-is_private_ipv4() {
+# is_cgnat_ipv4 matches the shared address space 100.64.0.0/10 (RFC 6598),
+# where carrier-grade NAT lives and where Tailscale assigns every tailnet
+# address. An address here is dialable by tailnet peers and by nobody else.
+is_cgnat_ipv4() {
     case "$1" in
-    10.* | 192.168.* | 127.* | 169.254.*) return 0 ;;
-    172.1[6-9].* | 172.2[0-9].* | 172.3[01].*) return 0 ;;
     100.6[4-9].* | 100.[7-9][0-9].* | 100.1[01][0-9].* | 100.12[0-7].*) return 0 ;;
     esac
     return 1
 }
 
+# is_private_ipv4 covers RFC1918, loopback, link-local, and the CGNAT range
+# above. The Docker bridge gateway 172.17.0.1 falls in the 172.16/12 arm, and
+# that address is the trap: advertised, it makes every remote node dial its
+# own bridge.
+is_private_ipv4() {
+    case "$1" in
+    10.* | 192.168.* | 127.* | 169.254.*) return 0 ;;
+    172.1[6-9].* | 172.2[0-9].* | 172.3[01].*) return 0 ;;
+    esac
+    is_cgnat_ipv4 "$1"
+}
+
+# url_host strips a trailing :port so the control-plane address can be
+# classified like any other host.
+url_host() {
+    echo "$1" | sed 's/:[0-9]*$//'
+}
+
+# ensure_tailscale is the KLITE_VPN=tailscale mode: install tailscale if
+# consented, join the tailnet with the auth key unless the box already sits
+# on one, and advertise the tailnet IP. An explicit KLITE_ADVERTISE still
+# wins, so a subnet-router setup can advertise something else on purpose.
+ensure_tailscale() {
+    [ "${KLITE_VPN:-}" = "tailscale" ] || return 0
+    if ! command -v tailscale >/dev/null 2>&1; then
+        if [ "${KLITE_YES:-0}" = "1" ]; then
+            info "installing tailscale via tailscale.com/install.sh"
+            curl -fsSL https://tailscale.com/install.sh | as_root sh -
+        else
+            fatal "KLITE_VPN=tailscale but tailscale is missing. Install it yourself:
+  curl -fsSL https://tailscale.com/install.sh | sudo sh -
+or re-run this script with KLITE_YES=1 to consent to that exact command."
+        fi
+        command -v tailscale >/dev/null 2>&1 || fatal "tailscale installed but the binary isn't on PATH"
+    fi
+    ts_ip="$(tailscale_ip4)"
+    if [ -z "$ts_ip" ]; then
+        [ -n "${KLITE_TS_AUTHKEY:-}" ] || fatal "this box isn't on a tailnet yet, and joining one needs KLITE_TS_AUTHKEY.
+Mint a key at https://login.tailscale.com/admin/settings/keys and re-run."
+        info "joining the tailnet (tailscale up)"
+        as_root tailscale up --auth-key "$KLITE_TS_AUTHKEY" --timeout 30s ||
+            fatal "tailscale up failed (is the auth key expired or single-use and used?)"
+        ts_ip="$(tailscale_ip4)"
+    else
+        info "already on a tailnet as $ts_ip, skipping tailscale up"
+    fi
+    is_ipv4 "$ts_ip" || fatal "tailscale is up but 'tailscale ip -4' answered '${ts_ip:-nothing}'"
+    if [ -n "${KLITE_ADVERTISE:-}" ]; then
+        info "KLITE_ADVERTISE=$KLITE_ADVERTISE overrides the tailnet IP $ts_ip"
+        return 0
+    fi
+    KLITE_ADVERTISE="$ts_ip"
+    ADVERTISE_SOURCE="tailscale ip -4"
+}
+
+tailscale_ip4() {
+    as_root tailscale ip -4 2>/dev/null | head -n 1
+}
+
 pick_advertise() {
     if [ -n "${KLITE_ADVERTISE:-}" ]; then
-        info "advertising $KLITE_ADVERTISE (from KLITE_ADVERTISE)"
+        info "advertising $KLITE_ADVERTISE (from ${ADVERTISE_SOURCE:-KLITE_ADVERTISE})"
         return
+    fi
+    # A tailnet control-plane address means every peer dials tailnet IPs, and
+    # the public IPv4 detected below would be an address no peer dials.
+    # Refuse before detection can produce a plausible wrong answer.
+    if is_cgnat_ipv4 "$(url_host "${KLITE_URL:-}")"; then
+        fatal "the control plane lives on a tailnet address (${KLITE_URL:-}), so this
+box must advertise its own tailnet IP, not a detected public one.
+Re-run with KLITE_VPN=tailscale (KLITE_TS_AUTHKEY if not joined yet),
+or set KLITE_ADVERTISE to this box's tailnet IP."
     fi
     addr="$(curl -4 -sf --max-time 10 https://ifconfig.me 2>/dev/null || true)"
     if ! is_ipv4 "$addr"; then
@@ -124,8 +201,10 @@ your port forward, the LAN IP on a LAN, the tailnet IP on a tailnet."
     fi
     if is_private_ipv4 "$addr"; then
         fatal "detected $addr, which is private and unreachable from other nodes.
-Set KLITE_ADVERTISE to the address other nodes actually dial. Never use
-the Docker bridge gateway (172.17.0.1): every remote node would dial itself."
+Set KLITE_ADVERTISE to the address other nodes actually dial, or re-run
+with KLITE_VPN=tailscale to put this box on a tailnet and advertise that.
+Never use the Docker bridge gateway (172.17.0.1): every remote node
+would dial itself."
     fi
     KLITE_ADVERTISE="$addr"
     info "advertising $addr (detected public IPv4, override with KLITE_ADVERTISE)"
@@ -212,10 +291,14 @@ main() {
     TMP="$(mktemp -d)"
     trap 'rm -rf "$TMP"' EXIT
     ensure_docker
+    ensure_tailscale
     pick_advertise
     download_agent
     write_config
     start_service
 }
 
-main "$@"
+# Sourced with KLITE_JOIN_TEST set, nothing runs (hack/test-join.sh drives
+# the functions directly). The guard shares the dispatch's last line, so the
+# header's truncation promise holds.
+[ -n "${KLITE_JOIN_TEST:-}" ] || main "$@"
