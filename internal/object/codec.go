@@ -16,6 +16,10 @@ import (
 // APIVersion is the only apiVersion this codec accepts or emits.
 const APIVersion = "klite/v1"
 
+// maxDecodeBytes caps YAML input. Real manifests run a few KB, and the cap
+// keeps parser blowups (deep nesting, alias expansion) bounded by construction.
+const maxDecodeBytes = 4 << 20
+
 var docSeparator = regexp.MustCompile(`(?m)^---\s*(#.*)?$`)
 
 // Enum values cross the YAML boundary in the short form users write.
@@ -31,6 +35,9 @@ var policyActionLong = map[string]string{
 
 // Decode parses multi-document YAML into Object envelopes, skipping empty documents.
 func Decode(data []byte) ([]*klitev1.Object, error) {
+	if len(data) > maxDecodeBytes {
+		return nil, fmt.Errorf("yaml input is %d bytes, limit %d", len(data), maxDecodeBytes)
+	}
 	var objs []*klitev1.Object
 	for i, doc := range docSeparator.Split(string(data), -1) {
 		if strings.TrimSpace(doc) == "" {
@@ -49,6 +56,9 @@ func Decode(data []byte) ([]*klitev1.Object, error) {
 
 // DecodeOne parses a single YAML document. A comments-only document decodes to nil.
 func DecodeOne(doc []byte) (*klitev1.Object, error) {
+	if len(doc) > maxDecodeBytes {
+		return nil, fmt.Errorf("yaml document is %d bytes, limit %d", len(doc), maxDecodeBytes)
+	}
 	jsonBytes, err := yaml.YAMLToJSON(doc)
 	if err != nil {
 		return nil, fmt.Errorf("parse yaml: %w", err)

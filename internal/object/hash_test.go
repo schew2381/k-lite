@@ -23,6 +23,45 @@ func template(image string) *klitev1.Template {
 	}
 }
 
+// TestTemplateHashGolden pins the hash of a fixed template. If this fails,
+// the hash inputs or algorithm changed, and shipping that change re-rolls
+// every Workload in every existing cluster (see internal/object/CLAUDE.md).
+// Do not update the constant until that is the intent.
+func TestTemplateHashGolden(t *testing.T) {
+	tpl := &klitev1.Template{
+		Labels: map[string]string{"app": "b", "tier": "web", "zone": "local", "env": "dev"},
+		Containers: []*klitev1.Container{{
+			Name:    "web",
+			Image:   "traefik/whoami:v1.10",
+			Command: []string{"/bin/whoami"},
+			Args:    []string{"--port=80"},
+			Env: []*klitev1.EnvVar{
+				{Name: "A", Value: "1"},
+				{Name: "B", Value: "2"},
+			},
+			Ports:          []*klitev1.Port{{ContainerPort: 80}},
+			Resources:      &klitev1.Resources{Cpus: "0.5", Memory: "128Mi"},
+			ReadinessProbe: &klitev1.ReadinessProbe{TcpPort: 80},
+		}},
+	}
+	got, err := object.TemplateHash(tpl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "151e9c6519123fa1"; got != want {
+		t.Errorf("full template hash = %s, want %s", got, want)
+	}
+	empty, err := object.TemplateHash(&klitev1.Template{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An empty template marshals to zero bytes, so its hash is the FNV-1a
+	// offset basis.
+	if want := "cbf29ce484222325"; empty != want {
+		t.Errorf("empty template hash = %s, want %s", empty, want)
+	}
+}
+
 func TestTemplateHashStability(t *testing.T) {
 	want, err := object.TemplateHash(template("img:1"))
 	if err != nil {

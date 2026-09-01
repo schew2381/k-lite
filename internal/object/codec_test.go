@@ -1,6 +1,7 @@
 package object_test
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -176,6 +177,40 @@ func TestDecodeErrors(t *testing.T) {
 				t.Fatalf("err = %v, want substring %q", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestDecodeRejectsOversizeInput(t *testing.T) {
+	big := append([]byte(workloadYAML), bytes.Repeat([]byte("# padding\n"), 512*1024)...)
+	if _, err := object.Decode(big); err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Errorf("Decode(5MB) err = %v, want size limit error", err)
+	}
+	if _, err := object.DecodeOne(big); err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Errorf("DecodeOne(5MB) err = %v, want size limit error", err)
+	}
+}
+
+// The YAML library refuses documents whose aliases expand far beyond their
+// byte size. This pins that a billion-laughs payload errors instead of
+// eating the heap.
+func TestDecodeRejectsAliasBomb(t *testing.T) {
+	bomb := `apiVersion: klite/v1
+kind: Workload
+metadata:
+  name: a
+spec:
+  a: &a ["x","x","x","x","x","x","x","x","x"]
+  b: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a]
+  c: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b]
+  d: &d [*c,*c,*c,*c,*c,*c,*c,*c,*c]
+  e: &e [*d,*d,*d,*d,*d,*d,*d,*d,*d]
+  f: &f [*e,*e,*e,*e,*e,*e,*e,*e,*e]
+  g: &g [*f,*f,*f,*f,*f,*f,*f,*f,*f]
+  h: &h [*g,*g,*g,*g,*g,*g,*g,*g,*g]
+  i: &i [*h,*h,*h,*h,*h,*h,*h,*h,*h]
+`
+	if _, err := object.Decode([]byte(bomb)); err == nil {
+		t.Error("Decode accepted an alias bomb")
 	}
 }
 
