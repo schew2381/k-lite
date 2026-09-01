@@ -20,4 +20,13 @@ describe('internetJoinCommand', () => {
   it('keeps the klited port from the cluster endpoints', () => {
     expect(internetJoinCommand(info)).toContain(':7443')
   })
+
+  it('offers the facade machine LAN address when the browser only knows localhost', () => {
+    const cmd = internetJoinCommand({ ...info, machineAddresses: ['192.168.1.20', '10.0.0.4'] })
+    expect(cmd).toContain('--server 192.168.1.20:7443')
+  })
+
+  it('demands an advertise address so the new machine never guesses its Docker bridge', () => {
+    expect(internetJoinCommand(info)).toContain('--advertise-address <new-machine-address>')
+  })
 })

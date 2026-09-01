@@ -36,8 +36,9 @@
 // POST   /api/nodes/{name}/uncordon    → Uncordon RPC (M8). Cordon has no
 //                                      route: live, it only happens as the
 //                                      first step of a drain.
-// GET    /api/nodetoken                → {"token", "endpoints"} for joining a
-//                                      new machine with klite-agent
+// GET    /api/nodetoken                → {"token", "endpoints",
+//                                      "machineAddresses"} for joining a new
+//                                      machine with klite-agent
 // POST   /api/nodes/{name}/join        → {"ok","pid","log"}. The facade
 //                                      starts klite-agent on its own machine,
 //                                      making the dialog's "this machine"
@@ -154,7 +155,7 @@ export class HttpClient implements KliteClient {
     await this.json(`/api/nodes/${node}/uncordon`, { method: 'POST' })
   }
 
-  async nodeToken(): Promise<{ token: string; endpoints: string[] }> {
+  async nodeToken(): Promise<{ token: string; endpoints: string[]; machineAddresses?: string[] }> {
     return this.json('/api/nodetoken')
   }
 

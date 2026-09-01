@@ -224,8 +224,9 @@ func (s *Server) handleNodeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"token":     resp.GetToken(),
-		"endpoints": s.endpoints,
+		"token":            resp.GetToken(),
+		"endpoints":        s.endpoints,
+		"machineAddresses": machineAddresses(),
 	})
 }
 

@@ -21,20 +21,26 @@ export interface JoinInfo {
   node: string
   token: string
   endpoints: string[]
+  machineAddresses?: string[]
 }
 
 // A remote machine can't dial 127.0.0.1, so the internet command needs the
 // cluster's routable address. The browser's own hostname is the best guess
-// when the browser itself isn't on the cluster machine.
-function routableServer(endpoints: string[]): string {
-  const port = endpoints[0]?.split(':')[1] ?? '7443'
+// when the browser itself isn't on the cluster machine. When it is, the
+// facade's own interface addresses stand in.
+function routableServer(info: JoinInfo): string {
+  const port = info.endpoints[0]?.split(':')[1] ?? '7443'
   const host = typeof window !== 'undefined' ? window.location.hostname : ''
   if (host && host !== 'localhost' && host !== '127.0.0.1') return `${host}:${port}`
-  return `<machine-address>:${port}`
+  const lan = info.machineAddresses?.[0]
+  return lan ? `${lan}:${port}` : `<machine-address>:${port}`
 }
 
+// The advertise address stays a placeholder on purpose: it names the NEW
+// machine, which only that machine knows. Without it, a Linux box guesses
+// its Docker bridge and every node dials into nothing (ADR 0034).
 export function internetJoinCommand(info: JoinInfo): string {
-  return `klite-agent --node ${info.node} --server ${routableServer(info.endpoints)} --token ${info.token}`
+  return `klite-agent --node ${info.node} --server ${routableServer(info)} --token ${info.token} --advertise-address <new-machine-address>`
 }
 
 function CommandBlock({ command }: { command: string }) {
@@ -105,7 +111,7 @@ function LocalJoin({ info, onDone }: { info: JoinInfo; onDone: () => void }) {
         <p className="text-xs text-muted-foreground">
           {state === 'done'
             ? 'Watch its card: the node goes Ready once the agent registers.'
-            : 'Starts klite-agent here, on the machine already running klited.'}
+            : 'Starts klite-agent on the machine already running klited.'}
         </p>
       )}
     </>
@@ -145,8 +151,8 @@ export function JoinNodeDialog({
           <TabsContent value="internet" className="flex flex-col gap-2">
             <CommandBlock command={internetJoinCommand(info)} />
             <p className="text-xs text-muted-foreground">
-              Run it on the new machine. It needs to reach the cluster address above, and the cluster
-              needs to reach it back for the mTLS ingress (ADR 0034).
+              Run it on the new machine, filling in that machine's own routable address. Other nodes dial
+              that address for the mTLS ingress, so each side has to reach the other (ADR 0034).
             </p>
           </TabsContent>
         </Tabs>

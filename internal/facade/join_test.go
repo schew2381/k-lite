@@ -108,6 +108,31 @@ func TestJoinUndeclaredNodeIs404(t *testing.T) {
 	}
 }
 
+func TestNodeTokenListsMachineAddresses(t *testing.T) {
+	srv := New(tokenFake{&fakeClient{}}, []string{"127.0.0.1:7443"}, "", false, nil)
+	req := httptest.NewRequest("GET", "/api/nodetoken", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Token            string   `json:"token"`
+		MachineAddresses []string `json:"machineAddresses"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Token != "tok-1" {
+		t.Fatalf("token %q", out.Token)
+	}
+	for _, a := range out.MachineAddresses {
+		if strings.HasPrefix(a, "127.") {
+			t.Fatalf("loopback %s offered as a machine address", a)
+		}
+	}
+}
+
 func TestJoinWithoutSpawnerIs501(t *testing.T) {
 	srv := New(tokenFake{&fakeClient{}}, []string{"127.0.0.1:7443"}, "", false, nil)
 	if rec := postJoin(t, srv, "node-9"); rec.Code != 501 {

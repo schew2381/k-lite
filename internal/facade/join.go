@@ -3,6 +3,7 @@ package facade
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -33,6 +34,26 @@ func (s *Server) EnableLocalJoin(bin, dir string) {
 		server = s.endpoints[0]
 	}
 	s.spawn = &agentSpawner{bin: bin, dir: dir, server: server}
+}
+
+// machineAddresses lists this machine's non-loopback IPv4 addresses. The
+// join dialog needs one when its browser only knows localhost, since a
+// machine across the network can't dial the loopback endpoint the facade
+// itself uses.
+func machineAddresses() []string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, a := range addrs {
+		ipn, ok := a.(*net.IPNet)
+		if !ok || ipn.IP.To4() == nil || ipn.IP.IsLoopback() || ipn.IP.IsLinkLocalUnicast() {
+			continue
+		}
+		out = append(out, ipn.IP.String())
+	}
+	return out
 }
 
 // handleJoin mints a join token and starts an agent for the named node on
