@@ -28,14 +28,14 @@ export function ServiceCard({
   const name = service.metadata.name
 
   // the mirror of the create dialog: the pair goes together, and the
-  // instances drain out through the same reconcile everything else uses
+  // controller deletes the orphaned instances outright (no drain)
   const removeService = () =>
     act(
       (workload ? client.remove('Workload', workload.metadata.name) : Promise.resolve())
         .then(() => client.remove('Service', name))
         .then(() => {
           toast(
-            `service/${name} deleted${workload ? ` with workload/${workload.metadata.name}` : ''}. Instances drain out`,
+            `service/${name} deleted${workload ? ` with workload/${workload.metadata.name}` : ''}. Instances go with it`,
           )
         }),
     )
@@ -72,7 +72,7 @@ export function ServiceCard({
                 <Trash2Icon className="text-deny" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Delete {name} and its workload. Instances drain out.</TooltipContent>
+            <TooltipContent>Delete {name} and its workload. Instances go with it.</TooltipContent>
           </Tooltip>
         </span>
       </div>

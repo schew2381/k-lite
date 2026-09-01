@@ -255,8 +255,15 @@ export class Cluster {
     this.objects[kind].delete(name)
     this.emit('DELETED', obj)
     if (kind === 'Service') this.reconcileVipAllocations()
-    // Instances of a deleted Workload drain out via reconcile. A deleted
-    // Service stops resolving (no-endpoints), and policies flip verdicts.
+    // Instances whose workload is gone get deleted, matching the real
+    // controller (internal/controller/workload.go): no drain, the agents
+    // just stop them. A deleted Service stops resolving (no-endpoints), and
+    // policies flip verdicts.
+    if (kind === 'Workload') {
+      for (const inst of this.instancesOf(name)) {
+        this.deleteInstance(inst.metadata.name)
+      }
+    }
   }
 
   killInstance(name: string) {
