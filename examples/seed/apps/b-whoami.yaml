@@ -20,9 +20,9 @@ spec:
             trap "exit 0" TERM; mkdir -p /www;
             echo "$(hostname) is b" > /www/index.html;
             httpd -p 80 -h /www;
-            while :; do sleep $((8 - $(date +%s) % 8)) & wait $!;
+            while :; do sleep $((10 - $(date +%s) % 10)) & wait $!;
             r=$(head -c2 /dev/urandom | od -An -tu2 | tr -d " ");
-            [ "$r" -lt 13107 ] || continue;
+            [ "$r" -lt 16384 ] || continue;
             n=0; for t in $TARGETS; do n=$((n+1)); done;
             [ "$n" -gt 0 ] || continue;
             k=$(( ($(head -c2 /dev/urandom | od -An -tu2 | tr -d " ") % n) + 1 ));

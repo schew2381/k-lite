@@ -18,8 +18,8 @@
 #   finale      the apps' own chatter confirmed, then the live board
 #
 # Zero-failure gates ride deterministic probe loops (wget to b and to c once
-# a second from inside a's container). The apps' own chatter (one 20% roll
-# per shared 8-second wave) is shown and checked on its own clock, never used
+# a second from inside a's container). The apps' own chatter (one 25% roll
+# per shared 10-second wave) is shown and checked on its own clock, never used
 # as a gate's denominator.
 #
 # The demo leaves everything running so the audience can poke at it. Tear

@@ -17,8 +17,8 @@ spec:
         # services (frontend/app/lib/yamlgen.ts chattyContainer): each
         # instance serves its hostname on :80 and calls one random name from
         # TARGETS through the real data path (kdns, VIP, Envoy). Calls fire
-        # in waves: every instance sleeps to the same 8-second wall-clock
-        # boundary, then rolls one die. 13107 of 65536 is 20%, the per-wave
+        # in waves: every instance sleeps to the same 10-second wall-clock
+        # boundary, then rolls one die. 16384 of 65536 is 25%, the per-wave
         # equivalent of the old 2.5% per second. sh as pid 1 drops SIGTERM by
         # default, so the trap comes first, and the sleep runs backgrounded
         # under wait, where a trap can fire. Both together let drains and
@@ -30,9 +30,9 @@ spec:
             trap "exit 0" TERM; mkdir -p /www;
             echo "$(hostname) is a" > /www/index.html;
             httpd -p 80 -h /www;
-            while :; do sleep $((8 - $(date +%s) % 8)) & wait $!;
+            while :; do sleep $((10 - $(date +%s) % 10)) & wait $!;
             r=$(head -c2 /dev/urandom | od -An -tu2 | tr -d " ");
-            [ "$r" -lt 13107 ] || continue;
+            [ "$r" -lt 16384 ] || continue;
             n=0; for t in $TARGETS; do n=$((n+1)); done;
             [ "$n" -gt 0 ] || continue;
             k=$(( ($(head -c2 /dev/urandom | od -An -tu2 | tr -d " ") % n) + 1 ));
