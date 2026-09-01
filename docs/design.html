@@ -156,6 +156,10 @@ table.truth td.bad{color:var(--deny);font-weight:700}
   border:1.5px solid var(--ink);border-radius:8px;padding:5px 10px;box-shadow:2px 2px 0 rgba(43,42,36,.12)}
 .chip b{color:var(--ctrl)}
 
+/* plain tight bullets */
+ul.plain{margin:10px 0 0;padding-left:20px;max-width:78ch}
+ul.plain li{margin:4px 0;font-size:14px;color:#3c3b33}
+
 /* numbered join steps */
 ol.steps{list-style:none;counter-reset:step;margin:18px 0 0;padding:0;background:var(--card);
   border:1.5px solid var(--ink);border-radius:10px;box-shadow:2px 2px 0 rgba(43,42,36,.16);overflow:hidden}
@@ -270,49 +274,67 @@ footer .mono{font-family:var(--mono);font-size:12px}
   </div>
 </section>
 
-<!-- ============ 02 · FIRST DECISIONS ============ -->
+<!-- ============ 02 · AGENTS + ITERATIVE DESIGN ============ -->
 <section id="rounds">
   <div class="wrap">
-    <p class="eyebrow"><b>02</b>the first decisions</p>
-    <h3 class="sub">One agent process per node — not Docker-in-Docker <span class="adrchip">ADR 0003</span></h3>
+    <p class="eyebrow"><b>02</b>the process</p>
+    <h2>How I used agents and iterative design</h2>
+
+    <h3 class="sub">1 · Research open-source tools with agents, generate reports</h3>
     <p>
-      Locally a node is one <code>klite-agent</code> process, and all of them share the Mac's single
-      Docker daemon. Every container carries <code>io.klite.node=&lt;name&gt;</code>, and that label filter
-      is a node's whole worldview. Docker-in-Docker offered truer isolation at the price of privileged
-      containers, slow startup, and nested networking that misbehaves on macOS. One agent simulating N
-      nodes was rejected too — a fiction for the scheduler and drain logic to exercise. A cloud node later
-      is the same binary on a real machine.
+      Before any data-plane code, agents surveyed the proxy landscape and wrote the reports in
+      <code>research/</code> — ADR 0007 is the distillation.
+    </p>
+    <div class="decs">
+      <div class="dec"><span class="opt">nginx</span><span class="why">reload-based config — wrong for per-second endpoint churn</span><span class="tag">ADR 0007</span></div>
+      <div class="dec"><span class="opt">Traefik / Caddy</span><span class="why">dynamic routing, but listeners are static exactly where per-VIP listeners must appear at runtime</span><span class="tag">ADR 0007</span></div>
+      <div class="dec"><span class="opt">Consul</span><span class="why">solves discovery and policy at the price of a second raft-and-gossip system bigger than k-lite</span><span class="tag">ADR 0007</span></div>
+      <div class="dec"><span class="opt">Istio / Linkerd</span><span class="why">effectively require Kubernetes underneath</span><span class="tag">research/</span></div>
+      <div class="dec"><span class="opt">Cilium</span><span class="why">an eBPF data plane living in the Linux kernel — no story on a macOS-hosted cluster</span><span class="tag">research/</span></div>
+      <div class="dec"><span class="opt">Envoy</span><span class="why">drains, balancing, and hitless config over an open protocol (xDS)</span><span class="tag">ADR 0007</span></div>
+    </div>
+    <p>
+      The agent's first call from that research: build a <b>custom Go L4 proxy</b>, keep Envoy as the
+      documented swap.
     </p>
 
-    <h3 class="sub">gRPC everywhere, and agents always dial out <span class="adrchip">ADR 0004</span></h3>
-    <p>
-      Agents, the CLI, and every Envoy speak gRPC to klited, and connections only ever go from agent to
-      server — a node behind NAT joins with no design change. HTTP long-poll lost on the durability bar
-      (typed contracts, and xDS itself is gRPC). WebSockets lost because we'd be hand-designing the
-      framing gRPC already is. The browser is the one exception and gets a small REST/SSE facade.
-    </p>
+    <h3 class="sub">2 · Audit the agent's decisions</h3>
+    <p>Agent recommendations are drafts. Every big one got audited, and most flipped.</p>
+    <div class="decs">
+      <div class="dec no"><span class="opt">custom Go L4 proxy</span><span class="why">a few hundred lines we'd own — meaning a few hundred lines of connection-handling bugs</span><span class="tag">first call</span></div>
+      <div class="dec yes"><span class="opt">Envoy, speaking real xDS</span><span class="why">learning the xDS gRPC protocol tipped it — an easy-to-use open standard, and the code left to write is exactly the control plane</span><span class="tag">ADR 0007</span></div>
+      <div class="dec no"><span class="opt">bbolt embedded in one server</span><span class="why">cheap to run, impossible to replicate</span><span class="tag">first call</span></div>
+      <div class="dec yes"><span class="opt">etcd ×3, stateless klited</span><span class="why">the audit raised the bar to a battle-tested store that mirrors k8s — HA became a goal and bbolt died</span><span class="tag">ADR 0005</span></div>
+      <div class="dec no"><span class="opt">same-Wi-Fi peers, defer the internet</span><span class="why">real enough to demo, but the open internet stayed unproven</span><span class="tag">first call</span></div>
+      <div class="dec yes"><span class="opt">a Tailscale tailnet as the mesh VPN</span><span class="why">the audit pushed the agent to research and land the full working model, not defer it</span><span class="tag">ADR 0043</span></div>
+      <div class="dec no"><span class="opt">the agent's first UI design</span><span class="why">functional and forgettable — taste is the one thing agents don't default to</span><span class="tag">first call</span></div>
+      <div class="dec yes"><span class="opt">a live board with opinions</span><span class="why">pulled from real-world references — turbopuffer's pages, raft and paxos visualizations</span><span class="tag">review</span></div>
+    </div>
+    <p>The internet story got the deepest audit loop, and the records show it:</p>
+    <ul class="plain">
+      <li>ADR 0016 deferred cross-machine traffic but demanded the research up front — <code>research/overlay-wan.md</code> recorded the order (published ports first, a WireGuard mesh second) and named NAT rendezvous as the wall.</li>
+      <li>Published ports landed first (ADR 0034) and proved the wall real: a NATed node joins, heartbeats, and looks healthy while traffic aimed at it blackholes.</li>
+      <li>The audited answer is an overlay (ADR 0043): every machine dials out, hole-punching with DERP relay fallback hands each a stable 100.64/10 address, and k-lite changes zero lines — the tailnet address is simply what nodes advertise and what klited serves.</li>
+      <li>The tailnet carries packets, never trust: k-lite's own CA still signs everything, so it's our mTLS inside their WireGuard.</li>
+    </ul>
 
-    <h3 class="sub">etcd for state, klited stateless <span class="adrchip">ADR 0005</span></h3>
-    <p>
-      Cluster state lives in a 3-member etcd. Every klited serves reads and writes, and controllers run
-      single-active behind a 5-second lease — the kube-apiserver / controller-manager split at 1:100
-      scale. bbolt died the moment HA became a goal, and embedded raft was rejected as the largest
-      correctness tarpit the project could buy. Measured: after the leader's SIGKILL, a standby leads
-      within 4.5 seconds and no node dips from Ready.
-    </p>
+    <h3 class="sub">3 · Design and research as much as possible up front</h3>
+    <ul class="plain">
+      <li>A day of design before code beat weeks of rework — the ADRs and <code>research/</code> existed before <code>internal/</code>.</li>
+      <li>Real systems set the shapes: Envoy and Istio for the data plane, Kubernetes for the object model, k3s for the join flow.</li>
+      <li><code>/grill-with-docs</code> made the agent question its own plan relentlessly and write the decision record as it went — reversals included.</li>
+    </ul>
 
-    <h3 class="sub">Envoy from day one, speaking real xDS <span class="adrchip">ADR 0007</span></h3>
-    <p>
-      The round-one plan was our own DNS server and TCP proxy — a few hundred lines to own, meaning a few
-      hundred lines of connection-handling bugs, and graceful drain killed it. Envoy brings draining,
-      balancing, and hitless config as battle-tested machinery, so the code left to write is exactly the
-      control plane. The bet was spike-gated: Envoy on colima/arm64 had to take CDS/EDS/LDS over one ADS
-      stream and apply an RBAC deny hitlessly before the ADR stuck.
-    </p>
+    <h3 class="sub">4 · Parallel subagents for speed and thoroughness</h3>
+    <ul class="plain">
+      <li>Claude Code ran the build as three main sessions — infra, the live UI, and this page — each fanning out its own subagents.</li>
+      <li>Cross-session messages carried bug reports with diagnoses, byte-matched fixtures, and ADR numbering between them.</li>
+      <li>Adversarial subagents reviewed everything twice: technical accuracy against the code, writing against a style guide.</li>
+    </ul>
   </div>
 </section>
 
-<!-- ============ 03 · WHAT xDS IS ============ -->
+<!-- ============ 03 · WHAT xDS IS ============ --><!-- ============ 03 · WHAT xDS IS ============ -->
 <section id="xdsintro">
   <div class="wrap">
     <p class="eyebrow"><b>03</b>xDS in one breath</p>
@@ -1044,7 +1066,7 @@ function makeScene(svgId, vw, vh){
 /* ---------- left TOC rail ---------- */
 (function toc(){
   const NAMES = [
-    ["top","title"],["rounds","first decisions"],["xdsintro","xDS"],["yaml","the YAML"],
+    ["top","title"],["rounds","agents + iteration"],["xdsintro","xDS"],["yaml","the YAML"],
     ["loop","converge"],["discovery","discovery"],["node","a node joins"],["identity","identity"],
     ["wan","machines"],["reach","reachability"],["ui","the UI"],
     ["cli","the CLI"],["k8s","vs k8s"],
