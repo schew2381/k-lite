@@ -339,7 +339,7 @@ footer .mono{font-family:var(--mono);font-size:12px}
   <div class="wrap">
     <p class="eyebrow"><b>03</b>xDS in one breath</p>
     <h2>Envoy is configured by subscription, not by files</h2>
-    <p class="lede">The proxy asks discovery services for its config and applies every update hitlessly. Five terms cover it:</p>
+    <p class="lede">The proxy asks discovery services for its config and applies every update hitlessly.</p>
     <table class="addr">
       <tbody>
         <tr><td>LDS</td><td>listener discovery — which addresses and ports to bind, and the filter chain on each</td></tr>
@@ -356,7 +356,7 @@ footer .mono{font-family:var(--mono);font-size:12px}
 <section id="yaml">
   <div class="wrap">
     <p class="eyebrow"><b>04</b>the input surface</p>
-    <h2>You write four kinds. The server writes the rest.</h2>
+    <h2>Declarative YAML</h2>
 
     <div class="words">
       <div><b>Workload</b><s>Deployment</s><span>N copies of one image</span></div>
@@ -472,15 +472,7 @@ spec:
   <div class="wrap">
     <p class="eyebrow"><b>06</b>service discovery</p>
     <h2>Names resolve to a proxy, not an instance</h2>
-    <p class="lede">
-      Inside <code>a</code>, something calls <code>http://b:8080</code>. Four designs for what happens
-      next were considered. The survivor gives readiness, balancing, and policy one place to stand.
-    </p>
-
     <div class="decs">
-      <div class="dec no"><span class="opt">Docker network aliases</span><span class="why">zero infra, but dead containers linger and policy has no chokepoint</span><span class="tag">rejected</span></div>
-      <div class="dec no"><span class="opt">env-var injection</span><span class="why">stale on every reschedule, plus start-order dependencies</span><span class="tag">rejected</span></div>
-      <div class="dec no"><span class="opt">DNS straight to instance IPs</span><span class="why">client resolver caches (JVMs: 30s) keep serving the dead</span><span class="tag">rejected</span></div>
       <div class="dec yes"><span class="opt">own DNS + a VIP per (Service, Node)</span><span class="why">each node's instances hear their own node's answer — churn hides behind a fixed address</span><span class="tag">ADR 0006</span></div>
     </div>
 
@@ -866,9 +858,9 @@ function makeScene(svgId, vw, vh){
   sc.rect(46, 112, 120, 30, { rx:7, sw:1.6 });
   sc.txt(106, 131, "etcd", { size:11, anchor:"middle", cls:"mono", weight:650 });
 
-  sc.txt(346, 50, "klite scale workload b --replicas 3", { size:11.5, cls:"mono", fill:C.ctrl, weight:700 });
-  sc.arrow("M 520 46 C 420 30, 380 40, 332 52", { sw:2 });
-  sc.stepDot(360, 34, 1);
+  sc.txt(96, 18, "you (CLI · UI): klite scale workload b --replicas 3", { size:11.5, cls:"mono", fill:C.ctrl, weight:700 });
+  sc.arrow("M 86 16 C 66 18, 56 24, 54 32", { sw:2 });
+  sc.stepDot(70, 14, 1);
 
   sc.stepDot(40, 176, 2); sc.stepDot(40, 198, 3);
   sc.txt(58, 180, "workload ctrl: Instance b-3f81, Pending", { size:11.5, cls:"mono" });
