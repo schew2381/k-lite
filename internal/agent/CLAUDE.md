@@ -10,3 +10,5 @@ Invariants:
 - Stops honor the instance's termination grace as the docker stop timeout.
 - The infra pod (klite-net donor + Envoy joining its netns) is agent-managed per ADR 0008. Sequencing matters: donor first, it owns the netns.
 - SIGTERM just exits. Containers keep running and get adopted on the next run — that IS the contract.
+- The node identity under `~/.klite/agent/<node>/tls` (join.go, ADR 0013) outlives the process: reuse it on every start, re-join only when the cluster rejects it AND a token is in hand. Envoy mounts the same directory, and M9 ingress listeners will read it too.
+- The command plane pins one klited per stream life (commands.go). Output pushes route only on the server holding the waiter, so never move them onto the round-robin channel.
