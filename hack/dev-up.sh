@@ -224,4 +224,4 @@ if [[ -n "$MAC_IP" ]]; then
   echo "  (macOS may ask to allow incoming connections for klited: allow it)"
 fi
 echo
-echo "tear down: hack/dev-down.sh (add --all to stop etcd and remove klite0)"
+echo "tear down: hack/dev-down.sh (add --all to also wipe the cluster: etcd data, CA, node identities)"
