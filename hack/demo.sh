@@ -453,10 +453,12 @@ wait_for 60 facade_up \
   || { tail -5 "$DEV_DIR/facade.log"; die "facade never answered on :7080 (see $DEV_DIR/facade.log)"; }
 
 kill_port 5173 # nothing may squat the port, or Vite silently takes 5174
-(cd frontend && exec bun run dev) >"$DEV_DIR/vite.log" 2>&1 &
+# NO_COLOR keeps the startup banner grep-able; the probe uses localhost
+# because Vite may bind the IPv6 loopback only.
+(cd frontend && NO_COLOR=1 exec bun run dev) >"$DEV_DIR/vite.log" 2>&1 &
 echo $! >"$DEV_DIR/vite.pid"
 disown
-vite_up() { curl -s --max-time 2 -o /dev/null "http://127.0.0.1:5173/"; }
+vite_up() { curl -s --max-time 2 -o /dev/null "http://localhost:5173/"; }
 wait_for 60 vite_up || { tail -5 "$DEV_DIR/vite.log"; die "Vite never answered on :5173 (see $DEV_DIR/vite.log)"; }
 grep -q "localhost:5173/" "$DEV_DIR/vite.log" || die "Vite came up on the wrong port (see $DEV_DIR/vite.log)"
 pass "Vite dev server on :5173, /api proxied to the facade"
