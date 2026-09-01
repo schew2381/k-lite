@@ -14,7 +14,7 @@ import (
 )
 
 // The cross-node ingress range (ADR 0024): every node owns
-// IngressPortsPerNode host ports starting at base + size*(index-1), and its
+// IngressPortsPerNode host ports starting at base + 32*(index-1), and its
 // donor publishes the whole slice at creation because Docker can't add
 // published ports to a running container.
 const (
@@ -53,14 +53,19 @@ type ingressController struct {
 }
 
 // nodeRange returns the node's half-open port slice [lo, hi). ok is false
-// while the node has no index yet or the slice would leave the port space.
+// while the node has no index yet or the slice would leave the 1-65535 port
+// space. The lower bound matters as much as the upper: a negative base
+// (int32 truncation of a fat-fingered flag) would otherwise mint negative
+// ports, and xds.validateNet rejects those, wedging every node on its last
+// good snapshot. The agent's ingressPortRange makes the same refusal, so
+// allocator and donor stay agreed on "no slice".
 func (c *ingressController) nodeRange(index int32) (lo, hi int32, ok bool) {
 	if index < 1 {
 		return 0, 0, false
 	}
 	lo = c.base + IngressPortsPerNode*(index-1)
 	hi = lo + IngressPortsPerNode
-	if hi > 65536 {
+	if lo < 1 || hi > 65536 {
 		return 0, 0, false
 	}
 	return lo, hi, true
@@ -117,7 +122,7 @@ func (c *ingressController) wanted(svcObjs, instObjs []*klitev1.Object, index ma
 				continue
 			}
 			if _, _, ok := c.nodeRange(index[node]); !ok {
-				continue // no index yet; the registration write re-kicks us
+				continue // no index yet, and the registration write re-kicks us
 			}
 			name := IngressAllocationName(svc.GetMeta().GetName(), inst.GetMeta().GetName())
 			want[name] = &klitev1.IngressAllocationSpec{
@@ -145,29 +150,34 @@ func (c *ingressController) reconcileAllocation(ctx context.Context, alloc *klit
 	}
 	spec, wanted := want[name]
 	delete(want, name)
+	rev := alloc.GetMeta().GetResourceVersion()
 	switch {
 	case !wanted:
-		return c.release(ctx, name, "endpoint gone")
+		return c.release(ctx, name, rev, "endpoint gone")
 	case spec.GetNode() != alloc.GetSpec().GetNode():
 		// The name outlived its instance and a namesake landed elsewhere.
 		want[name] = spec // reallocated below
-		return c.release(ctx, name, "instance moved nodes")
+		return c.release(ctx, name, rev, "instance moved nodes")
 	case !valid:
 		want[name] = spec // reallocated below
-		return c.release(ctx, name, "port outside the node's range")
+		return c.release(ctx, name, rev, "port outside the node's range")
 	case duplicate:
 		// List walks names in order, so the lexically-first holder keeps a
 		// contested port and the repair converges on every pass.
 		want[name] = spec // reallocated below
-		return c.release(ctx, name, "duplicate port")
+		return c.release(ctx, name, rev, "duplicate port")
 	}
 	return nil
 }
 
-func (c *ingressController) release(ctx context.Context, name, reason string) error {
-	err := c.st.Delete(ctx, object.KindIngressAllocation, name)
+// release deletes the allocation at the revision this pass listed. The pin
+// keeps a lagging leader's release from taking out an allocation a newer
+// leader just re-minted, which would move a port the instance already
+// advertises. Either way the next pass re-observes.
+func (c *ingressController) release(ctx context.Context, name string, rev int64, reason string) error {
+	err := c.st.DeleteIfRevision(ctx, object.KindIngressAllocation, name, rev)
 	switch {
-	case errors.Is(err, store.ErrNotFound):
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, store.ErrConflict):
 		return nil
 	case err != nil:
 		return err
@@ -179,7 +189,7 @@ func (c *ingressController) release(ctx context.Context, name, reason string) er
 func (c *ingressController) allocate(ctx context.Context, spec *klitev1.IngressAllocationSpec, used map[int32]bool, index map[string]int32) error {
 	lo, hi, ok := c.nodeRange(index[spec.GetNode()])
 	if !ok {
-		return nil // wanted() screened this; a raced node delete lands here
+		return nil // wanted() screened this, so only a raced node delete lands here
 	}
 	port, err := firstFreePort(lo, hi, used)
 	if err != nil {

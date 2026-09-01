@@ -81,26 +81,30 @@ func (c *vipController) reconcileAllocation(ctx context.Context, alloc *klitev1.
 	}
 	spec, wanted := want[name]
 	delete(want, name)
+	rev := alloc.GetMeta().GetResourceVersion()
 	switch {
 	case !wanted:
-		return c.release(ctx, name, "service or node gone")
+		return c.release(ctx, name, rev, "service or node gone")
 	case !valid:
 		want[name] = spec // reallocated below
-		return c.release(ctx, name, "vip outside the pool")
+		return c.release(ctx, name, rev, "vip outside the pool")
 	case duplicate:
 		// Two leader lives can each create-only their own name with the same
 		// address. List walks names in order, so the lexically-first holder
 		// keeps a contested VIP and the repair converges on every pass.
 		want[name] = spec // reallocated below
-		return c.release(ctx, name, "duplicate vip")
+		return c.release(ctx, name, rev, "duplicate vip")
 	}
 	return nil
 }
 
-func (c *vipController) release(ctx context.Context, name, reason string) error {
-	err := c.st.Delete(ctx, object.KindVIPAllocation, name)
+// release deletes the allocation at the revision this pass listed, so a
+// lagging leader's release can't remove one a newer leader re-minted and
+// churn a VIP mid-life. Either way the next pass re-observes.
+func (c *vipController) release(ctx context.Context, name string, rev int64, reason string) error {
+	err := c.st.DeleteIfRevision(ctx, object.KindVIPAllocation, name, rev)
 	switch {
-	case errors.Is(err, store.ErrNotFound):
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, store.ErrConflict):
 		return nil
 	case err != nil:
 		return err

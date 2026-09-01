@@ -189,3 +189,51 @@ func TestIngressNodeRangeBounds(t *testing.T) {
 		t.Fatal("a range past 65535 must be refused")
 	}
 }
+
+// A release decided on a stale list must not remove an allocation another
+// leader life re-minted in the meantime: that would churn a port the
+// instance already advertises. The revision pin turns it into a no-op.
+func TestIngressStaleReleaseSparesReMintedAllocation(t *testing.T) {
+	t.Parallel()
+	st, c := ingressSetup(t, ingressAllocObj("b", "b-aa", "node-1", 20000))
+	staleObjs, _, err := st.List(context.Background(), object.KindIngressAllocation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := IngressAllocationName("b", "b-aa")
+	if err := st.Delete(context.Background(), object.KindIngressAllocation, name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Put(context.Background(), ingressAllocObj("b", "b-aa", "node-1", 20007), store.RevCreate); err != nil {
+		t.Fatal(err)
+	}
+	staleRev := staleObjs[0].GetIngressAllocation().GetMeta().GetResourceVersion()
+	if err := c.release(context.Background(), name, staleRev, "test"); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	got := ingressPorts(t, st)
+	if got[name].GetPort() != 20007 {
+		t.Fatalf("allocation = %v, the re-minted port must survive a stale release", got[name])
+	}
+}
+
+// A negative base (int32 truncation of a fat-fingered flag) must allocate
+// nothing rather than mint negative ports, which xds validation would reject
+// on every node's snapshot.
+func TestIngressRefusesNegativeBase(t *testing.T) {
+	t.Parallel()
+	st, c := ingressSetup(t,
+		serviceObj("b"),
+		indexedNodeObj("node-1", 1),
+		instObj("b-aa", "node-1", map[string]string{"app": "b"}))
+	c.base = -20000
+	if err := c.reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := ingressPorts(t, st); len(got) != 0 {
+		t.Fatalf("allocations = %v, want none from a negative base", got)
+	}
+	if _, _, ok := c.nodeRange(1); ok {
+		t.Fatal("a negative base must yield no range")
+	}
+}

@@ -527,3 +527,71 @@ func TestUnknownDrainDeadlineRestartsClock(t *testing.T) {
 		t.Fatalf("instances = %d, want the drain expired on the restarted clock", got)
 	}
 }
+
+// The doomed classification is only as fresh as the list it came from. When
+// the agent flips the instance READY between that list and the delete, the
+// revision-pinned delete must conflict and spare it: it's in EDS now, and
+// deleting it would kill live connections (ADR 0010's zero-dip promise).
+func TestDoomedTurnedReadySurvivesStaleDelete(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	wl := workloadObj("b", 1, "v2", 5)
+	h.put(wl)
+	h.seedInstance("b", "b-old", "h-old", "node-1", klitev1.InstancePhase_INSTANCE_PHASE_RUNNING)
+
+	stale := h.instances() // the pass's view: stale hash, not READY, doomed
+	h.setPhase("b-old", klitev1.InstancePhase_INSTANCE_PHASE_READY)
+	if err := h.c.advance(h.ctx, wl.GetWorkload(), hashOf(t, wl), stale, nil); err != nil {
+		t.Fatalf("advance: %v", err)
+	}
+
+	got, _, err := h.st.Get(h.ctx, object.KindInstance, "b-old")
+	if err != nil {
+		t.Fatalf("the READY-flipped instance must survive the stale delete: %v", err)
+	}
+	if got.GetInstance().GetStatus().GetPhase() != klitev1.InstancePhase_INSTANCE_PHASE_READY {
+		t.Fatalf("phase = %v, want READY untouched", got.GetInstance().GetStatus().GetPhase())
+	}
+	// A fresh pass sees it READY on a stale hash and starts the surge-first
+	// retirement: no draining until a READY replacement exists, and never
+	// deletion.
+	h.pass()
+	got, _, err = h.st.Get(h.ctx, object.KindInstance, "b-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GetInstance().GetStatus().GetPhase() == klitev1.InstancePhase_INSTANCE_PHASE_DRAINING {
+		t.Fatal("retirement must wait for a READY replacement before draining")
+	}
+}
+
+// A lagging leader whose drain clock expired must not take out an instance
+// a newer leader already deleted and whose name the workload controller
+// recycled. The pinned delete conflicts on the recreated object's revision.
+func TestLaggingDrainExpirySkipsRecycledName(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	wl := workloadObj("b", 1, "v1", 5)
+	hash := hashOf(t, wl)
+	h.put(wl)
+	h.seedInstance("b", "b-aa", hash, "node-1", klitev1.InstancePhase_INSTANCE_PHASE_DRAINING)
+
+	stale := h.instances()
+	// Another leader life finishes the drain and mints a namesake.
+	if err := h.st.Delete(h.ctx, object.KindInstance, "b-aa"); err != nil {
+		t.Fatal(err)
+	}
+	h.seedInstance("b", "b-aa", hash, "node-2", klitev1.InstancePhase_INSTANCE_PHASE_READY)
+
+	h.c.deadlines[stale[0].GetMeta().GetUid()] = h.now.Add(-time.Second) // long expired
+	if err := h.c.expireDrains(h.ctx, stale); err != nil {
+		t.Fatalf("expireDrains: %v", err)
+	}
+	got, _, err := h.st.Get(h.ctx, object.KindInstance, "b-aa")
+	if err != nil {
+		t.Fatalf("the recycled instance must survive the lagging expiry: %v", err)
+	}
+	if got.GetInstance().GetStatus().GetPhase() != klitev1.InstancePhase_INSTANCE_PHASE_READY {
+		t.Fatalf("phase = %v, want the namesake untouched", got.GetInstance().GetStatus().GetPhase())
+	}
+}

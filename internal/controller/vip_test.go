@@ -52,6 +52,32 @@ func allocations(t *testing.T, st *storetest.Memory) map[string]string {
 	return out
 }
 
+// Same pin as the ingress allocator: a release decided on a stale list must
+// not remove an allocation another leader life re-minted, or the VIP a node
+// already routes would churn mid-life.
+func TestVIPStaleReleaseSparesReMintedAllocation(t *testing.T) {
+	t.Parallel()
+	st, c := vipSetup(t, allocationObj("b", "node-1", "10.44.64.1"))
+	staleObjs, _, err := st.List(context.Background(), object.KindVIPAllocation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := AllocationName("b", "node-1")
+	if err := st.Delete(context.Background(), object.KindVIPAllocation, name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Put(context.Background(), allocationObj("b", "node-1", "10.44.64.7"), store.RevCreate); err != nil {
+		t.Fatal(err)
+	}
+	staleRev := staleObjs[0].GetVipAllocation().GetMeta().GetResourceVersion()
+	if err := c.release(context.Background(), name, staleRev, "test"); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if got := allocations(t, st); got[name] != "10.44.64.7" {
+		t.Fatalf("allocation = %q, the re-minted VIP must survive a stale release", got[name])
+	}
+}
+
 func TestVIPAllocatesEveryServiceNodePair(t *testing.T) {
 	t.Parallel()
 	st, c := vipSetup(t,

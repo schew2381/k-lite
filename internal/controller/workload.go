@@ -154,12 +154,19 @@ func (c *workloadController) createInstance(ctx context.Context, w *klitev1.Work
 	return fmt.Errorf("workload %s: kept colliding on instance names", wname)
 }
 
+// deleteInstance removes the instance only while it still matches what this
+// pass listed. The revision pin is what makes a stale view harmless. A
+// doomed instance that turned READY since the list surfaces as ErrConflict,
+// and so does a lagging drain expiry against a name another leader already
+// recycled. The next pass re-observes instead of killing a serving instance.
 func (c *workloadController) deleteInstance(ctx context.Context, inst *klitev1.Instance) error {
 	name := inst.GetMeta().GetName()
-	err := c.st.Delete(ctx, object.KindInstance, name)
+	err := c.st.DeleteIfRevision(ctx, object.KindInstance, name, inst.GetMeta().GetResourceVersion())
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		return nil // another leader life got here first
+	case errors.Is(err, store.ErrConflict):
+		return nil // the instance moved since the list, so re-observe
 	case err != nil:
 		return err
 	}

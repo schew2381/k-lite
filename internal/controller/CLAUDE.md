@@ -4,9 +4,9 @@ This package holds the leader-only reconcile loops: workload materialization, th
 
 Invariants:
 
-- Loops are level-based (store watch plus periodic resync) and idempotent. A brief double-leadership window during failover must be harmless, which means CAS or create-only semantics on every write, deletes that are safe to repeat, and no in-memory state a rerun can't rebuild. Drain deadlines restart on a fresh leader, they never shorten.
+- Loops are level-based (store watch plus periodic resync) and idempotent. A brief double-leadership window during failover must be harmless, which means CAS or create-only semantics on every write, deletes pinned to the revision the pass listed (`DeleteIfRevision`, where NotFound and Conflict both mean re-observe, never failure), and no in-memory state a rerun can't rebuild. Drain deadlines restart on a fresh leader, they never shorten.
 - The scheduler filters (pin, Ready, not cordoned, capacity) then picks fewest-instances with a name tie-break (ADR 0012). Placement stays explainable in one sentence.
 - Scale-down removes newest-first. Rollouts and drains follow the surge-first choreography with the DRAINING endpoint state (ADR 0010).
 - Node death is two timers: NotReady after 15s of heartbeat silence, instances deleted for rescheduling 30s after that.
-- Allocators (VIP, M9 ingress ports) share one shape: create-only writes, every seen value reserved before any release lands, repair of duplicates and out-of-range holders, lexically-first holder keeps a contested value. Ingress ports are fixed at instance birth — phase flips never churn them — and each node's slice is 32 ports at base + 32*(index-1).
-- The endpoints engine runs on every replica and now also carries ADR 0024's riders: per-endpoint ingress ports and advertise addresses on groups, plus the per-node allocation-driven ingress_listeners list.
+- Allocators (VIP, M9 ingress ports) share one shape: create-only writes, every seen value reserved before any release lands, repair of duplicates and out-of-range holders, and a lexically-first-holder-keeps rule for contested values. Ingress ports are fixed at instance birth — phase flips never churn them — and each node's slice is 32 ports at base + 32*(index-1).
+- The endpoints engine runs on every replica and carries ADR 0024's riders: per-endpoint ingress ports and advertise addresses on groups, plus the per-node allocation-driven ingress_listeners list.

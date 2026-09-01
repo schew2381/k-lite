@@ -104,6 +104,68 @@ func TestPendingDeleteReassertsDrain(t *testing.T) {
 	}
 }
 
+// Re-applying a node's YAML cancels its pending delete (ADR 0033). A pass
+// that listed the node before the re-apply still sees the label, and its
+// revision-pinned delete must conflict rather than remove the re-declared
+// record.
+func TestReappliedNodeSurvivesLaggingPendingDelete(t *testing.T) {
+	t.Parallel()
+	labels := map[string]string{object.LabelPendingDelete: "true"}
+	st, c := nodeTestSetup(t,
+		nodeObj("node-2", klitev1.NodePhase_NODE_PHASE_DRAINING, true, nodeNow.Unix(), labels))
+	staleObjs, _, err := st.List(context.Background(), object.KindNode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The user re-applies the node, which clears the label and bumps the
+	// revision under the lagging pass.
+	if _, err := st.Put(context.Background(),
+		nodeObj("node-2", klitev1.NodePhase_NODE_PHASE_DRAINING, true, nodeNow.Unix(), nil), store.RevAny); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.reconcileNode(context.Background(), staleObjs[0], 0, nil); err != nil {
+		t.Fatalf("reconcileNode: %v", err)
+	}
+	if _, _, err := st.Get(context.Background(), object.KindNode, "node-2"); err != nil {
+		t.Fatalf("the re-declared node must survive the lagging delete: %v", err)
+	}
+}
+
+// Evacuation acts on the pass's instance list. When the workload controller
+// has already recycled a dead node's instance name onto a live node, the
+// lagging evacuation's pinned delete must conflict and spare the namesake.
+func TestEvacuateSparesRecycledInstance(t *testing.T) {
+	t.Parallel()
+	inst := func(node string, phase klitev1.InstancePhase) *klitev1.Object {
+		return &klitev1.Object{Kind: &klitev1.Object_Instance{Instance: &klitev1.Instance{
+			Meta:   &klitev1.Meta{Name: "b-aa"},
+			Spec:   &klitev1.InstanceSpec{Workload: "b", Node: node},
+			Status: &klitev1.InstanceStatus{Phase: phase},
+		}}}
+	}
+	st, c := nodeTestSetup(t, inst("node-2", klitev1.InstancePhase_INSTANCE_PHASE_READY))
+	staleObjs, _, err := st.List(context.Background(), object.KindInstance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Delete(context.Background(), object.KindInstance, "b-aa"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Put(context.Background(), inst("node-3", klitev1.InstancePhase_INSTANCE_PHASE_READY), store.RevAny); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.evacuate(context.Background(), "node-2", staleObjs); err != nil {
+		t.Fatalf("evacuate: %v", err)
+	}
+	got, _, err := st.Get(context.Background(), object.KindInstance, "b-aa")
+	if err != nil {
+		t.Fatalf("the recycled instance must survive the lagging evacuation: %v", err)
+	}
+	if got.GetInstance().GetSpec().GetNode() != "node-3" {
+		t.Fatalf("node = %q, want the namesake on node-3 untouched", got.GetInstance().GetSpec().GetNode())
+	}
+}
+
 // TestSilentNodeEvacuatedAfterGrace exercises the two timers from the
 // package invariants. Silence past 15s turns the node NOT_READY, and 30s more
 // deletes its instances so the workload controller can recreate them

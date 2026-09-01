@@ -289,8 +289,10 @@ func listAllocations(ctx context.Context, st store.Store, in *inputs) error {
 }
 
 // buildAll assembles every node's snapshot from one input read. Endpoint
-// groups span the whole cluster (any node may dial any instance over klite0,
-// ADR 0006), while services, probe targets, and instances are per-node.
+// groups span the whole cluster, since a consuming node's Envoy balances
+// across every endpoint and reaches the remote ones through the mTLS ingress
+// hop (ADR 0024). Services, probe targets, instances, and ingress listeners
+// are per-node.
 func buildAll(in *inputs) map[string]*NodeSnapshot {
 	compiled := policy.Compile(in.policies)
 	groups := buildGroups(in)
