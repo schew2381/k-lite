@@ -549,11 +549,12 @@ klite-agent --node node-5 --token K10…</div>
 <section id="wan">
   <div class="wrap">
     <p class="eyebrow"><b>09</b>crossing machines</p>
-    <h2>Connection to nodes over open internet</h2>
+    <h2>How traffic crosses machines: published ports behind mTLS</h2>
     <p class="lede">
-      Cross-machine traffic was deliberately deferred, then landed as the smallest honest
-      design: when the picked endpoint lives elsewhere, EDS hands over
-      <code>advertiseAddress:ingressPort</code> instead of an instance IP.
+      When the picked endpoint lives on another machine, EDS hands over
+      <code>advertiseAddress:ingressPort</code> instead of an instance IP. This is the mechanism on
+      every network — same Wi-Fi, LAN, or tailnet. Slide 11 covers the other layer: how machines get
+      a dialable address across the open internet at all.
     </p>
 
     <div class="decs">
