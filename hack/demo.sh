@@ -364,7 +364,7 @@ STEP=rollout
 # re-applied file still says replicas: 2, matching the stored count, so the
 # rollout is the only change in flight.
 B_BEFORE="$("$KLITE" get instances | awk '$2=="b" {print $1}' | sort)"
-awk '{print} /^            value: a c$/ {print "          - name: DEMO_ROLLOUT"; print "            value: \"1\""}' \
+awk '{print} /^            value: a c d$/ {print "          - name: DEMO_ROLLOUT"; print "            value: \"1\""}' \
   "$DEV_DIR/apps/b-whoami.yaml" | "$KLITE" apply -f - >/dev/null || die "apply the rolled b template"
 info "watching the surge-first replace (create one, wait Ready, drain one, repeat)"
 rolled() {
