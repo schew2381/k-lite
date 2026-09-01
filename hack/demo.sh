@@ -251,7 +251,7 @@ info "the K10<ca-sha256> prefix pins the CA, and ::node:<secret> is the one-time
 pause
 
 for i in 1 2 3; do
-  "$KLITE" apply -f "examples/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
+  "$KLITE" apply -f "examples/seed/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
 done
 pass "declared node-1..3 (membership is YAML first, ADR 0018)"
 
@@ -291,7 +291,7 @@ patch_drain() { # patch_drain <src> <dst>
   }' "$1" > "$2"
 }
 for app in a-client b-whoami c-whoami d-web; do
-  patch_drain "examples/apps/$app.yaml" "$DEV_DIR/apps/$app.yaml"
+  patch_drain "examples/seed/apps/$app.yaml" "$DEV_DIR/apps/$app.yaml"
 done
 # d seeds at 3, one short of its resting 4, so the scale beat lands the
 # final shape live. Replicas, like the drain knobs above, sit outside
@@ -389,7 +389,7 @@ STEP=policy
 info "right now a reaches b, c, and d (the last probe against each):"
 show tail -n 1 "$PROBE_B" "$PROBE_C" "$PROBE_D"
 CHAT_MARK="$(date +%s)"
-show "$KLITE" apply -f examples/policies/deny-a-to-c.yaml
+show "$KLITE" apply -f examples/demo-policies/deny-a-to-c.yaml
 c_denied() {
   [[ "$(tail -n 3 "$PROBE_C" 2>/dev/null | grep -c FAILED)" == 3 ]] \
     && tail -n 1 "$PROBE_B" 2>/dev/null | grep -q ' is b'
@@ -584,7 +584,7 @@ echo "
     $KLITE get instances --watch
     $KLITE logs -f $A_INST                              # a's chatter: '-> b ok'
     $KLITE scale workload b --replicas 3
-    $KLITE apply -f examples/policies/deny-a-to-c.yaml   # watch the board turn
+    $KLITE apply -f examples/demo-policies/deny-a-to-c.yaml   # watch the board turn
     $KLITE delete networkpolicy deny-a-to-c
     $KLITE drain $DRAIN_NODE && $KLITE uncordon $DRAIN_NODE
     $KLITE get ingressallocations

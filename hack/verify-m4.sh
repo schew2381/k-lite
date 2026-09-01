@@ -72,7 +72,7 @@ all_ready() {
   [[ "$("$KLITE" get instances | awk '$2=="d" && $4=="Ready"' | wc -l | tr -d ' ')" == 4 ]]
 }
 
-# The seeded apps chat at random (a 2.5% roll per second, see examples/apps),
+# The seeded apps chat at random (a 2.5% roll per second, see examples/seed/apps),
 # which is the wrong clock to hang assertions on. The script runs its own
 # probe loop instead: one wget per second to b's service, executed inside
 # a's container so it rides the same kdns -> VIP -> Envoy path. Each probe
@@ -120,7 +120,7 @@ TOKEN="$("$KLITE" node token)" && pass "minted join token" || die "mint join tok
 
 # --- nodes and infra pods ----------------------------------------------------
 for i in 1 2 3; do
-  "$KLITE" apply -f "examples/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
+  "$KLITE" apply -f "examples/seed/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
 done
 pass "applied 3 node YAMLs"
 
@@ -133,7 +133,7 @@ wait_for 60 infra_up \
 
 # --- workloads a, b, c, d ------------------------------------------------------
 for app in a-client b-whoami c-whoami d-web; do
-  "$KLITE" apply -f "examples/apps/$app.yaml" >/dev/null || die "apply $app.yaml"
+  "$KLITE" apply -f "examples/seed/apps/$app.yaml" >/dev/null || die "apply $app.yaml"
 done
 pass "applied a, b, c, d workloads and services"
 

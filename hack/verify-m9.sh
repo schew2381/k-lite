@@ -154,7 +154,7 @@ wait_for 15 klited_ready && pass "klited serving on $EP" || die "klited serving 
 TOKEN="$("$KLITE" node token)" || die "mint join token"
 
 for i in 1 2 3; do
-  "$KLITE" apply -f "examples/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
+  "$KLITE" apply -f "examples/seed/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
 done
 for n in "${NODES[@]}"; do start_agent "$n"; done
 wait_for 30 nodes_ready && pass "3 nodes joined and Ready" || die "3 nodes Ready"
@@ -200,7 +200,7 @@ patch_drain() { # patch_drain <src> <dst>
   }' "$1" > "$2"
 }
 for app in a-client b-whoami c-whoami d-web; do
-  patch_drain "examples/apps/$app.yaml" "$TMP/$app-fast.yaml"
+  patch_drain "examples/seed/apps/$app.yaml" "$TMP/$app-fast.yaml"
   "$KLITE" apply -f "$TMP/$app-fast.yaml" >/dev/null || die "apply $app.yaml (fast drains)"
 done
 wait_for 90 counts_ready 2 && pass "workloads a, b, c, d all Ready (probe-gated)" || die "workloads Ready"

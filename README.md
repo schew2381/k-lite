@@ -22,10 +22,10 @@ The cluster the demo (or `dev-up.sh`) leaves behind is a normal k-lite cluster, 
 ```
 klite get workloads                       # what's running
 klite get instances --watch               # live event stream, Ctrl-C to stop
-klite apply -f examples/apps/b-whoami.yaml
+klite apply -f examples/seed/apps/b-whoami.yaml
 klite scale workload b --replicas 5       # scale-down drains before deleting
 klite logs -f <instance>                  # follow a container's output
-klite apply -f examples/policies/deny-a-to-c.yaml
+klite apply -f examples/demo-policies/deny-a-to-c.yaml
 klite policy check a c                    # verdict names the policy; nonzero exit on denied
 klite drain node-2                        # streamed, surge-first, zero dropped requests
 klite uncordon node-2

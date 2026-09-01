@@ -193,7 +193,7 @@ pass "no identity persisted by either rejected join"
 # ============================================================
 STEP=5-fresh-join
 for i in 1 2 3; do
-  "$KLITE" --server "$BOTH" apply -f "examples/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
+  "$KLITE" --server "$BOTH" apply -f "examples/seed/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
 done
 for n in "${NODES[@]}"; do start_agent "$n"; done
 wait_for 30 nodes_ready 3 && pass "3 nodes joined and Ready" || die "3 nodes Ready"
@@ -222,7 +222,7 @@ pass "infra containers labeled io.klite.cluster=$CLUSTER_ID"
 # ============================================================
 STEP=6-envoy-mtls
 for app in a-client b-whoami c-whoami d-web; do
-  "$KLITE" --server "$BOTH" apply -f "examples/apps/$app.yaml" >/dev/null || die "apply $app.yaml"
+  "$KLITE" --server "$BOTH" apply -f "examples/seed/apps/$app.yaml" >/dev/null || die "apply $app.yaml"
 done
 wait_for 90 counts_ready 2 && pass "workloads a, b, c, d all Ready (probe-gated)" || die "workloads Ready"
 

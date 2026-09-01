@@ -93,8 +93,8 @@ TOKEN="$("$KLITE" node token)" || die "mint join token"
 # --- nodes + agents ---
 say "registering nodes: ${NODES[*]}"
 for n in "${NODES[@]}"; do
-  if [[ -f "examples/nodes/$n.yaml" ]]; then
-    "$KLITE" apply -f "examples/nodes/$n.yaml" >/dev/null
+  if [[ -f "examples/seed/nodes/$n.yaml" ]]; then
+    "$KLITE" apply -f "examples/seed/nodes/$n.yaml" >/dev/null
   else
     printf 'apiVersion: klite/v1\nkind: Node\nmetadata:\n  name: %s\n  labels:\n    zone: local\nspec:\n  maxInstances: 32\n' "$n" \
       | "$KLITE" apply -f - >/dev/null
@@ -115,8 +115,8 @@ say "all $KLITE_NODE_COUNT nodes Ready"
 for n in "${NODES[@]}"; do "$KLITE" uncordon "$n" >/dev/null 2>&1 || true; done
 
 # --- example apps ---
-say "applying examples/apps"
-"$KLITE" apply -f examples/apps >/dev/null
+say "applying examples/seed/apps"
+"$KLITE" apply -f examples/seed/apps >/dev/null
 wait_for 90 instances_running || die "instances not all Running (try: $KLITE get instances; logs in $DEV_DIR)"
 say "all instances Running"
 
@@ -142,8 +142,8 @@ echo "  $KLITE logs -f $A_INST     # a's chatter: '-> b ok' on 2.5% rolls"
 echo "  $KLITE describe instance $A_INST"
 echo "  $KLITE describe workload b"
 echo "  $KLITE scale workload b --replicas 5"
-echo "  $KLITE apply -f examples/policies/allow-only-a-to-b.yaml"
-echo "  $KLITE delete -f examples/policies/allow-only-a-to-b.yaml"
+echo "  $KLITE apply -f examples/demo-policies/allow-only-a-to-b.yaml"
+echo "  $KLITE delete -f examples/demo-policies/allow-only-a-to-b.yaml"
 echo "  docker ps --filter label=io.klite.role=workload"
 echo "  tail -f $KLITED_LOG"
 echo

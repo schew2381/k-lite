@@ -67,7 +67,7 @@ wait_for 15 klited_ready \
 
 # --- nodes ---
 for i in 1 2; do
-  "$KLITE" apply -f "examples/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
+  "$KLITE" apply -f "examples/seed/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
 done
 pass "applied 2 node YAMLs"
 

@@ -37,8 +37,8 @@ Vocabulary follows [CONTEXT.md](../CONTEXT.md): you declare a Workload, and each
 Create or update objects from YAML.
 
 ```
-klite apply -f examples/apps/b-whoami.yaml
-klite apply -f examples/       # a directory, every YAML in it
+klite apply -f examples/seed/apps/b-whoami.yaml
+klite apply -f examples/seed/apps  # a directory, every YAML in it
 cat spec.yaml | klite apply -f -
 ```
 
@@ -91,7 +91,7 @@ klite logs -f a-5877           # follow until Ctrl-C; ends cleanly if the contai
 Delete by file or by kind and name.
 
 ```
-klite delete -f examples/policies/deny-a-to-c.yaml
+klite delete -f examples/demo-policies/deny-a-to-c.yaml
 klite delete workload b
 klite delete node node-2       # cordons, drains, then removes, same as deleting its YAML
 ```

@@ -552,7 +552,7 @@ echo "$OUT" | grep -q "default allow" \
 
 # ============================================================
 STEP=5-deny
-"$KLITE" apply -f examples/policies/deny-a-to-c.yaml >/dev/null \
+"$KLITE" apply -f examples/demo-policies/deny-a-to-c.yaml >/dev/null \
   || die "apply deny-a-to-c"
 assert_pair a c denied 10   # scenario 2 wants ~5s, budget 10 with the settle time reported
 DENY_LAG=$LAST_WAIT_S
@@ -573,7 +573,7 @@ info "denied wget says: ${RESET:-<no output, connection refused/reset>}"
 
 # ============================================================
 STEP=6-allow-flip
-"$KLITE" apply -f examples/policies/allow-only-a-to-b.yaml >/dev/null \
+"$KLITE" apply -f examples/demo-policies/allow-only-a-to-b.yaml >/dev/null \
   || die "apply allow-only-a-to-b"
 assert_pair a b allowed 10 # a is on b's allowlist
 assert_pair a c denied 10  # deny-a-to-c still holds
@@ -617,7 +617,7 @@ echo "$OUT" | grep -q "allowlist" \
 
 # ============================================================
 STEP=7-except
-"$KLITE" apply -f examples/policies/lockdown-a.yaml >/dev/null \
+"$KLITE" apply -f examples/demo-policies/lockdown-a.yaml >/dev/null \
   || die "apply lockdown-a"
 # The except list carves b out of DENY a->*: with a wildcard deny in force,
 # a->b flowing at all is the except list working.

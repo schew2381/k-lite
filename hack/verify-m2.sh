@@ -80,7 +80,7 @@ TOKEN="$("$KLITE" node token)" && pass "minted join token" || die "mint join tok
 
 # --- nodes ---
 for i in 1 2 3; do
-  "$KLITE" apply -f "examples/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
+  "$KLITE" apply -f "examples/seed/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
 done
 pass "applied 3 node YAMLs"
 
@@ -91,7 +91,7 @@ wait_for 10 nodes_ready \
   && pass "all 3 nodes Ready within 10s" || die "all 3 nodes Ready within 10s"
 
 # --- workload b: run and spread ---
-"$KLITE" apply -f examples/apps/b-whoami.yaml >/dev/null \
+"$KLITE" apply -f examples/seed/apps/b-whoami.yaml >/dev/null \
   && pass "apply b-whoami.yaml" || die "apply b-whoami.yaml"
 "$KLITE" scale workload b --replicas 5 >/dev/null \
   && pass "scale workload b to 5" || die "scale workload b to 5"

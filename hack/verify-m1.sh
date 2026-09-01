@@ -41,9 +41,9 @@ wait_ready 127.0.0.1:7443 \
   && pass "klited answering on 7443" || die "klited answering on 7443"
 
 # Data dirs persist across etcd-up runs, so clear leftovers from earlier attempts.
-"$KLITE" delete -f examples/apps/b-whoami.yaml >/dev/null 2>&1
+"$KLITE" delete -f examples/seed/apps/b-whoami.yaml >/dev/null 2>&1
 
-"$KLITE" apply -f examples/apps/b-whoami.yaml | grep -q "workload/b created" \
+"$KLITE" apply -f examples/seed/apps/b-whoami.yaml | grep -q "workload/b created" \
   && pass "apply b-whoami.yaml" || die "apply b-whoami.yaml"
 
 "$KLITE" get workloads | grep -Eq '^b[[:space:]]+0/2[[:space:]]+2[[:space:]]' \
@@ -80,7 +80,7 @@ get_after_restart() {
 get_after_restart \
   && pass "get answers through etcd member restart" || die "get answers through etcd member restart"
 
-"$KLITE" --server 127.0.0.1:7445 delete -f examples/apps/b-whoami.yaml | grep -q "workload/b deleted" \
+"$KLITE" --server 127.0.0.1:7445 delete -f examples/seed/apps/b-whoami.yaml | grep -q "workload/b deleted" \
   && pass "delete -f b-whoami.yaml" || die "delete -f b-whoami.yaml"
 
 "$KLITE" --server 127.0.0.1:7445 get workloads | grep -Eq '^b[[:space:]]' \

@@ -190,7 +190,7 @@ TOKEN="$("$KLITE" node token)" && pass "minted join token" || die "mint join tok
 
 # --- nodes, agents, infra (the m4 recipe) ------------------------------------
 for i in 1 2 3; do
-  "$KLITE" apply -f "examples/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
+  "$KLITE" apply -f "examples/seed/nodes/node-$i.yaml" >/dev/null || die "apply node-$i.yaml"
 done
 pass "applied 3 node YAMLs"
 for n in "${NODES[@]}"; do start_agent "$n"; done
@@ -203,7 +203,7 @@ wait_for 60 infra_up \
 # The example apps get the 4s/4s drain knobs (ADR 0010: demo pace lives in
 # YAML) and are applied once, so every instance is born with the fast drains.
 for app in a-client b-whoami c-whoami d-web; do
-  patch_drain "examples/apps/$app.yaml" "$TMP/${app}-fast.yaml"
+  patch_drain "examples/seed/apps/$app.yaml" "$TMP/${app}-fast.yaml"
   "$KLITE" apply -f "$TMP/${app}-fast.yaml" >/dev/null || die "apply ${app}-fast.yaml"
 done
 pass "applied a, b, c, d with drain 4s/4s"
@@ -329,7 +329,7 @@ C_FAILS1="$(fails_in "$PROBE_C")"
   || die "failed probes during node drain (b: $B_FAILS0->$B_FAILS1, c: $C_FAILS0->$C_FAILS1)"
 
 # --- node delete via YAML ------------------------------------------------------
-"$KLITE" delete -f "examples/nodes/$DRAIN_NODE.yaml" >/dev/null \
+"$KLITE" delete -f "examples/seed/nodes/$DRAIN_NODE.yaml" >/dev/null \
   && pass "klite delete -f $DRAIN_NODE.yaml accepted" || die "klite delete -f $DRAIN_NODE.yaml"
 wait_for 30 node_gone "$DRAIN_NODE" \
   && pass "$DRAIN_NODE record gone after drain-backed delete" || die "$DRAIN_NODE record gone"
@@ -347,7 +347,7 @@ docker rm -f "klite.$DRAIN_NODE.net" "klite.$DRAIN_NODE.envoy" >/dev/null 2>&1
 pass "$DRAIN_NODE agent stopped and infra removed"
 
 # --- capacity-blocked fallback (informational: timing-sensitive) ---------------
-sed 's/maxInstances: 32/maxInstances: 10/' "examples/nodes/$DRAIN_NODE.yaml" > "$TMP/$DRAIN_NODE-cap10.yaml"
+sed 's/maxInstances: 32/maxInstances: 10/' "examples/seed/nodes/$DRAIN_NODE.yaml" > "$TMP/$DRAIN_NODE-cap10.yaml"
 "$KLITE" apply -f "$TMP/$DRAIN_NODE-cap10.yaml" >/dev/null || die "re-declare $DRAIN_NODE with maxInstances 10"
 start_agent "$DRAIN_NODE"
 wait_for 30 nodes_ready 3 || warn "rejoined $DRAIN_NODE not Ready in 30s"
