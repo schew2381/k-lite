@@ -162,7 +162,9 @@ func loadOrCreateAdminToken(path string) (string, error) {
 	if err := f.Close(); err != nil {
 		return "", err
 	}
-	slog.Info("admin token minted (first boot)", "path", path, "token", token)
+	// The token itself stays out of the log: klited's stderr routinely lands
+	// in journals and CI captures, and the CLI reads the file directly anyway.
+	slog.Info("admin token minted (first boot)", "path", path)
 	return token, nil
 }
 

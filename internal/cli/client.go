@@ -139,7 +139,7 @@ func (c *connCfg) callOpts() ([]grpc.DialOption, error) {
 
 // dial opens one lazy connection that round-robins over every endpoint, so any
 // live klited answers (research/grpc-go.md). WaitForReady queues one-shot calls
-// until a backend connects or the command deadline hits.
+// until a klited connects or the command deadline hits.
 func dial(cfg *connCfg) (*grpc.ClientConn, klitev1.ClusterServiceClient, error) {
 	eps := endpoints(cfg.server)
 	addrs := make([]resolver.Address, 0, len(eps))
