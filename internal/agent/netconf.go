@@ -54,7 +54,8 @@ func (a *Agent) netLoop(ctx context.Context) {
 }
 
 // dialNetAdmin opens the (lazy) client connection to the donor's published
-// admin port. Plain TCP on loopback, like every pre-M8 hop.
+// admin port. The dial stays plain TCP on loopback: M8's mTLS never covered
+// this hop, and ADR 0029's netns rules guard the port instead.
 func (a *Agent) dialNetAdmin() (*grpc.ClientConn, error) {
 	addr := fmt.Sprintf("127.0.0.1:%d", a.netAdminPort())
 	return grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))

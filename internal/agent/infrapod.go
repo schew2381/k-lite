@@ -187,8 +187,8 @@ func (a *Agent) netContainerSpec(nb *klitev1.NetBootstrap) *runtime.InfraContain
 		},
 		Labels: a.infraLabels(nb, runtime.RoleNet),
 	}
-	// The whole ingress slice publishes at creation — Docker can't add
-	// ports to a running container — on every interface, because remote
+	// The whole ingress slice publishes at creation (Docker can't add
+	// ports to a running container), on every interface, because remote
 	// machines dial these (ADR 0024). Envoy binds them one listener per
 	// local endpoint as allocations arrive. The map feeds the config hash,
 	// so donors from before this range recreate exactly once.

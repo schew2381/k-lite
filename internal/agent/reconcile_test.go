@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,8 +28,11 @@ type fakeRuntime struct {
 	removes  []string // container IDs
 	stopWait []time.Duration
 
-	infra     []runtime.InfraInfo // ListInfra's canned answer
-	hostsFile []byte              // ReadContainerFile's canned /etc/hosts
+	infra      []runtime.InfraInfo       // ListInfra's canned answer
+	hostsFile  []byte                    // ReadContainerFile's canned /etc/hosts
+	oneShots   []*runtime.InfraContainer // specs passed to RunOneShot
+	oneShotErr error                     // RunOneShot's canned failure
+	imageErr   error                     // EnsureImage's canned failure
 }
 
 func newFakeRuntime() *fakeRuntime {
@@ -37,9 +41,27 @@ func newFakeRuntime() *fakeRuntime {
 
 func (f *fakeRuntime) EnsureNetwork(context.Context) error { return nil }
 
-func (f *fakeRuntime) EnsureImage(context.Context, string) error { return nil }
+func (f *fakeRuntime) EnsureImage(context.Context, string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.imageErr
+}
 
-func (f *fakeRuntime) RunOneShot(context.Context, *runtime.InfraContainer) error { return nil }
+func (f *fakeRuntime) RunOneShot(_ context.Context, spec *runtime.InfraContainer) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.oneShotErr != nil {
+		return f.oneShotErr
+	}
+	f.oneShots = append(f.oneShots, spec)
+	return nil
+}
+
+func (f *fakeRuntime) oneShotCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.oneShots)
+}
 
 func (f *fakeRuntime) RunInfra(context.Context, *runtime.InfraContainer) (string, error) {
 	return "", nil
@@ -111,19 +133,9 @@ func (f *fakeRuntime) ListInstances(context.Context, string) ([]runtime.RunningI
 		out = append(out, *c)
 	}
 	slices.SortFunc(out, func(a, b runtime.RunningInstance) int {
-		return cmpStrings(a.ContainerID, b.ContainerID)
+		return strings.Compare(a.ContainerID, b.ContainerID)
 	})
 	return out, nil
-}
-
-func cmpStrings(a, b string) int {
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
-	}
-	return 0
 }
 
 func (f *fakeRuntime) WatchEvents(context.Context, string) (<-chan runtime.Event, error) {

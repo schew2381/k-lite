@@ -63,10 +63,12 @@ type Agent struct {
 	advertiseFlag string
 	now           func() time.Time
 
-	// lockedDonor and lockAttempt belong to the netLoop goroutine alone:
-	// which donor container already got the admin-port lockdown, and when
-	// the last failed attempt happened (lockdown.go).
+	// lockedDonor, lockTried, and lockAttempt belong to the netLoop goroutine
+	// alone: which donor container already got the admin-port lockdown, plus
+	// which donor the last attempt targeted and when. That's what keeps
+	// retries paced per donor (lockdown.go).
 	lockedDonor string
+	lockTried   string
 	lockAttempt time.Time
 
 	// cmdDial and cmdIdx belong to the commandLoop goroutine alone: the

@@ -41,16 +41,19 @@ iptables -w -S INPUT
 `
 
 // ensureLockdown applies the admin-port rules to the donor's netns exactly
-// once per donor container. Failure never blocks the infra pod — DNS and the
-// data plane matter more than the hardening pass — but it is loud, and it
+// once per donor container. Failure never blocks the infra pod (DNS and the
+// data plane matter more than the hardening pass), but it is loud, and it
 // retries on a timer.
 func (a *Agent) ensureLockdown(ctx context.Context, nb *klitev1.NetBootstrap, donor *runtime.InfraStatus) {
 	if donor == nil || !donor.Running || a.lockedDonor == donor.ID {
 		return
 	}
-	if a.now().Sub(a.lockAttempt) < lockRetryDelay {
+	// The pacing is per donor: a failed pass shouldn't stall the hardening
+	// of a freshly recreated donor, whose ports sit open until it lands.
+	if donor.ID == a.lockTried && a.now().Sub(a.lockAttempt) < lockRetryDelay {
 		return
 	}
+	a.lockTried = donor.ID
 	a.lockAttempt = a.now()
 	spec := &runtime.InfraContainer{
 		Name:      "klite." + a.node + ".lockdown",

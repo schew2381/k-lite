@@ -148,3 +148,35 @@ func TestRenderEnvoyBootstrapTLSAndFailover(t *testing.T) {
 		t.Fatal("TLS stanza rendered without an identity dir")
 	}
 }
+
+// ingressPortRange mirrors the server-side allocator's slice math, and the
+// degenerate inputs (pre-M9 servers, unassigned indexes, a slice past the
+// port ceiling) all collapse to an empty range instead of a bad publish.
+func TestIngressPortRangeBounds(t *testing.T) {
+	t.Parallel()
+	nb := func(base, per, idx int32) *klitev1.NetBootstrap {
+		return &klitev1.NetBootstrap{IngressPortBase: base, IngressPortsPerNode: per, NodeIndex: idx}
+	}
+	tests := []struct {
+		name   string
+		nb     *klitev1.NetBootstrap
+		lo, hi int
+	}{
+		{"first node", nb(20000, 32, 1), 20000, 20032},
+		{"third node", nb(20000, 32, 3), 20064, 20096},
+		{"pre-M9 server sends no base", nb(0, 32, 1), 0, 0},
+		{"no per-node size", nb(20000, 0, 1), 0, 0},
+		{"unassigned index", nb(20000, 32, 0), 0, 0},
+		{"slice ending exactly at the ceiling", nb(65472, 32, 2), 65504, 65536},
+		{"slice past the ceiling", nb(65505, 32, 2), 0, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			lo, hi := ingressPortRange(tt.nb)
+			if lo != tt.lo || hi != tt.hi {
+				t.Fatalf("ingressPortRange = [%d, %d), want [%d, %d)", lo, hi, tt.lo, tt.hi)
+			}
+		})
+	}
+}
