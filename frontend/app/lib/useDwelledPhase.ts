@@ -6,9 +6,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-const DWELL_MS = 1000 // a full second per phase, so a live birth reads as three deliberate beats
+export const DWELL_MS = 1000 // a full second per phase, so a live birth reads as three deliberate beats
 
-export function useDwelledPhase<T>(actual: T): T {
+export function useDwelledPhase<T>(actual: T, dwellMs = DWELL_MS): T {
   const [shown, setShown] = useState(actual)
   const shownRef = useRef(actual)
   const shownSince = useRef(performance.now())
@@ -22,7 +22,7 @@ export function useDwelledPhase<T>(actual: T): T {
 
     const pump = () => {
       if (timer.current) return
-      const wait = Math.max(0, DWELL_MS - (performance.now() - shownSince.current))
+      const wait = Math.max(0, dwellMs - (performance.now() - shownSince.current))
       timer.current = window.setTimeout(() => {
         timer.current = 0
         const next = queue.current.shift()

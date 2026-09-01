@@ -105,7 +105,12 @@ test('killing an instance brings it back with a restart tally', async ({ page })
   const chip = page.getByTestId('instance-b-1')
   await chip.hover()
   await chip.getByRole('button', { name: 'Kill b-1' }).click()
-  // Failed lasts only the first backoff (500ms), so assert the durable outcome
+  // the displayed phase dwells a second per beat: the real backoff is 500ms,
+  // so Failed still showing after 700ms proves the dwell holds
+  await expect(chip).toHaveAttribute('data-phase', 'Failed', { timeout: 5_000 })
+  await page.waitForTimeout(700)
+  await expect(chip).toHaveAttribute('data-phase', 'Failed')
+  // then the durable outcome
   await expect(chip).toContainText('↻1', { timeout: 15_000 })
   await expect(chip).toHaveAttribute('data-phase', 'Ready', { timeout: 15_000 })
 })
