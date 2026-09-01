@@ -11,6 +11,7 @@
 import {
   type ApplyResult,
   endpointStateOf,
+  type IngressAllocation,
   type Instance,
   type Kind,
   type KliteObject,
@@ -78,6 +79,7 @@ export class Cluster {
     NetworkPolicy: new Map(),
     Instance: new Map(),
     VIPAllocation: new Map(),
+    IngressAllocation: new Map(),
   }
   private tasks: Task[] = []
   private agents = new Map<string, AgentState>()
@@ -124,6 +126,7 @@ export class Cluster {
     }
     this.reconcileWorkloads()
     this.reconcileVipAllocations()
+    this.reconcileIngressAllocations()
     this.schedule()
 
     // 3. traffic generator
@@ -350,6 +353,42 @@ export class Cluster {
     return alloc?.spec.vip
   }
 
+  // The IngressAllocation reconciler mirrors the VIP one: one object per
+  // (Service, Instance) endpoint, named "<service>.<instance>", created when
+  // the endpoint exists on a node and released when either side goes.
+  private reconcileIngressAllocations() {
+    const want = new Map<string, { service: string; instance: Instance }>()
+    for (const svc of this.objects.Service.values() as Iterable<Service>) {
+      for (const inst of this.objects.Instance.values() as Iterable<Instance>) {
+        if (!inst.spec.node || !inst.status.instanceIp) continue
+        if (!selectorMatches(svc.spec.selector, inst.metadata.labels)) continue
+        want.set(`${svc.metadata.name}.${inst.metadata.name}`, {
+          service: svc.metadata.name,
+          instance: inst,
+        })
+      }
+    }
+    for (const [name, obj] of this.objects.IngressAllocation) {
+      if (!want.has(name)) {
+        this.objects.IngressAllocation.delete(name)
+        this.emit('DELETED', obj)
+      }
+    }
+    for (const [name, { service, instance }] of want) {
+      if (this.objects.IngressAllocation.has(name)) continue
+      const node = instance.spec.node
+      if (!node) continue
+      const alloc: IngressAllocation = {
+        apiVersion: 'klite/v1',
+        kind: 'IngressAllocation',
+        metadata: { name, createdUnix: this.simUnix() },
+        spec: { service, instance: instance.metadata.name, node, port: this.ipam.ingressPort(node) },
+      }
+      this.objects.IngressAllocation.set(name, alloc)
+      this.emit('ADDED', alloc)
+    }
+  }
+
   private cordonAndDrain(name: string) {
     const node = this.objects.Node.get(name) as NodeObj | undefined
     if (!node) return
@@ -538,7 +577,6 @@ export class Cluster {
     if (inst?.status.phase !== 'Pending') return
     inst.status.phase = 'Running'
     inst.status.instanceIp ??= this.ipam.instanceIp()
-    if (inst.spec.node) inst.status.ingressPort ??= this.ipam.ingressPort(inst.spec.node)
     inst.status.message = undefined
     this.emit('MODIFIED', inst)
     this.logs.push(name, this.now, `started ${inst.spec.container.image} on ${inst.spec.node}`)

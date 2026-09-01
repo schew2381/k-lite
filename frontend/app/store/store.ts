@@ -5,6 +5,7 @@
 
 import { useSyncExternalStore } from 'react'
 import type {
+  IngressAllocation,
   Instance,
   Kind,
   KliteObject,
@@ -25,6 +26,7 @@ export interface Snapshot {
   instances: Record<string, Instance>
   policies: Record<string, NetworkPolicy>
   vipAllocations: Record<string, VIPAllocation>
+  ingressAllocations: Record<string, IngressAllocation>
 }
 
 const EMPTY: Snapshot = {
@@ -36,11 +38,12 @@ const EMPTY: Snapshot = {
   instances: {},
   policies: {},
   vipAllocations: {},
+  ingressAllocations: {},
 }
 
 type ObjectMapKey = keyof Pick<
   Snapshot,
-  'workloads' | 'services' | 'nodes' | 'instances' | 'policies' | 'vipAllocations'
+  'workloads' | 'services' | 'nodes' | 'instances' | 'policies' | 'vipAllocations' | 'ingressAllocations'
 >
 
 const KEY: Record<Kind, ObjectMapKey> = {
@@ -50,6 +53,7 @@ const KEY: Record<Kind, ObjectMapKey> = {
   NetworkPolicy: 'policies',
   Instance: 'instances',
   VIPAllocation: 'vipAllocations',
+  IngressAllocation: 'ingressAllocations',
 }
 
 export class ClusterStore {

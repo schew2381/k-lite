@@ -59,7 +59,8 @@ export function ControlPlaneStrip() {
     Object.keys(snapshot.nodes).length +
     Object.keys(snapshot.policies).length +
     Object.keys(snapshot.instances).length +
-    Object.keys(snapshot.vipAllocations).length
+    Object.keys(snapshot.vipAllocations).length +
+    Object.keys(snapshot.ingressAllocations).length
 
   // In mock, phase is the truth. Against a live cluster, a stream is only as
   // alive as its last heartbeat, and a declared-but-never-registered node has

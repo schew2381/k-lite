@@ -15,6 +15,7 @@ const ONEOF_KIND: Record<string, Kind> = {
   networkPolicy: 'NetworkPolicy',
   instance: 'Instance',
   vipAllocation: 'VIPAllocation',
+  ingressAllocation: 'IngressAllocation',
 }
 
 // list path segment → kind, matching internal/object's plural table
@@ -25,6 +26,7 @@ export const KIND_PATH: Record<Kind, string> = {
   NetworkPolicy: 'networkpolicies',
   Instance: 'instances',
   VIPAllocation: 'vipallocations',
+  IngressAllocation: 'ingressallocations',
 }
 
 // Turns "INSTANCE_PHASE_NOT_READY" into "NotReady", the same rule the

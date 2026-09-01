@@ -9,7 +9,14 @@ import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { useSnapshot } from '@/store/store'
 
-type ObjectMap = 'nodes' | 'workloads' | 'services' | 'policies' | 'instances' | 'vipAllocations'
+type ObjectMap =
+  | 'nodes'
+  | 'workloads'
+  | 'services'
+  | 'policies'
+  | 'instances'
+  | 'vipAllocations'
+  | 'ingressAllocations'
 
 const GROUPS: { kind: Kind; prefix: string; map: ObjectMap }[] = [
   { kind: 'Node', prefix: '/klite/v1/nodes', map: 'nodes' },
@@ -18,6 +25,7 @@ const GROUPS: { kind: Kind; prefix: string; map: ObjectMap }[] = [
   { kind: 'NetworkPolicy', prefix: '/klite/v1/networkpolicies', map: 'policies' },
   { kind: 'Instance', prefix: '/klite/v1/instances', map: 'instances' },
   { kind: 'VIPAllocation', prefix: '/klite/v1/vipallocations', map: 'vipAllocations' },
+  { kind: 'IngressAllocation', prefix: '/klite/v1/ingressallocations', map: 'ingressAllocations' },
 ]
 
 function summarize(obj: KliteObject): string {
@@ -36,6 +44,8 @@ function summarize(obj: KliteObject): string {
       return `${obj.status.phase} · ${obj.spec.node ?? 'unbound'} · ${obj.status.instanceIp ?? 'no ip'}`
     case 'VIPAllocation':
       return `${obj.spec.vip} · ${obj.spec.service} on ${obj.spec.node}`
+    case 'IngressAllocation':
+      return `:${obj.spec.port} · ${obj.spec.instance} on ${obj.spec.node}`
   }
 }
 

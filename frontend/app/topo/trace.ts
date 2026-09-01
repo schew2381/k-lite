@@ -7,7 +7,7 @@
 // platform-generic: resolvers, not Docker.
 
 import type { TrafficEvent } from '@/api/types'
-import { vipFor } from '@/store/selectors'
+import { ingressPortOf, vipFor } from '@/store/selectors'
 import type { Snapshot } from '@/store/store'
 import type { Trace, TraceStep } from '@/store/traceStore'
 
@@ -99,9 +99,8 @@ export function buildTrace(e: TrafficEvent, s: Snapshot): Trace {
 
   // The pick is on another machine, so the EDS entry is that node's
   // advertised address instead of an instance IP (M9's ingress design).
-  const target = e.toInstance ? s.instances[e.toInstance] : undefined
   const machine = (targetNode && s.nodes[targetNode]?.status?.advertiseAddress) ?? '198.51.100.?'
-  const ingress = target?.status.ingressPort
+  const ingress = e.toInstance ? ingressPortOf(s, e.toService, e.toInstance) : undefined
   const via = ingress ? `${machine}:${ingress}` : `${machine} ingress`
   steps.push({
     at: 'eds',

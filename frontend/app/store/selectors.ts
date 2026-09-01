@@ -155,6 +155,12 @@ export function infraIpOf(node: NodeObj): string | undefined {
   return idx ? `10.44.0.${10 + idx}` : undefined
 }
 
+// ingressPortOf reads the endpoint's published port from its
+// IngressAllocation, the server-materialized kind named "<service>.<instance>".
+export function ingressPortOf(s: Snapshot, service: string, instance: string): number | undefined {
+  return s.ingressAllocations[`${service}.${instance}`]?.spec.port
+}
+
 // dialTargetOf answers what `fromNode`'s Envoy would actually dial for one
 // endpoint: the raw instance ip:targetPort when it's local, or the owning
 // node's advertised machine address and mTLS ingress port when it's remote
@@ -170,7 +176,7 @@ export function dialTargetOf(
     return { local, address: `${inst.status.instanceIp ?? '?'}:${svc.spec.targetPort}` }
   }
   const machine = (inst.spec.node && s.nodes[inst.spec.node]?.status?.advertiseAddress) ?? '?'
-  const port = inst.status.ingressPort
+  const port = ingressPortOf(s, svc.metadata.name, inst.metadata.name)
   return { local, address: port ? `${machine}:${port}` : `${machine}` }
 }
 
@@ -185,16 +191,15 @@ export interface IngressRow {
 
 export function ingressRowsOf(s: Snapshot, node: string): IngressRow[] {
   const rows: IngressRow[] = []
-  for (const svc of sortedServices(s)) {
-    const eps = endpointsOf(s, svc)
-    for (const inst of [...eps.ready, ...eps.draining]) {
-      if (inst.spec.node !== node || !inst.status.ingressPort) continue
-      rows.push({
-        port: inst.status.ingressPort,
-        instance: inst.metadata.name,
-        forward: `${inst.status.instanceIp ?? '?'}:${svc.spec.targetPort}`,
-      })
-    }
+  for (const alloc of Object.values(s.ingressAllocations)) {
+    if (alloc.spec.node !== node) continue
+    const inst = s.instances[alloc.spec.instance]
+    const svc = s.services[alloc.spec.service]
+    rows.push({
+      port: alloc.spec.port,
+      instance: alloc.spec.instance,
+      forward: `${inst?.status.instanceIp ?? '?'}:${svc?.spec.targetPort ?? '?'}`,
+    })
   }
   return rows.sort((a, b) => a.port - b.port)
 }

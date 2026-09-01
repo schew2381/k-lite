@@ -61,6 +61,17 @@ describe('decodeObject', () => {
     expect(obj?.kind === 'VIPAllocation' && obj.spec.vip).toBe('10.44.64.7')
   })
 
+  it('decodes an IngressAllocation from the watch dialect', () => {
+    const obj = decodeObject({
+      ingressAllocation: {
+        meta: { name: 'b.b-2' },
+        spec: { service: 'b', instance: 'b-2', node: 'node-3', port: 31024 },
+      },
+    })
+    expect(obj?.kind).toBe('IngressAllocation')
+    expect(obj?.kind === 'IngressAllocation' && obj.spec.port).toBe(31024)
+  })
+
   it('returns null for payloads without a recognizable kind', () => {
     expect(decodeObject(null)).toBeNull()
     expect(decodeObject({ something: 'else' })).toBeNull()

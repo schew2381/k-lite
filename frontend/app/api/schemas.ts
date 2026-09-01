@@ -126,7 +126,7 @@ export function parseApplyYaml(text: string): ParsedApply {
     }
     const raw = doc.toJS() as Record<string, unknown> | null
     if (raw == null) continue // blank document between separators
-    if (raw.kind === 'Instance' || raw.kind === 'VIPAllocation') {
+    if (raw.kind === 'Instance' || raw.kind === 'VIPAllocation' || raw.kind === 'IngressAllocation') {
       // server-materialized kinds, mirroring klited's apply rejection (ADR 0022)
       errors.push({
         kind: raw.kind,

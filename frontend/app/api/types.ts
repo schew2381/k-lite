@@ -6,7 +6,14 @@
 // binding: Workload, Instance, Service, VIP, Node, Endpoint, and never
 // Deployment, Pod, or ClusterIP.
 
-export type Kind = 'Workload' | 'Service' | 'Node' | 'NetworkPolicy' | 'Instance' | 'VIPAllocation'
+export type Kind =
+  | 'Workload'
+  | 'Service'
+  | 'Node'
+  | 'NetworkPolicy'
+  | 'Instance'
+  | 'VIPAllocation'
+  | 'IngressAllocation'
 
 export type InstancePhase = 'Pending' | 'Running' | 'Ready' | 'Draining' | 'Failed' | 'Terminating'
 
@@ -69,6 +76,18 @@ export interface Service extends Base<'Service'> {
   }
 }
 
+// An IngressAllocation is server-materialized: one per (Service, Instance)
+// endpoint, named "<service>.<instance>". It stores the host-published mTLS
+// ingress port remote proxies dial, fixed for the endpoint's lifetime.
+export interface IngressAllocation extends Base<'IngressAllocation'> {
+  spec: {
+    service: string
+    instance: string
+    node: string // owns the published range the port comes from
+    port: number
+  }
+}
+
 // A VIPAllocation is server-materialized: one per (Service, Node), named
 // "<service>.<node>" (ADR 0022). Apply rejects the kind. kdns and the UI
 // read the per-node VIP a caller resolves from these objects and never
@@ -125,15 +144,17 @@ export interface Instance extends Base<'Instance'> {
     instanceIp?: string
     containerId?: string
     message?: string
-    // Remote proxies dial this mTLS ingress port on the owning machine.
-    // Live, it rides the NetDesired stream (derived from the node's port
-    // base) and never lands in etcd, so only the sim fills it. The UI
-    // degrades to the address alone when it's absent.
-    ingressPort?: number
   }
 }
 
-export type KliteObject = Workload | Service | NodeObj | NetworkPolicy | Instance | VIPAllocation
+export type KliteObject =
+  | Workload
+  | Service
+  | NodeObj
+  | NetworkPolicy
+  | Instance
+  | VIPAllocation
+  | IngressAllocation
 
 // A Service selects the instances whose labels carry all its selector pairs.
 export function selectorMatches(

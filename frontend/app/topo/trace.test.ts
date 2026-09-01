@@ -43,6 +43,7 @@ function snapshotFromCluster(c: Cluster) {
     instances: {},
     policies: {},
     vipAllocations: {},
+    ingressAllocations: {},
   } as Record<string, Record<string, unknown>>
   const keyOf = {
     Workload: 'workloads',
@@ -51,6 +52,7 @@ function snapshotFromCluster(c: Cluster) {
     Instance: 'instances',
     NetworkPolicy: 'policies',
     VIPAllocation: 'vipAllocations',
+    IngressAllocation: 'ingressAllocations',
   } as const
   for (const kind of Object.keys(keyOf) as (keyof typeof keyOf)[]) {
     for (const obj of c.list(kind)) maps[keyOf[kind]][obj.metadata.name] = obj
