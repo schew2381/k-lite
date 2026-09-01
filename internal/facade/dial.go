@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,19 +114,36 @@ func (c *Creds) dialOptions() []grpc.DialOption {
 	return opts
 }
 
+// endpointAddresses builds the resolver addresses for the manual resolver.
+// ServerName pins TLS verification to each endpoint's own host; without it
+// the handshake checks the placeholder authority from the target URI and
+// loops forever against klited's real certificate.
+func endpointAddresses(endpoints []string) []resolver.Address {
+	addrs := make([]resolver.Address, 0, len(endpoints))
+	for _, e := range endpoints {
+		addrs = append(addrs, resolver.Address{Addr: e, ServerName: hostOf(e)})
+	}
+	return addrs
+}
+
+// hostOf strips the port for TLS server-name checks, keeping the input when
+// it has none.
+func hostOf(ep string) string {
+	if h, _, err := net.SplitHostPort(ep); err == nil && h != "" {
+		return h
+	}
+	return ep
+}
+
 // Dial opens one lazy connection that round-robins over every endpoint, the
 // same shape the CLI uses (internal/cli/client.go). WaitForReady queues
 // one-shot calls until a backend connects or the request deadline hits.
 func Dial(endpoints []string, creds *Creds) (*grpc.ClientConn, klitev1.ClusterServiceClient, error) {
-	addrs := make([]resolver.Address, 0, len(endpoints))
-	for _, e := range endpoints {
-		addrs = append(addrs, resolver.Address{Addr: e})
-	}
 	rb := manual.NewBuilderWithScheme("klite-facade")
-	rb.InitialState(resolver.State{Addresses: addrs})
-	resolver.Register(rb)
+	rb.InitialState(resolver.State{Addresses: endpointAddresses(endpoints)})
 
 	opts := append(creds.dialOptions(),
+		grpc.WithResolvers(rb),
 		grpc.WithDefaultServiceConfig(`{"loadBalancingConfig":[{"round_robin":{}}]}`),
 		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 	)
