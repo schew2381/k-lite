@@ -91,6 +91,9 @@ export interface NodeObj extends Base<'Node'> {
     lastHeartbeatUnix?: number
     nodeIndex?: number
     instanceCount: number
+    // the machine address other nodes' proxies dial for this node's mTLS
+    // ingress listeners (M9), always a literal IP
+    advertiseAddress?: string
     infra?: { ip: string; ready: boolean } // facade enrichment
   }
 }
@@ -122,6 +125,11 @@ export interface Instance extends Base<'Instance'> {
     instanceIp?: string
     containerId?: string
     message?: string
+    // Remote proxies dial this mTLS ingress port on the owning machine.
+    // Live, it rides the NetDesired stream (derived from the node's port
+    // base) and never lands in etcd, so only the sim fills it. The UI
+    // degrades to the address alone when it's absent.
+    ingressPort?: number
   }
 }
 

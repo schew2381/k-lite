@@ -57,7 +57,7 @@ export function buildTrace(e: TrafficEvent, s: Snapshot): Trace {
       detail: `RBAC (${callerIp} = ${e.fromService}): ${e.matchedRule?.policy ?? 'a policy'} denies ${e.fromService} → ${e.toService}. Connection reset.`,
       tone: 'deny',
     })
-    return { event: e, steps }
+    return { event: e, steps, targetNode }
   }
 
   steps.push({
@@ -76,21 +76,58 @@ export function buildTrace(e: TrafficEvent, s: Snapshot): Trace {
       detail: `EDS has no READY endpoints for ${e.toService} right now. The dial fails fast.`,
       tone: 'deny',
     })
-    return { event: e, steps }
+    return { event: e, steps, targetNode }
   }
 
+  const remote = targetNode !== undefined && targetNode !== e.viaNode
+  if (!remote) {
+    steps.push({
+      at: 'eds',
+      short: `pick ${e.toInstance}`,
+      detail: `EDS round-robin over READY endpoints picks ${e.toInstance}. DRAINING gets nothing new.`,
+      tone: 'info',
+    })
+    steps.push({
+      at: 'target',
+      motion: 'travel',
+      short: `→ ${e.toInstance}`,
+      detail: `Envoy relays the bytes to ${e.toInstance}${targetNode ? ` on ${targetNode}` : ''} (${e.latencyMs}ms).`,
+      tone: 'allow',
+    })
+    return { event: e, steps, targetNode }
+  }
+
+  // The pick is on another machine, so the EDS entry is that node's
+  // advertised address instead of an instance IP (M9's ingress design).
+  const target = e.toInstance ? s.instances[e.toInstance] : undefined
+  const machine = (targetNode && s.nodes[targetNode]?.status?.advertiseAddress) ?? '198.51.100.?'
+  const ingress = target?.status.ingressPort
+  const via = ingress ? `${machine}:${ingress}` : `${machine} ingress`
   steps.push({
     at: 'eds',
-    short: `pick ${e.toInstance}`,
-    detail: `EDS round-robin over READY endpoints picks ${e.toInstance}. DRAINING gets nothing new.`,
+    short: `pick ${e.toInstance} · remote`,
+    detail: `EDS picks ${e.toInstance} on ${targetNode}. It lives on another machine, so the entry is ${via} instead of an instance IP.`,
+    tone: 'info',
+  })
+  steps.push({
+    at: 'targetInfra',
+    motion: 'travel',
+    short: `mTLS → ${via}`,
+    detail: `${e.viaNode}'s Envoy dials ${via} across the open internet, inside proxy-to-proxy mTLS.`,
+    tone: 'info',
+  })
+  steps.push({
+    at: 'targetInfra',
+    short: ingress ? `DNAT :${ingress} → envoy` : 'DNAT → envoy ingress',
+    detail: `The machine's published port lands the connection inside ${targetNode}'s infra pod (the DNAT hop), where Envoy terminates the mTLS.`,
     tone: 'info',
   })
   steps.push({
     at: 'target',
     motion: 'travel',
     short: `→ ${e.toInstance}`,
-    detail: `Envoy relays the bytes to ${e.toInstance}${targetNode ? ` on ${targetNode}` : ''} (${e.latencyMs}ms).`,
+    detail: `${targetNode}'s Envoy hands the bytes to ${e.toInstance} (${e.latencyMs}ms), since the owning node dials its instances raw.`,
     tone: 'allow',
   })
-  return { event: e, steps }
+  return { event: e, steps, targetNode }
 }

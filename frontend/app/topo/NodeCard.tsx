@@ -112,7 +112,7 @@ export function NodeCard({ node, layout, count }: { node: NodeObj; layout: NodeL
         <div className="flex items-baseline gap-2">
           <span className="text-[15px] font-bold">{name}</span>
           <span className="font-mono text-[10px] text-muted-foreground">
-            {count}/{node.spec.maxInstances}
+            {count}/{node.spec.maxInstances} instances
           </span>
         </div>
         <div className="flex items-center gap-1.5">
@@ -226,8 +226,8 @@ export function NodeCard({ node, layout, count }: { node: NodeObj; layout: NodeL
           {services.map((svc) => {
             const eps = endpointsOf(snapshot, svc)
             const entries = [
-              ...eps.ready.map((i) => ({ name: i.metadata.name, draining: false })),
-              ...eps.draining.map((i) => ({ name: i.metadata.name, draining: true })),
+              ...eps.ready.map((i) => ({ name: i.metadata.name, draining: false, node: i.spec.node })),
+              ...eps.draining.map((i) => ({ name: i.metadata.name, draining: true, node: i.spec.node })),
             ]
             return (
               <div key={svc.metadata.name} className="truncate">
@@ -241,6 +241,11 @@ export function NodeCard({ node, layout, count }: { node: NodeObj; layout: NodeL
                           <span className="font-bold text-deny">{e.name} DRAINING</span>
                         ) : (
                           `${e.name} READY`
+                        )}{' '}
+                        {e.node === name ? (
+                          <span className="text-muted-foreground">local</span>
+                        ) : (
+                          <span className="font-semibold text-ctrl">internet</span>
                         )}
                       </span>
                     ))}

@@ -29,3 +29,25 @@ Directory names say which half of the repo you're in: the Go backend owns `cmd/`
 ## Swapping in the real backend
 
 Set `VITE_KLITE_MODE=http` and `VITE_KLITE_API` to klited's address. `HttpClient` implements the ADR 0015 facade, and its header comment is the wire contract: the SSE watch shape, the scale and drain routes that map ClusterService RPCs, and the `GET /v1/traffic` route ADR 0024 adds. The mock and the real server see identical requests. Mock-only controls disappear on their own, since the UI renders them only when the client exposes `chaos`.
+
+## Developing
+
+Set up the hooks once, from the repo root:
+
+```sh
+brew install prek        # hook runner, https://github.com/j178/prek
+cd frontend && bun install
+prek install             # registers the pre-commit hook for this clone
+```
+
+Every commit then runs fast checks against your staged files only:
+
+- Biome checks and fixes the frontend sources
+- gofmt lists unformatted Go files without rewriting them
+- hygiene guards come from the standard pre-commit-hooks set
+
+When Biome rewrites a file, the commit stops so you can review the fix. `git add` it and commit again. Before handing work off, run the fuller gate:
+
+```sh
+bun run check      # biome lint then tsc -b then bun test app
+```

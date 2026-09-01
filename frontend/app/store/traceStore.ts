@@ -8,8 +8,9 @@ import type { TrafficEvent } from '@/api/types'
 // The step and trace shapes live here, not in topo/, so the store never
 // imports from the component layer. topo/trace.ts builds them.
 export interface TraceStep {
-  // where the dot is when this step ends: an instance or an infra sub-box
-  at: 'caller' | 'kdns' | 'lds' | 'rbac' | 'eds' | 'target'
+  // where the dot is when this step ends: an instance, an infra sub-box on
+  // the caller's node, or the target node's whole infra pod
+  at: 'caller' | 'kdns' | 'lds' | 'rbac' | 'eds' | 'targetInfra' | 'target'
   // 'travel': the step is told while the dot moves to `at`, not parked there
   motion?: 'travel'
   // short label riding on the dot, e.g. "kdns: 10.44.64.7"
@@ -22,6 +23,7 @@ export interface TraceStep {
 export interface Trace {
   event: TrafficEvent
   steps: TraceStep[]
+  targetNode?: string // where the picked endpoint lives, anchoring the remote hops
 }
 
 export interface ActiveTrace {

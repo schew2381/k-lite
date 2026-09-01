@@ -305,6 +305,7 @@ export class Cluster {
       phase: 'Ready',
       instanceCount: this.instancesOn(name).length,
       nodeIndex: this.ipam.indexOf(name),
+      advertiseAddress: this.ipam.advertiseAddress(name),
       infra: { ip: this.ipam.infraIp(name), ready: true },
     }
     this.emit('MODIFIED', node)
@@ -536,6 +537,7 @@ export class Cluster {
     if (inst?.status.phase !== 'Pending') return
     inst.status.phase = 'Running'
     inst.status.instanceIp ??= this.ipam.instanceIp()
+    if (inst.spec.node) inst.status.ingressPort ??= this.ipam.ingressPort(inst.spec.node)
     inst.status.message = undefined
     this.emit('MODIFIED', inst)
     this.logs.push(name, this.now, `started ${inst.spec.container.image} on ${inst.spec.node}`)
@@ -667,7 +669,9 @@ export class Cluster {
     const cursor = this.rrCursor.get(key) ?? 0
     this.rrCursor.set(key, cursor + 1)
     const to = endpoints[cursor % endpoints.length]
-    const latencyMs = Math.round((2 + this.rand() * 8) * 10) / 10
+    // a remote pick crosses the internet between machines, and it shows
+    const remote = to.spec.node !== viaNode
+    const latencyMs = Math.round(((remote ? 28 : 2) + this.rand() * 8) * 10) / 10
     this.emitTraffic({
       ...base,
       verdict: 'allowed',

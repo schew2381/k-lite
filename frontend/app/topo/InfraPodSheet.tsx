@@ -2,7 +2,7 @@
 // the compiled RBAC table, the EDS endpoint sets, and the identity map. Every
 // row derives live from the store.
 
-import type { NodeObj } from '@/api/types'
+import type { Instance, NodeObj } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
@@ -14,7 +14,7 @@ import {
   sortedServices,
   vipFor,
 } from '@/store/selectors'
-import { useSnapshot } from '@/store/store'
+import { type Snapshot, useSnapshot } from '@/store/store'
 
 function Section({
   title,
@@ -47,6 +47,14 @@ const Row = ({ children, tone }: { children: React.ReactNode; tone?: 'deny' | 'a
     {children}
   </div>
 )
+
+// viaAddress builds a remote endpoint's dial target: the owning machine's
+// advertised address, plus the endpoint's mTLS ingress port when the sim
+// knows it.
+function viaAddress(s: Snapshot, inst: Instance): string {
+  const machine = (inst.spec.node && s.nodes[inst.spec.node]?.status?.advertiseAddress) ?? '?'
+  return inst.status.ingressPort ? `${machine}:${inst.status.ingressPort}` : `${machine}`
+}
 
 export function InfraPodSheet({
   node,
@@ -132,6 +140,11 @@ export function InfraPodSheet({
                   {ready.map((i) => (
                     <span key={i.metadata.name}>
                       {i.metadata.name} <span className="text-traffic">READY</span>{' '}
+                      {i.spec.node === name ? (
+                        <span className="text-muted-foreground">local </span>
+                      ) : (
+                        <span className="text-ctrl">via {viaAddress(snapshot, i)} (mTLS ingress) </span>
+                      )}
                     </span>
                   ))}
                   {draining.map((i) => (
