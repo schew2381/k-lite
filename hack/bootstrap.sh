@@ -37,7 +37,7 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 # --- base images ---
-for img in alpine:3.20 traefik/whoami:v1.10 quay.io/coreos/etcd:v3.5.16 envoyproxy/envoy:v1.31.5; do
+for img in alpine:3.20 busybox:1.36 traefik/whoami:v1.10 quay.io/coreos/etcd:v3.5.16 envoyproxy/envoy:v1.31.5; do
   if docker image inspect "$img" >/dev/null 2>&1; then
     skip "docker pull $img (already present)"
   else
