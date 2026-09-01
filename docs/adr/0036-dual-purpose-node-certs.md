@@ -15,4 +15,4 @@ Node certs were ClientAuth-only, which broke 0034's assumption the moment a dest
 
 ## Outcome
 
-verify-m9 starts from wiped state on every run, so the dual-EKU join flow is what each pass proves: `openssl -purpose` shows `SSL server : Yes` on all three fresh node certs, the ingress listeners complete handshakes against node certificates, and a certificate signed by a foreign CA registers as `fail_verify_error` instead of reaching the pod. The self-heal path for pre-M9 identities shipped alongside and stays covered by the agent's join tests.
+verify-m9 starts from wiped state on every run, so the dual-EKU join flow is what each pass proves. `openssl -purpose` shows `SSL server : Yes` on all three fresh node certs, the ingress listeners complete handshakes against node certificates, and a certificate signed by a foreign CA registers as `fail_verify_error` instead of reaching the pod. The self-heal path for pre-M9 identities shipped alongside and stays covered by the agent's join tests.

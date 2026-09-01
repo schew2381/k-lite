@@ -1,6 +1,6 @@
 # Ingress ports are allocations, and listeners follow allocations, not health
 
-Cross-machine ingress (0034) needed a port per local endpoint from each node's published slice. Ports live as a server-materialized `IngressAllocation` kind (`<service>.<instance>`), reconciled by a leader-only allocator copying the VIP allocator's reserve-and-repair shape (ADR 0022), fixed at instance birth so Ready↔Draining transitions never move them. The destination Envoy's ingress listeners are generated from the allocation list, not from endpoint health. A listener exists before traffic routes to it and survives while its instance drains, which is what keeps drains hitless across the mTLS hop.
+Cross-machine ingress (0034) needed a port per local endpoint from each node's published slice. Ports live as a server-materialized `IngressAllocation` kind (`<service>.<instance>`). A leader-only allocator reconciles them, copying the VIP allocator's reserve-and-repair shape (ADR 0022), and each port is fixed at instance birth so Ready↔Draining transitions never move it. The destination Envoy's ingress listeners are generated from the allocation list, not from endpoint health. A listener exists before traffic routes to it and survives while its instance drains, which is what keeps drains hitless across the mTLS hop.
 
 ## Considered Options
 
@@ -14,8 +14,15 @@ Cross-machine ingress (0034) needed a port per local endpoint from each node's p
 - Remote endpoints render as `machineAddress:ingressPort` against a constant `transport_socket_matches` pair. Regenerating the match list from live endpoints would churn CDS and drain connections mid-rollout.
 - A remote endpoint without its allocation is omitted from EDS entirely. The flat-bridge path is dead, not a fallback.
 - The kind registration surfaced a codec gap (a forged YAML could nil-panic klited through the envelope switch), now closed and pinned by tests.
-- Ports burn per (service, instance), not per instance: an instance selected by N services takes N of its node's 32 slots, and surplus endpoints past exhaustion silently lose remote reachability. Acceptable at demo scale, and the first knob to revisit if real clusters arrive.
+- Ports burn per (service, instance), not per instance: an instance selected by N services takes N of its node's 32 slots, and surplus endpoints past exhaustion silently lose remote reachability. That's acceptable at demo scale, and it's the first knob to revisit if real clusters arrive.
 
 ## Outcome
 
-verify-m9 holds the kind to its contract: one allocation per (service, instance), every port inside its owner's published slice, Apply rejecting a client-written object, and a killed instance's allocation released with the replacement minting its own. The allocation-driven listener list did what it was chosen for, since the drain and rollout steps run traffic through listeners whose instances are mid-teardown and finish with zero failed requests. The port-burn consequence stands as accepted risk and hasn't bitten at demo scale.
+verify-m9 holds the kind to its contract.
+
+- One allocation per (service, instance).
+- Every port inside its owner's published slice.
+- Apply rejecting a client-written object.
+- A killed instance's allocation released, with the replacement minting its own.
+
+The allocation-driven listener list did what it was chosen for, since the drain and rollout steps run traffic through listeners whose instances are mid-teardown and finish with zero failed requests. The port-burn consequence stands as accepted risk and hasn't bitten at demo scale.

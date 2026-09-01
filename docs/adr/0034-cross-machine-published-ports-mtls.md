@@ -4,9 +4,9 @@ This ends ADR 0016's deferral. When an endpoint lives on another node, klited re
 
 ## Considered Options
 
-1. **Published ports, plaintext** (research/overlay-wan.md's minimal step). Smallest change, and every cross-node byte crosses the network readable, with nothing checking who dialed in.
+1. **Published ports, plaintext** (research/overlay-wan.md's minimal step). It's the smallest change, and every cross-node byte crosses the network readable, with nothing checking who dialed in.
 2. **Published ports with proxy-terminated mTLS** (chosen). The remote Envoy terminates TLS on its ingress listener, so the wire is encrypted and only certificate-holding nodes can connect. Costs one extra proxy hop on cross-node traffic.
-3. **WireGuard mesh.** Still the recorded second step for when NAT traversal or flat pod IPs matter. Heavier: key lifecycle, MTU, rendezvous.
+3. **WireGuard mesh.** It stays the recorded second step for when NAT traversal or flat pod IPs matter, at the cost of key lifecycle, MTU, and rendezvous work.
 4. **Relay through klited.** Rejected outright — the control plane must never sit in the data path.
 
 ## Consequences
@@ -18,4 +18,4 @@ This ends ADR 0016's deferral. When an endpoint lives on another node, klited re
 
 ## Outcome
 
-verify-m9 pins the design end to end on a fresh cluster. Consumer EDS carries `machineAddress:ingressPort` for every remote endpoint and the raw pod IP appears nowhere in the consumer's cluster table, so the flat-bridge path is verifiably gone. The remote listener's `ssl.handshake` counter rises while the client loop runs, plaintext and foreign-CA and certless dials all die in the handshake with zero decrypted bytes moved toward the pod, and a node-cert dial on the same listener reaches it (the positive control). Scale, rollout, drain, and a live advertise-address flip to the machine's LAN IP all pass through the ingress hop with zero failed requests.
+verify-m9 pins the design end to end on a fresh cluster. Consumer EDS carries `machineAddress:ingressPort` for every remote endpoint and the raw pod IP appears nowhere in the consumer's cluster table, so the flat-bridge path is verifiably gone. The remote listener's `ssl.handshake` counter rises while the client loop runs. Plaintext, foreign-CA, and certless dials all die in the handshake with zero decrypted bytes moved toward the pod, while a node-cert dial on the same listener reaches it (the positive control). Scale, rollout, drain, and a live advertise-address flip to the machine's LAN IP all pass through the ingress hop with zero failed requests.

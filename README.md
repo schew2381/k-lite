@@ -55,12 +55,12 @@ Traffic has two legs. When `a` calls `b` and the picked endpoint is local, the w
    [a] ──1 DNS──▶ kdns ──2 VIP answer──▶ [a] ──3 dial──▶ envoy ──4 raw──▶ [b, same node]
 ```
 
-When the pick is on another machine, the source Envoy crosses the open internet to the owner's published ingress port, mTLS with node certificates on both ends, and the owning Envoy hands off raw locally (ADRs 0034–0036):
+When the pick is on another machine, the hop crosses the open internet, so both Envoys authenticate with the node certificates the join flow already issued (ADRs 0034–0036):
 
 ```
    [a] ──▶ envoy A ════ mTLS, node certs ════▶ addr:20017 ──▶ envoy B ──raw──▶ [b, node B]
-            picks the endpoint                 published        terminates
-            and balances                       ingress port     TLS, forwards
+           picks the endpoint                  published      terminates
+           and balances                        ingress port   TLS, forwards
 ```
 
 Locally the advertised address defaults to `host.docker.internal`, so every demo runs the same handshake production would.

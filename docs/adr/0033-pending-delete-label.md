@@ -17,4 +17,4 @@ Deleting a Node doesn't remove its record. The server stamps a `klite.io/pending
 
 ## Outcome
 
-Shipped, and the interplay with uncordon settled the way the M8 note above says: `klite uncordon` refuses to clear a cordon that a pending delete owns, so the label is load-bearing in two directions. verify-m5 exercises the delete-by-YAML path (drain first, record removed only when empty) and verify-m8 drains node-wan out through the same choreography. ADR 0037 later pinned the final record removal to the revision the controller read, closing the window where a re-applied node could be deleted by a lagging leader.
+The label shipped, and the interplay with uncordon settled the way the M8 note above says: `klite uncordon` refuses to clear a cordon that a pending delete owns, so the label is load-bearing in two directions. verify-m5 exercises the delete-by-YAML path (drain first, record removed only when empty) and verify-m8 drains node-wan out through the same choreography. ADR 0037 later pinned the final record removal to the revision the controller read, closing the window where a re-applied node could be deleted by a lagging leader.

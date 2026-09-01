@@ -1,6 +1,6 @@
 # ADR index
 
-One line per record. The track column says where a decision came from: the design sessions before any code (design), the backend build sessions (build), or the UI session that ran beside them (ui). The two tracks numbered in parallel and collided once, so 0023 and 0024 were each claimed twice. The frontend records kept those numbers, the backend pair moved to 0033 and 0034, and the history keeps the collision visible instead of rewriting it.
+Each record gets one line. The track column says where a decision came from: the design sessions before any code (design), the backend build sessions (build), or the UI session that ran beside them (ui). The two tracks numbered in parallel and collided once, so 0023 and 0024 were each claimed twice. The frontend records kept those numbers, the backend pair moved to 0033 and 0034, and the history keeps the collision visible instead of rewriting it.
 
 | ADR                                                | Decision                                                    | Track  | Status                                                          |
 | -------------------------------------------------- | ----------------------------------------------------------- | ------ | --------------------------------------------------------------- |

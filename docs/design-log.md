@@ -82,27 +82,56 @@ M9's cross-machine design reached the UI before its code reached main. The in-fl
 
 ## The build: ten milestones, decisions still landing
 
-Design closed and the milestones ran: spikes (M0), the store and CLI (M1), agents and scheduling (M2), log streaming (M3), discovery (M4), drains and rollouts (M5), policy (M6), HA chaos (M7), the mTLS join surface (M8), and the cross-machine data plane (M9). Each one landed with an end-to-end harness under `hack/`, kept independently runnable so a regression in an old milestone fails a script with its number on it. The harnesses earned their pay in both directions, since verify-m9 alone ate twelve run-until-green iterations before its first clean pass.
+Design closed and the milestones ran.
 
-The ADR habit held under implementation pressure. The build sessions recorded membership-by-YAML (0018), the moby client pick (0019), VIP allocations as a stored kind (0022), the deny-by-default RPC gate (0028), the iptables admin lockdown (0029), cluster identity labels (0030), the pending-delete label (0033), published-port mTLS ingress and its allocation kind (0034, 0035), dual-purpose node certs (0036), and revision-pinned deletes (0037), while the UI session minted 0023 through 0027 plus 0031 and 0032 in parallel. Two of those are reversals wearing supersession stamps. protoc gave way to buf the moment the proto surface grew more hands, which is the exact trigger ADR 0020 had named for its own retirement (0021), and M9 ended 0016's cross-host deferral on the two seams that record said would move (0034).
+1. M0, the spike gates.
+2. M1, the etcd store, stateless klited, and the CLI.
+3. M2, agents and scheduling.
+4. M3, log streaming.
+5. M4, discovery.
+6. M5, drains and rollouts.
+7. M6, policy.
+8. M7, HA chaos.
+9. M8, the mTLS join surface.
+10. M9, the cross-machine data plane.
+
+Each one landed with an end-to-end harness under `hack/`, kept independently runnable so a regression in an old milestone fails a script with its number on it. The harnesses earned their pay in both directions, since verify-m9 alone ate twelve run-until-green iterations before its first clean pass.
+
+The ADR habit held under implementation pressure. The build sessions recorded:
+
+- membership-by-YAML (0018) and the moby client pick (0019)
+- VIP allocations as a stored kind (0022)
+- the deny-by-default RPC gate (0028), the iptables admin lockdown (0029), and cluster identity labels (0030)
+- the pending-delete label (0033)
+- published-port mTLS ingress and its allocation kind (0034, 0035)
+- dual-purpose node certs (0036) and revision-pinned deletes (0037)
+
+The UI session minted 0023 through 0027 plus 0031 and 0032 in parallel. Two records are reversals wearing supersession stamps. protoc gave way to buf the moment the proto surface grew more hands, which is the exact trigger ADR 0020 had named for its own retirement (0021). M9 then ended 0016's cross-host deferral on the two seams that record said would move (0034).
 
 Parallel numbering left one scar worth keeping: 0023 and 0024 each got claimed twice, once per session, and the backend pair now lives at 0033 and 0034. INDEX.md maps both tracks rather than pretending the collision never happened.
 
 ## The reviews, and what they caught
 
-Review ran as its own lane behind the build agents, adversarial on purpose: package-scoped code audits after M4 (netd, xds, ca, object, store, leader, policy), a controller audit after M5, an auth-and-runtime audit over the M8/M9 surface, and a writing critic over every batch of prose, per the CLAUDE.md mandate. The catches that justified the lane:
+Review ran as its own lane behind the build agents, adversarial on purpose.
+
+- Package-scoped code audits after M4 (netd, xds, ca, object, store, leader, policy).
+- A controller audit after M5.
+- An auth-and-runtime audit over the M8/M9 surface.
+- A writing critic over every batch of prose, per the CLAUDE.md mandate.
+
+The catches that justified the lane:
 
 1. The VIP allocator could mint duplicate VIPs across leader lives, and two services sharing an address breaks that node's routing. Reconcile now reserves every address it sees and repairs contested ones.
 2. Every write was revision-checked but deletes went by bare name, so a lagging leader could delete an instance that had already turned READY. `DeleteIfRevision` closed the hole and ADR 0037 records it.
-3. Node certificates carried ClientAuth only, which broke the moment a destination Envoy presented one as an ingress server cert. Reproduced live with `fail_verify_error` climbing, fixed as ADR 0036.
+3. Node certificates carried ClientAuth only, which broke the moment a destination Envoy presented one as an ingress server cert. We reproduced it live with `fail_verify_error` climbing and fixed it as ADR 0036.
 4. netd's ApplyConfig could store an older config over a newer one when an agent retry raced a timed-out RPC, leaving stale DNS and VIPs the agent believed replaced. Pushes now serialize.
-5. A forged YAML could nil-panic klited through the codec's envelope switch. The instance was fixed landing ADR 0035, then the class got closed: a parity test walks every kind through all four switches and a fuzz corpus holds the boundary.
+5. A forged YAML could nil-panic klited through the codec's envelope switch. The instance was fixed while landing ADR 0035, and then the class got closed: a parity test walks every kind through all four switches and a fuzz corpus holds the boundary.
 6. One node's certificate could rewrite another node's instance statuses, or inject into its command streams. Both paths now bind to the authenticated node.
 
-The writing lane pulled real weight too. Beyond style debts, it caught a fabricated proto quotation that had smuggled "pod" past the glossary into three UI trace strings, and doc comments describing diffs rather than the code they sat on.
+The writing lane caught more than style debts: a fabricated proto quotation that had smuggled "pod" past the glossary into three UI trace strings, and doc comments describing diffs rather than the code they sat on.
 
 ## The process, multi-session
 
 The build ran as several agent sessions sharing one `main`, committing directly and often. Coordination was written, not assumed: the frontend guessed the facade's contract behind a seam (0023), adopted the real dialect when it landed (0026), and took M9's shape from in-flight protos before the code reached main (0032). When M8's new Uncordon RPC broke the facade's test fake, the break and the fix pattern rode a session note, and the facade served the route the same day. Commit hygiene arrived mid-build as prek's fast staged-only hooks (0031) after a sandbox run proved the stash window could eat concurrent edits, which is why the shared checkout keeps the hook uninstalled and gates through `make precommit` instead.
 
-The numbers the chaos harness prints make the architecture's case better than the diagrams do. Leadership moves about four and a half seconds after a SIGKILL (the 5s election lease is most of the wait), the churned store converges a couple of seconds later, and the client loop that runs through every drain, rollout, and leader kill finishes with zero failed requests, which was the bar the whiteboard set.
+The numbers the chaos harness prints make the architecture's case better than the diagrams do. Leadership moves about four and a half seconds after a SIGKILL (the 5s election lease is most of the wait), and the churned store converges a couple of seconds later. The client loop that runs through every drain, rollout, and leader kill finishes with zero failed requests, which was the bar the whiteboard set.
