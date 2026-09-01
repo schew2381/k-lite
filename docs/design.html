@@ -953,6 +953,8 @@ function makeScene(svgId, vw, vh){
   sc.arrow("M 332 90 C 480 90, 620 66, 786 62", { dash:"7 6", sw:2 });
   sc.stepDot(560, 76, 4);
   sc.txt(430, 76, "full desired snapshot", { size:10, cls:"mono", fill:C.ctrl });
+  sc.txt(346, 118, "the same engine also feeds every Envoy over ADS —", { size:9, cls:"mono soft" });
+  sc.txt(346, 133, "but b's endpoints only change at step 7, once Ready", { size:9, cls:"mono soft" });
 
   sc.instance(600, 120, "b-3f81", "10.44.128.21", "Ready");
   sc.txt(600, 226, "docker run klite.node-1.b-3f81", { size:10.5, cls:"mono" });
