@@ -9,7 +9,7 @@ make bootstrap   # brew tools, colima, base images (safe to re-run)
 make demo        # fresh cluster, every headline feature, ends on the live board
 ```
 
-The demo wipes any previous playground, boots etcd and two klited replicas, and joins three nodes over mTLS. It then walks the headline features, gating each beat PASS/FAIL: discovery, a live scale, a hitless rollout, a policy denial, a node drain, and a leader kill. It ends by opening the web board against the running cluster and leaves everything up to poke at. `hack/dev-up.sh` is the quieter alternative (same cluster, no narration), and one command ends either, frontend included:
+The demo wipes any previous playground, boots etcd and two klited replicas, and joins four nodes over mTLS. It then walks the headline features, gating each beat PASS/FAIL: discovery, a live scale, a hitless rollout, a policy denial, a node drain, and a leader kill. It ends by opening the web board against the running cluster and leaves everything up to poke at. `hack/dev-up.sh` is the quieter alternative (same cluster, no narration), and one command ends either, frontend included:
 
 ```
 make down

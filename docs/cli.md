@@ -135,9 +135,9 @@ klite node token
 Declare a node and get its join command in one step.
 
 ```
-klite node add node-4
-klite node add node-4 --labels zone=sfo --max-instances 16
-klite node add node-4 --url 203.0.113.7:7443
+klite node add laptop-1
+klite node add laptop-1 --labels zone=sfo --max-instances 16
+klite node add laptop-1 --url 203.0.113.7:7443
 ```
 
 `node add` applies the Node object, mints a join token, and prints two paste-ready blocks. The first is the one-command join for a fresh Linux box, which fetches `join.sh` from the latest GitHub release and leaves the agent running under systemd. The second is the manual fallback for machines the releases don't cover yet: copy `bin/klite-agent` over and run it with `--server`, `--token`, and `--advertise-address`. Re-running the command is safe. Apply reports the node unchanged and the join block prints again.
