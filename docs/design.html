@@ -156,6 +156,20 @@ table.truth td.bad{color:var(--deny);font-weight:700}
   border:1.5px solid var(--ink);border-radius:8px;padding:5px 10px;box-shadow:2px 2px 0 rgba(43,42,36,.12)}
 .chip b{color:var(--ctrl)}
 
+/* numbered join steps */
+ol.steps{list-style:none;counter-reset:step;margin:18px 0 0;padding:0;background:var(--card);
+  border:1.5px solid var(--ink);border-radius:10px;box-shadow:2px 2px 0 rgba(43,42,36,.16);overflow:hidden}
+ol.steps li{counter-increment:step;display:flex;gap:14px;padding:10px 16px;border-bottom:1px solid var(--board-edge);
+  font-size:13.4px;color:#3c3b33;align-items:baseline}
+ol.steps li:last-child{border-bottom:none}
+ol.steps li::before{content:counter(step);font-family:var(--mono);font-weight:700;font-size:11px;color:#fff;
+  background:var(--ink);border-radius:999px;min-width:20px;height:20px;display:inline-flex;align-items:center;
+  justify-content:center;flex:0 0 20px;position:relative;top:3px}
+ol.steps li code{white-space:nowrap}
+h3.sub{font-size:17px;margin:26px 0 6px;letter-spacing:-.01em}
+h3.sub .adrchip{margin-left:10px;vertical-align:2px}
+section p{max-width:78ch;font-size:14.5px;color:#3c3b33}
+
 /* hint card (the app's aside register) */
 .hint{
   display:block;background:var(--card);border:1.5px dashed var(--ghost);
@@ -250,72 +264,83 @@ footer .mono{font-family:var(--mono);font-size:12px}
       <h1 class="wordmark">k-lite</h1>
       <p class="thesis">a small Kubernetes built from scratch, to find out why the real one is shaped the way it is</p>
     </div>
-    <p class="hero-sub">
-      YAML in, scheduled containers out — with service discovery, mTLS, and network policies on plain
-      Docker. Everything on this page runs today. The live UI is the interactive version.
-    </p>
-
-    <div class="idea-row" role="list">
-      <div class="idea" role="listitem"><h3><i>1</i>Declare</h3><p><code>klite apply</code> hands any server replica a wish list. It lands in etcd. Nothing imperative leaves your terminal.</p></div>
-      <div class="idea" role="listitem"><h3><i>2</i>Converge</h3><p>Leader-elected controllers write what's missing. Each node's agent nudges Docker until reality matches.</p></div>
-      <div class="idea" role="listitem"><h3><i>3</i>Discover</h3><p>Instances dial names. kdns answers with this node's VIP, and the Envoy behind it checks policy, then relays.</p></div>
-      <div class="idea" role="listitem"><h3><i>4</i>Survive</h3><p>Kill containers, drain nodes, kill the lead server. The lease moves and traffic never notices.</p></div>
-    </div>
-
-    <div class="boardbox">
+    <div class="boardbox" style="margin-top:22px">
       <svg id="board-hero" role="img" aria-label="The k-lite cluster: you apply YAML to stateless klited replicas backed by etcd; per-node agents watch over mTLS gRPC and run instances on a shared Docker network, each node carrying an infra pod with klite-net and Envoy."></svg>
     </div>
   </div>
 </section>
 
-<!-- ============ 02 · THE BRIEF ============ -->
-<section id="brief">
-  <div class="wrap">
-    <p class="eyebrow"><b>02</b>the brief</p>
-    <h2>Five requirements, fixed before any code</h2>
-    <ul class="ctrls" style="margin-top:22px">
-      <li><b>feel like Kubernetes</b>Declare desired state, converge toward it, watch everything change.</li>
-      <li><b>fit on one Mac</b>A whole multi-node cluster runs locally, containers included.</li>
-      <li><b>real machines later</b>A Linux box joins the same cluster with the same binary, unchanged.</li>
-      <li><b>security by design</b>Service policies and mTLS belong to the architecture, not a patch.</li>
-      <li><b>visible mechanisms</b>A live UI is a deliverable. If it can't be watched, it isn't done.</li>
-    </ul>
-    <p class="takeaway">every later decision traces back to one of these five</p>
-  </div>
-</section>
-
-<!-- ============ 03 · ROUND ONE, ERASED ============ -->
+<!-- ============ 02 · FIRST DECISIONS ============ -->
 <section id="rounds">
   <div class="wrap">
-    <p class="eyebrow"><b>03</b>the first decisions</p>
+    <p class="eyebrow"><b>02</b>the first decisions</p>
     <h2>The first sketch didn't survive the review</h2>
     <p class="lede">
       Round one was one server writing a bbolt file, HTTP long-polling agents, and a hand-rolled proxy.
-      Round two replaced the foundations before any code existed — and each replacement became a record.
+      Four decisions replaced it before any code existed.
     </p>
 
-    <div class="decs">
-      <div class="dec no"><span class="opt">bbolt file in one server</span><span class="why">one process owns all state — no HA story, no watches</span><span class="tag">round 1</span></div>
-      <div class="dec yes"><span class="opt">etcd ×3, stateless klited</span><span class="why">any replica serves · controllers gate on a 5s lease · watches come free</span><span class="tag">ADR 0005</span></div>
-      <div class="dec no"><span class="opt">HTTP long-poll + callback POSTs</span><span class="why">curl-friendly, but the bar was typed contracts — and xDS itself is gRPC</span><span class="tag">round 1</span></div>
-      <div class="dec yes"><span class="opt">gRPC streams, agents always dial out</span><span class="why">typed contracts, mTLS in the transport — and NAT-proof by direction</span><span class="tag">ADR 0004</span></div>
-      <div class="dec no"><span class="opt">hand-rolled DNS + TCP proxy</span><span class="why">a few hundred lines of connection-handling bugs to own</span><span class="tag">round 1</span></div>
-      <div class="dec yes"><span class="opt">Envoy, speaking real xDS</span><span class="why">drains, balancing, hitless config — a miniature istiod, spike-gated</span><span class="tag">ADR 0007</span></div>
-      <div class="dec no"><span class="opt">Docker-in-Docker per node</span><span class="why">privileged, slow, and flaky on macOS</span><span class="tag">rejected</span></div>
-      <div class="dec yes"><span class="opt">one agent process per node</span><span class="why">a node is a process plus a label filter — cheap to add, honest to swap</span><span class="tag">ADR 0003</span></div>
-      <div class="dec no"><span class="opt">borrow the k8s vocabulary</span><span class="why">the words import assumptions the project exists to question</span><span class="tag">rejected</span></div>
-      <div class="dec yes"><span class="opt">its own words: Workload, Instance, VIP</span><span class="why">every term carries only what this design put in it — no borrowed folklore</span><span class="tag">ADR 0001</span></div>
-    </div>
-    <p class="takeaway">the rule behind the record: every decision gets its ADR the moment it's made, rejected options included</p>
+    <h3 class="sub">One agent process per node — not Docker-in-Docker <span class="adrchip">ADR 0003</span></h3>
+    <p>
+      Locally a node is one <code>klite-agent</code> process, and all of them share the Mac's single
+      Docker daemon. Every container carries <code>io.klite.node=&lt;name&gt;</code>, and that label filter
+      is a node's whole worldview. Docker-in-Docker offered truer isolation at the price of privileged
+      containers, slow startup, and nested networking that misbehaves on macOS. One agent simulating N
+      nodes was rejected too — a fiction for the scheduler and drain logic to exercise. A cloud node later
+      is the same binary on a real machine.
+    </p>
+
+    <h3 class="sub">gRPC everywhere, and agents always dial out <span class="adrchip">ADR 0004</span></h3>
+    <p>
+      Agents, the CLI, and every Envoy speak gRPC to klited, and connections only ever go from agent to
+      server — a node behind NAT joins with no design change. HTTP long-poll lost on the durability bar
+      (typed contracts, and xDS itself is gRPC). WebSockets lost because we'd be hand-designing the
+      framing gRPC already is. The browser is the one exception and gets a small REST/SSE facade.
+    </p>
+
+    <h3 class="sub">etcd for state, klited stateless <span class="adrchip">ADR 0005</span></h3>
+    <p>
+      Cluster state lives in a 3-member etcd. Every klited serves reads and writes, and controllers run
+      single-active behind a 5-second lease — the kube-apiserver / controller-manager split at 1:100
+      scale. bbolt died the moment HA became a goal, and embedded raft was rejected as the largest
+      correctness tarpit the project could buy. Measured: after the leader's SIGKILL, a standby leads
+      within 4.5 seconds and no node dips from Ready.
+    </p>
+
+    <h3 class="sub">Envoy from day one, speaking real xDS <span class="adrchip">ADR 0007</span></h3>
+    <p>
+      The round-one plan was our own DNS server and TCP proxy — a few hundred lines to own, meaning a few
+      hundred lines of connection-handling bugs, and graceful drain killed it. Envoy brings draining,
+      balancing, and hitless config as battle-tested machinery, so the code left to write is exactly the
+      control plane. The bet was spike-gated: Envoy on colima/arm64 had to take CDS/EDS/LDS over one ADS
+      stream and apply an RBAC deny hitlessly before the ADR stuck.
+    </p>
   </div>
 </section>
 
-<!-- ============ 04 · THE YAML ============ -->
+<!-- ============ 03 · WHAT xDS IS ============ -->
+<section id="xdsintro">
+  <div class="wrap">
+    <p class="eyebrow"><b>03</b>xDS in one breath</p>
+    <h2>Envoy is configured by subscription, not by files</h2>
+    <p class="lede">The proxy asks discovery services for its config and applies every update hitlessly. Five terms cover it:</p>
+    <table class="addr">
+      <tbody>
+        <tr><td>LDS</td><td>listener discovery — which addresses and ports to bind, and the filter chain on each</td></tr>
+        <tr><td>RDS</td><td>route discovery — HTTP routing tables (unused here: every k-lite listener is plain L4 <code>tcp_proxy</code>)</td></tr>
+        <tr><td>CDS</td><td>cluster discovery — the named upstreams a listener can hand traffic to</td></tr>
+        <tr><td>EDS</td><td>endpoint discovery — the addresses inside each cluster, with health attached</td></tr>
+        <tr><td>ADS</td><td>the aggregated stream — all of the above over one gRPC connection, ordered so a listener never references a cluster that doesn't exist yet</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ 04 · THE YAML ============ --><!-- ============ 04 · THE YAML ============ -->
 <section id="yaml">
   <div class="wrap">
     <p class="eyebrow"><b>04</b>the input surface</p>
     <h2>You write four kinds. The server writes the rest.</h2>
-    <p class="lede">Six nouns cover the whole system, and four of them are yours to declare:</p>
 
     <div class="words">
       <div><b>Workload</b><s>Deployment</s><span>N copies of one image</span></div>
@@ -388,22 +413,13 @@ spec:
         </div>
       </div>
     </div>
-    <p class="takeaway">three more kinds (Instance, VIPAllocation, IngressAllocation) are server-materialized, and apply refuses them — allocator decisions are stored, watchable state (ADR 0022, 0035)</p>
 
-    <div class="split">
-      <div>
-        <p class="filetag" style="margin-top:16px">where it all lands — one etcd prefix, one key per object</p>
-        <div class="codepane">/klite/v1/workloads/b            <span class="b">spec.replicas: 2</span>
+    <div class="codepane" style="margin-top:16px">/klite/v1/workloads/b            <span class="b">spec.replicas: 2</span>
 /klite/v1/instances/b-7da4       <span class="b">spec.node: node-1</span>
 /klite/v1/services/b             <span class="b">8080 → 80</span>
 /klite/v1/vipallocations/b.node-1     <span class="g">10.44.64.4</span>
 /klite/v1/ingressallocations/b.b-7da4 <span class="g">:20002</span>
 /klite/leader                    <span class="y">★ 5s lease — controllers</span></div>
-      </div>
-      <div>
-        <p class="takeaway" style="margin-top:16px">every write bumps a global revision, and every consumer (controllers, agents, the UI) lists once and watches forever</p>
-      </div>
-    </div>
   </div>
 </section>
 
@@ -421,14 +437,6 @@ spec:
       <svg id="board-relay" role="img" aria-label="The convergence relay, numbered: apply writes etcd; the workload controller creates a Pending instance; the scheduler binds the emptiest node; WatchDesired streams the change to that node's agent; the agent runs the container; klite-net's probe makes it Ready; EDS tells every Envoy."></svg>
     </div>
 
-    <ul class="ctrls">
-      <li><b>workload</b>creates and retires Instances to match <code>replicas</code> — runs rollouts and drains</li>
-      <li><b>scheduler</b>filters (pin · Ready · uncordoned · under max), then emptiest node wins — ties break by name</li>
-      <li><b>node</b>15 quiet seconds → NotReady; 30 more → instances evacuated elsewhere</li>
-      <li><b>vip</b>one <code>VIPAllocation</code> per (Service, Node), first free address in the pool</li>
-      <li><b>ingress</b>one <code>IngressAllocation</code> per (Service, Instance), fixed at birth</li>
-    </ul>
-
     <div class="chips">
       <span class="chip">probe <b>2s</b></span>
       <span class="chip">heartbeat <b>5s</b></span>
@@ -440,8 +448,6 @@ spec:
       <span class="chip">leader lease <b>5s</b></span>
     </div>
 
-    <p class="takeaway">restarts stay honest: containers run with --restart=no, the agent owns the backoff and the ↻ counter (ADR 0011) · drains surge first, one retirement in flight, capacity never dips (ADR 0010)</p>
-    <div class="adrs"><span class="adrchip">ADR 0010</span><span class="adrchip">ADR 0011</span><span class="adrchip">ADR 0012</span><span class="adrchip">ADR 0033</span></div>
   </div>
 </section>
 
@@ -459,7 +465,6 @@ spec:
       <div class="dec no"><span class="opt">Docker network aliases</span><span class="why">zero infra, but dead containers linger and policy has no chokepoint</span><span class="tag">rejected</span></div>
       <div class="dec no"><span class="opt">env-var injection</span><span class="why">stale on every reschedule, plus start-order dependencies</span><span class="tag">rejected</span></div>
       <div class="dec no"><span class="opt">DNS straight to instance IPs</span><span class="why">client resolver caches (JVMs: 30s) keep serving the dead</span><span class="tag">rejected</span></div>
-      <div class="dec no"><span class="opt">one cluster-wide VIP</span><span class="why">the k8s shape — but two proxies claiming one IP on a shared bridge is an ARP fight</span><span class="tag">rejected</span></div>
       <div class="dec yes"><span class="opt">own DNS + a VIP per (Service, Node)</span><span class="why">each node's instances hear their own node's answer — churn hides behind a fixed address</span><span class="tag">ADR 0006</span></div>
     </div>
 
@@ -467,31 +472,44 @@ spec:
       <svg id="board-call" role="img" aria-label="One call, numbered: the resolver appends svc.klite; kdns answers this node's VIP with TTL 5s; TCP lands on Envoy's VIP listener; the RBAC filter allows or resets; round-robin picks a Ready endpoint; Envoy dials the instance raw; the reply returns through the proxy."></svg>
     </div>
 
-    <div class="chips">
-      <span class="chip">records live <b>5s</b></span>
-      <span class="chip">denied callers still resolve — <b>reset ≠ NXDOMAIN</b></span>
-      <span class="chip">balancing is Envoy's, <b>per connection</b></span>
-      <span class="chip">policy stands at the <b>caller's</b> proxy</span>
-      <span class="chip">at rest, <b>3 of 12</b> service pairs are denied by design</span>
-    </div>
-    <p class="takeaway">the seed ships both policy shapes: one plain DENY (c→b dies at c's proxy) and one ALLOW (from a to d) — the first ALLOW targeting d flips it into allowlist mode, so b→d and c→d are denied by absence (ADR 0009)</p>
-    <div class="adrs"><span class="adrchip">ADR 0006</span><span class="adrchip">ADR 0009</span><span class="adrchip">ADR 0017</span></div>
   </div>
 </section>
 
-<!-- ============ 07 · A NODE ============ -->
+<!-- ============ 07 · A NODE JOINS ============ -->
 <section id="node">
   <div class="wrap">
-    <p class="eyebrow"><b>07</b>a node, up close</p>
-    <h2>node-1 is a process, a label, and two containers</h2>
+    <p class="eyebrow"><b>07</b>a node joins</p>
+    <h2>From declared to Ready, on either home</h2>
     <p class="lede">
-      One <code>klite-agent</code> host process holds the identity — no VM, no nesting. Every container
-      it owns carries <code>io.klite.node=node-1</code>, and that label filter is its entire worldview.
+      A Node is declared first, and its card waits NotReady until a machine claims it. Only the start
+      differs by home — everything after the dial is byte-for-byte identical.
     </p>
 
-    <div class="boardbox">
-      <svg id="board-node" role="img" aria-label="Anatomy of one node: the klite-agent host process, the infra pod's two containers sharing one netns (klite-net with DNS, VIPs, probes; Envoy with VIP and ingress listeners), instance containers pointing their DNS at klite-net, and the published ingress-port slice at the machine edge."></svg>
+    <div class="split">
+      <div>
+        <p class="filetag">on this machine — one button (ADR 0040)</p>
+        <div class="codepane"><span class="c"># the UI's join dialog: the facade starts</span>
+<span class="c"># the agent itself, right where klited runs</span>
+klite-agent --node node-5 --token K10…</div>
+      </div>
+      <div>
+        <p class="filetag">over the internet — printed by klite node add (ADR 0038)</p>
+        <div class="codepane">curl -sfL https://…/join.sh | \
+  KLITE_URL=<span class="g">203.0.113.7:7443</span> \
+  KLITE_TOKEN='K10…' KLITE_NODE=node-5 sh -
+<span class="c"># installs the binary and a systemd unit —</span>
+<span class="c"># the infra image arrives from ghcr</span></div>
+      </div>
     </div>
+
+    <ol class="steps">
+      <li><code>klite node add node-5</code> declares the Node and mints the token — <code>K10&lt;ca-hash&gt;::node:&lt;secret&gt;</code>. An agent for an undeclared name is refused.</li>
+      <li>The agent dials out. It has no CA yet, so it verifies the certificate it's shown against the hash pinned inside the token.</li>
+      <li>Register: the secret is checked in constant time, a CSR goes up, and a certificate comes back — <code>CN=klite:node:node-5</code>. The private key never left the machine.</li>
+      <li>The same response carries NetBootstrap: infra IP <code>10.44.0.15</code>, the VIP pool, ingress slice <code>:20128–20159</code>, the pinned infra image.</li>
+      <li>The agent builds the infra pod — klite-net owns the netns and the published port slice, Envoy joins it — then opens its streams: WatchDesired down, ReportStatus up every 5s.</li>
+      <li>klited stamps the node Ready and the scheduler starts counting it. 15 quiet seconds would mark it NotReady, 30 more evacuate its instances.</li>
+    </ol>
 
     <table class="addr">
       <thead><tr><th>range</th><th>what</th><th>allocated by</th></tr></thead>
@@ -500,64 +518,31 @@ spec:
         <tr><td>10.44.0.10+n</td><td>infra pod IPs — node-1 gets <code>.11</code></td><td class="who">klited, by formula (node index)</td></tr>
         <tr><td>10.44.64.0/18</td><td>VIP pool — never given to Docker</td><td class="who">vip controller, first free, stored</td></tr>
         <tr><td>10.44.128.0/17</td><td>instance IPs</td><td class="who">Docker's own IPAM, pinned by ip-range</td></tr>
-        <tr><td>:20000 + 32·(n−1)</td><td>ingress-port slice on the <em>machine</em> address (slide 11)</td><td class="who">ingress controller, first free in the slice</td></tr>
+        <tr><td>:20000 + 32·(n−1)</td><td>ingress-port slice on the <em>machine</em> address (slide 9)</td><td class="who">ingress controller, first free in the slice</td></tr>
       </tbody>
     </table>
-
-    <p class="takeaway">the infra pod is a hand-built pod — and needing to build one is the best argument for why Kubernetes has them (ADR 0008)</p>
-    <div class="adrs"><span class="adrchip">ADR 0003</span><span class="adrchip">ADR 0008</span><span class="adrchip">ADR 0022</span><span class="adrchip">ADR 0029</span></div>
   </div>
 </section>
 
-<!-- ============ 08 · xDS ============ -->
-<section id="xds">
-  <div class="wrap">
-    <p class="eyebrow"><b>08</b>programming envoy</p>
-    <h2>Three xDS APIs on one ADS stream</h2>
-    <p class="lede">
-      Every Envoy holds one gRPC stream to klited and discovers everything over it. The classic set is
-      four APIs. k-lite serves three, because pure L4 <code>tcp_proxy</code> has no HTTP routes to
-      discover.
-    </p>
-
-    <div class="boardbox">
-      <svg id="board-xds" role="img" aria-label="Each node's Envoy holds one ADS stream to klited, which serves three resource types: LDS listeners on VIPs with RBAC filters, CDS clusters, and EDS endpoints with health."></svg>
-    </div>
-
-    <div class="chips">
-      <span class="chip"><b>LDS</b> VIP listeners + RBAC · mTLS ingress listeners</span>
-      <span class="chip"><b>CDS</b> one round-robin cluster per service</span>
-      <span class="chip"><b>EDS</b> endpoints + health — local raw, remote machine:port</span>
-      <span class="chip">no RDS — <b>L4 only</b></span>
-      <span class="chip">no SDS — certs are <b>files the agent mounts</b></span>
-    </div>
-
-    <p class="takeaway">every klited replica computes every node's snapshot and serves xDS — whichever replica an Envoy dials must be able to answer. clusters apply before endpoints before listeners, so nothing dangles</p>
-    <div class="adrs"><span class="adrchip">ADR 0007</span></div>
-  </div>
-</section>
-
-<!-- ============ 09 · IDENTITY ============ -->
+<!-- ============ 08 · IDENTITY ============ -->
 <section id="identity">
   <div class="wrap">
-    <p class="eyebrow"><b>09</b>identity</p>
-    <h2>Identity arrived in four layers</h2>
-
-    <div class="decs" style="margin-top:22px">
-      <div class="dec yes"><span class="opt">token → CSR → certificate</span><span class="why">the join token pins the CA's hash, keys never leave the machine, and the cert says <code>CN=klite:node:&lt;name&gt;</code></span><span class="tag">ADR 0013</span></div>
-      <div class="dec yes"><span class="opt">one port, deny-by-default</span><span class="why">node certs may call AgentService + xDS, only as themselves · the admin token calls ClusterService · Register alone is open</span><span class="tag">ADR 0028</span></div>
-      <div class="dec yes"><span class="opt">admin ports get iptables, not auth</span><span class="why">a one-shot helper in the infra netns drops :9090/:9901 for workload ranges — Envoy's admin can't demand certs anyway</span><span class="tag">ADR 0029</span></div>
-      <div class="dec yes"><span class="opt">one cert, both TLS directions</span><span class="why">ClientAuth for dialing klited, ServerAuth so the same identity can terminate ingress mTLS</span><span class="tag">ADR 0036</span></div>
+    <p class="eyebrow"><b>08</b>identity</p>
+    <h2>One certificate, both directions</h2>
+    <p class="lede">
+      The join token buys each node one CA-signed certificate, and that identity authenticates
+      everything after it.
+    </p>
+    <div class="boardbox">
+      <svg id="board-mtls" role="img" aria-label="One node certificate used both ways: as the client certificate for the agent's gRPC and Envoy's xDS stream to klited, and as the server certificate on the node's mTLS ingress listeners that other nodes dial."></svg>
     </div>
-
-    <p class="takeaway">certificates name a node, never a service — per-service identity (the SPIFFE shape) is written down as future work, not forgotten (ADR 0034)</p>
   </div>
 </section>
 
 <!-- ============ 10 · CROSSING MACHINES ============ -->
 <section id="wan">
   <div class="wrap">
-    <p class="eyebrow"><b>10</b>crossing machines</p>
+    <p class="eyebrow"><b>09</b>crossing machines</p>
     <h2>Remote endpoints become machine:port, behind proxy mTLS</h2>
     <p class="lede">
       Cross-machine traffic was deliberately deferred (ADR 0016), then landed as the smallest honest
@@ -575,15 +560,13 @@ spec:
     <div class="boardbox" style="margin-top:18px">
       <svg id="board-wan" role="img" aria-label="A cross-machine call, numbered: the local steps are unchanged through RBAC; EDS answers with node-5's advertise address and ingress port; the caller's Envoy dials it over mTLS with its node certificate; Docker's published port delivers into node-5's infra netns; the ingress listener requires a client certificate and hands off raw to the instance."></svg>
     </div>
-    <p class="takeaway">the owning node still dials its own instances raw — balancing, readiness, and policy all happened at the caller. two proxy hops total, and klited touches neither</p>
-    <div class="adrs"><span class="adrchip">ADR 0016</span><span class="adrchip">ADR 0034</span><span class="adrchip">ADR 0035</span></div>
   </div>
 </section>
 
 <!-- ============ 11 · REACHABILITY ============ -->
 <section id="reach">
   <div class="wrap">
-    <p class="eyebrow"><b>11</b>reachability</p>
+    <p class="eyebrow"><b>10</b>reachability</p>
     <h2>Joining needs one reachable machine. Traffic needs all of them.</h2>
 
     <table class="addr" style="margin-top:22px">
@@ -620,14 +603,13 @@ curl -sfL https://…/join.sh | \
         <p class="takeaway">the playground already listens on <code>0.0.0.0:7443</code> whenever the Mac has a LAN address (the serving cert re-mints its SANs each boot) · real nodes still need <code>--advertise-address</code>, since self-detection would find the Docker bridge — join.sh refuses to guess</p>
       </div>
     </div>
-    <div class="adrs"><span class="adrchip">ADR 0013</span><span class="adrchip">ADR 0018</span><span class="adrchip">ADR 0038</span><span class="adrchip">ADR 0040</span></div>
   </div>
 </section>
 
 <!-- ============ 12 · THE UI ============ -->
 <section id="ui">
   <div class="wrap">
-    <p class="eyebrow"><b>12</b>the live UI</p>
+    <p class="eyebrow"><b>11</b>the live UI</p>
     <h2>The board is one more watcher</h2>
     <p class="lede">
       Browsers don't speak gRPC, so a small facade translates. Objects ride the same watch everything
@@ -645,15 +627,13 @@ curl -sfL https://…/join.sh | \
       <span class="chip">mock mode: an <b>in-browser simulator</b>, same client seam</span>
     </div>
 
-    <p class="takeaway">the frontend shipped before klited could serve it, against the simulator — when the real facade arrived, one decoder at the seam absorbed the dialect (ADR 0023, 0026)</p>
-    <div class="adrs"><span class="adrchip">ADR 0015</span><span class="adrchip">ADR 0023</span><span class="adrchip">ADR 0026</span><span class="adrchip">ADR 0041</span></div>
   </div>
 </section>
 
 <!-- ============ 13 · THE CLI ============ -->
 <section id="cli">
   <div class="wrap">
-    <p class="eyebrow"><b>13</b>the CLI</p>
+    <p class="eyebrow"><b>12</b>the CLI</p>
     <h2>Eleven commands drive everything</h2>
     <p class="lede">
       <code>klite</code> dials any replica over TLS with the admin token and fails over across a server
@@ -676,14 +656,13 @@ curl -sfL https://…/join.sh | \
         <tr><td>klite node add &lt;name&gt;</td><td class="twist">declare the Node and print the paste-ready join blocks</td></tr>
       </tbody>
     </table>
-    <p class="takeaway">server resolution: --server, then KLITE_SERVER, then ~/.klite/config, then 127.0.0.1:7443</p>
   </div>
 </section>
 
 <!-- ============ 14 · VS KUBERNETES ============ -->
 <section id="k8s">
   <div class="wrap">
-    <p class="eyebrow"><b>14</b>the decoder ring</p>
+    <p class="eyebrow"><b>13</b>the decoder ring</p>
     <h2>Where Kubernetes hides a mechanism, k-lite names it</h2>
 
     <table class="k8s">
@@ -709,7 +688,7 @@ curl -sfL https://…/join.sh | \
 <!-- ============ 15 · THE RECORD ============ -->
 <section id="record">
   <div class="wrap">
-    <p class="eyebrow"><b>15</b>the record</p>
+    <p class="eyebrow"><b>14</b>the record</p>
     <h2>Forty-two decisions, kept honest</h2>
     <p class="lede">
       Reversals stay visible — superseded records are dimmed, not deleted, and the index keeps its
@@ -968,97 +947,40 @@ function makeScene(svgId, vw, vh){
   sc.txt(738, 116, "node-2", { size:12.5, weight:700, cls:"mono" });
   sc.txt(738, 136, "b-265f · 10.44.128.9", { size:9.5, cls:"mono soft" });
   sc.txt(738, 158, "a remote pick takes the", { size:9.5, cls:"lbl soft" });
-  sc.txt(738, 173, "slide-10 path instead", { size:9.5, cls:"lbl soft" });
+  sc.txt(738, 173, "slide-9 path instead", { size:9.5, cls:"lbl soft" });
   sc.txt(720, 250, "node-2's instances hear node-2's VIP", { size:10.5, cls:"mono", fill:C.ctrl });
   sc.txt(720, 290, "balancing already happened at the", { size:10.5, cls:"lbl soft" });
   sc.txt(720, 306, "VIP, so the last hop is a raw dial", { size:10.5, cls:"lbl soft" });
 })();
 
-/* ---------- 07 · node anatomy ---------- */
-(function nodeAnatomy(){
-  const sc = makeScene("board-node", 1000, 520);
+/* ---------- 08 · one cert, both directions ---------- */
+(function mtls(){
+  const sc = makeScene("board-mtls", 1000, 250);
 
-  sc.rect(24, 22, 952, 476, { rx:12, sw:2.4 });
-  sc.txt(44, 50, "node-1", { size:16, weight:750, cls:"mono" });
-  sc.txt(44, 68, "one machine — locally: your Mac, shared with every other node", { size:10.5, cls:"lbl soft" });
+  sc.rect(40, 40, 340, 170, { rx:11, sw:2.3 });
+  sc.txt(60, 68, "node-5", { size:13.5, weight:750, cls:"mono" });
+  sc.rect(58, 84, 304, 66, { rx:8, sw:1.8 });
+  sc.txt(74, 106, "node.crt — CN=klite:node:node-5", { size:10.5, cls:"mono" });
+  sc.txt(74, 124, "ClientAuth + ServerAuth · key never traveled", { size:9.5, cls:"mono soft" });
+  sc.txt(60, 172, "minted once: token → CSR → cert", { size:9.5, cls:"mono soft" });
+  sc.txt(60, 190, "agent and envoy share it", { size:9.5, cls:"mono soft" });
 
-  sc.rect(730, 34, 230, 54, { rx:8, sw:1.9 });
-  sc.txt(845, 56, "klite-agent — host process", { size:11.5, anchor:"middle", weight:650, cls:"mono" });
-  sc.txt(845, 72, "watches klited · drives Docker · reports", { size:9, anchor:"middle", cls:"lbl soft" });
+  sc.rect(660, 34, 310, 88, { rx:10, sw:2.2 });
+  sc.txt(680, 62, "klited", { size:13, weight:750, cls:"mono" });
+  sc.txt(680, 82, "CA inside · deny-by-default gate", { size:9.8, cls:"mono soft" });
+  sc.txt(680, 100, "certs = agents + xDS · bearer = admin", { size:9.8, cls:"mono soft" });
 
-  sc.line("M 24 104 L 976 104", { dash:"4 7", sw:1.3, stroke:C.soft });
-  sc.txt(44, 97, "machine edge — advertise address (the Mac's LAN IP locally; host.docker.internal offline)", { size:9.5, cls:"mono soft" });
-  sc.rect(640, 112, 320, 42, { rx:8, sw:1.7, dash:"6 5" });
-  sc.txt(800, 129, "published ingress ports :20000–20031", { size:10.5, anchor:"middle", cls:"mono" });
-  sc.txt(800, 145, "node-1's fixed slice, opened when the infra pod is created", { size:9, anchor:"middle", cls:"mono soft" });
+  sc.rect(660, 150, 310, 66, { rx:10, sw:2, dash:"6 5" });
+  sc.txt(680, 176, "any other node's envoy", { size:11.5, weight:650, cls:"mono" });
+  sc.txt(680, 196, "dials this node's ingress ports", { size:9.5, cls:"mono soft" });
 
-  sc.rect(44, 170, 400, 310, { rx:10, sw:2.2 });
-  sc.txt(64, 196, "infra pod", { size:13.5, weight:750, cls:"mono" });
-  sc.txt(150, 196, "one shared netns · 10.44.0.11", { size:10, cls:"mono soft" });
-
-  sc.rect(62, 212, 172, 118, { rx:8, sw:1.8 });
-  sc.txt(148, 234, "klite-net", { size:12.5, anchor:"middle", weight:700, cls:"mono" });
-  sc.txt(148, 253, "kdns :53 · TTL 5s", { size:9.2, anchor:"middle", cls:"mono" });
-  sc.txt(148, 269, "VIPs as /32s (netlink)", { size:9.2, anchor:"middle", cls:"mono" });
-  sc.txt(148, 285, "TCP probes, every 2s", { size:9.2, anchor:"middle", cls:"mono" });
-  sc.txt(148, 312, "owns the netns", { size:9, anchor:"middle", cls:"mono soft" });
-
-  sc.rect(252, 212, 172, 118, { rx:8, sw:1.8 });
-  sc.txt(338, 234, "envoy", { size:12.5, anchor:"middle", weight:700, cls:"mono" });
-  sc.txt(338, 253, "VIP listeners", { size:9.2, anchor:"middle", cls:"mono" });
-  sc.txt(338, 269, "RBAC filters (policy)", { size:9.2, anchor:"middle", cls:"mono" });
-  sc.txt(338, 285, "ingress listeners (mTLS)", { size:9.2, anchor:"middle", cls:"mono" });
-  sc.txt(338, 312, "--network container:…net", { size:8.8, anchor:"middle", cls:"mono", fill:C.ctrl });
-
-  sc.rect(62, 348, 362, 56, { rx:8, sw:1.5, dash:"5 5" });
-  sc.txt(78, 370, "VIPs here: a→10.44.64.1  b→.5  c→.9  d→.13", { size:9.5, cls:"mono" });
-  sc.txt(78, 388, "first-free scan — allocated by klited, bound by klite-net", { size:9, cls:"mono soft" });
-
-  sc.txt(62, 436, "run-once lockdown helper: iptables in this netns", { size:9.5, cls:"mono soft" });
-  sc.txt(62, 452, "drops :9090 / :9901 for workload ranges (ADR 0029)", { size:9, cls:"mono soft" });
-
-  sc.instance(500, 190, "a-963d", "10.44.128.2");
-  sc.instance(620, 190, "b-7da4", "10.44.128.6");
-  sc.txt(500, 296, "every instance: --dns 10.44.0.11 --dns-search svc.klite --dns-opt ndots:1", { size:9.8, cls:"mono", fill:C.ctrl });
-  sc.arrow("M 560 282 C 480 320, 330 300, 240 250", { dash:"4 5", sw:1.6, stroke:C.data });
-  sc.txt(500, 330, "labels: io.klite.node=node-1 · io.klite.instance=b-7da4 …", { size:9.2, cls:"mono soft" });
-
-  sc.line("M 480 380 L 950 380", { dash:"3 6", sw:1.2, stroke:C.ctrl });
-  sc.txt(480, 400, "klite0 · 10.44.0.0/16 — the table below maps every range", { size:9.8, cls:"mono", fill:C.ctrl });
-  sc.txt(480, 448, "a real node later: same picture, its own daemon — the shared bridge", { size:9.5, cls:"lbl soft" });
-  sc.txt(480, 464, "disappears and slide 10's ingress path carries cross-node traffic", { size:9.5, cls:"lbl soft" });
+  sc.arrow("M 384 92 C 500 74, 560 70, 654 74", { sw:2.1, label:"gRPC + xDS — this cert as the client", lx:404, ly:52, lsize:9.5 });
+  sc.lock(520, 66);
+  sc.arrow("M 654 184 C 560 190, 480 176, 386 140", { sw:2.1, stroke:C.data, label:"mTLS ingress — this cert as the server", lx:420, ly:214, lsize:9.5, lcolor:C.data });
+  sc.lock(520, 172, C.data);
 })();
 
-/* ---------- 08 · xDS ---------- */
-(function xds(){
-  const sc = makeScene("board-xds", 1000, 330);
-
-  function envoyBox(y, name){
-    sc.rect(40, y, 200, 66, { rx:9, sw:2 });
-    sc.txt(58, y+27, name, { size:12.5, weight:700, cls:"mono" });
-    sc.txt(58, y+46, "node.id = " + name.split("'")[0], { size:8.8, cls:"mono soft" });
-  }
-  envoyBox(50, "node-1's envoy");
-  envoyBox(200, "node-2's envoy");
-
-  sc.rect(560, 30, 400, 280, { rx:11, sw:2.3 });
-  sc.txt(580, 58, "klited — every replica serves xDS", { size:12.5, weight:750, cls:"mono" });
-  sc.txt(580, 76, "snapshot per node, versioned by the endpoints engine", { size:9, cls:"mono soft" });
-  function lane(y, name, what){
-    sc.rect(580, y, 360, 52, { rx:8, sw:1.7 });
-    sc.txt(598, y+21, name, { size:11.5, weight:700, cls:"mono" });
-    sc.txt(598, y+38, what, { size:8.8, cls:"mono soft" });
-  }
-  lane(92, "LDS — listeners", "VIP listeners + RBAC · mTLS ingress listeners");
-  lane(154, "CDS — clusters", "one EDS round-robin cluster per service");
-  lane(216, "EDS — endpoints", "instanceIP:port local · machine:ingressPort remote");
-
-  sc.arrow("M 244 80 C 380 84, 440 110, 556 140", { sw:2.1, label:"one ADS stream — mTLS, pinned to the node cert", lx:250, ly:56, lsize:9.5 });
-  sc.arrow("M 244 230 C 380 234, 440 214, 556 190", { sw:2.1 });
-  sc.lock(390, 66); sc.lock(390, 218);
-})();
-
-/* ---------- 10 · the WAN hop ---------- */
+/* ---------- 10 · the WAN hop ---------- *//* ---------- 10 · the WAN hop ---------- */
 (function wan(){
   const sc = makeScene("board-wan", 1000, 480);
 
@@ -1196,9 +1118,9 @@ function makeScene(svgId, vw, vh){
 /* ---------- left TOC rail ---------- */
 (function toc(){
   const NAMES = [
-    ["top","title"],["brief","the brief"],["rounds","round one"],["yaml","the YAML"],
-    ["loop","converge"],["discovery","discovery"],["node","a node"],["xds","xDS"],
-    ["identity","identity"],["wan","machines"],["reach","reachability"],["ui","the UI"],
+    ["top","title"],["rounds","first decisions"],["xdsintro","xDS"],["yaml","the YAML"],
+    ["loop","converge"],["discovery","discovery"],["node","a node joins"],["identity","identity"],
+    ["wan","machines"],["reach","reachability"],["ui","the UI"],
     ["cli","the CLI"],["k8s","vs k8s"],["record","the record"],
   ];
   const rail = document.createElement("nav");
