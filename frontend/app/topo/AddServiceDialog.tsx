@@ -1,7 +1,8 @@
 // Add a whole new service (d, e, …) without writing YAML: a name and an
 // instance count become a Workload + Service pair applied through the same
-// channel everything else uses. The image stays fixed (a whoami that answers
-// HTTP), and anyone who needs a different one has the apply page.
+// channel everything else uses. The image stays fixed (a busybox that both
+// serves HTTP and randomly calls the other services, so live traffic is
+// real), and anyone who needs a different one has the apply page.
 
 import { PlusIcon } from 'lucide-react'
 import { useState } from 'react'
@@ -23,8 +24,6 @@ import { useClient } from '@/lib/client-context'
 import { newServiceYaml } from '@/lib/yamlgen'
 import { sortedServices } from '@/store/selectors'
 import { useSnapshot } from '@/store/store'
-
-const DEFAULT_IMAGE = 'traefik/whoami:v1.10'
 
 function nextName(taken: Set<string>): string {
   for (let i = 0; i < 26; i++) {
@@ -56,15 +55,23 @@ export function AddServiceDialog() {
   const create = () => {
     if (!valid) return
     act(
-      client.apply(newServiceYaml(effectiveName, DEFAULT_IMAGE, parsedInstances)).then((results) => {
-        const failed = results.find((r) => r.action === 'error')
-        if (failed) toast.error(failed.error ?? 'rejected')
-        else {
-          toast(`workload/${effectiveName} and service/${effectiveName} created`)
-          setOpen(false)
-          setName('')
-        }
-      }),
+      client
+        .apply(
+          newServiceYaml(
+            effectiveName,
+            [...taken].filter((t) => t !== effectiveName),
+            parsedInstances,
+          ),
+        )
+        .then((results) => {
+          const failed = results.find((r) => r.action === 'error')
+          if (failed) toast.error(failed.error ?? 'rejected')
+          else {
+            toast(`workload/${effectiveName} and service/${effectiveName} created`)
+            setOpen(false)
+            setName('')
+          }
+        }),
     )
   }
 
@@ -80,9 +87,9 @@ export function AddServiceDialog() {
         <DialogHeader>
           <DialogTitle className="font-mono">new service</DialogTitle>
           <DialogDescription>
-            Creates a Workload and its Service through apply, running a whoami image that answers HTTP.
-            The scheduler places it, every node answers with its own VIP, and it joins the traffic
-            rotation on its own.
+            Creates a Workload and its Service through apply, running a busybox that answers HTTP and
+            calls the other services at random. The scheduler places it, every node answers with its own
+            VIP, and it joins the traffic on its own.
           </DialogDescription>
         </DialogHeader>
         <FieldGroup>
