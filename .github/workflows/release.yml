@@ -65,6 +65,10 @@ jobs:
   # The built board. Self-hosters serve it straight from klite-facade
   # (--ui-dir), no dev server. It attaches once the release exists.
   ui:
+    # Best-effort: the board tarball is a convenience asset, and a frontend
+    # type error must not paint the whole release red (binaries and the
+    # donor image are the release).
+    continue-on-error: true
     runs-on: ubuntu-latest
     needs: binaries
     permissions:
