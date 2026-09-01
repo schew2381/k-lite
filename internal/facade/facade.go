@@ -41,6 +41,9 @@ type Server struct {
 
 	// dialOne is swappable in tests; the default opens a real connection.
 	dialOne func(addr string) (io.Closer, klitev1.ClusterServiceClient, error)
+
+	// spawn arms the one-click join route; nil answers 501.
+	spawn *agentSpawner
 }
 
 // New builds a facade over an already-dialed ClusterService client. The
@@ -67,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/workloads/{name}/scale", s.handleScale)
 	mux.HandleFunc("POST /api/nodes/{name}/drain", s.handleDrain)
 	mux.HandleFunc("POST /api/nodes/{name}/uncordon", s.handleUncordon)
+	mux.HandleFunc("POST /api/nodes/{name}/join", s.handleJoin)
 	mux.HandleFunc("GET /api/nodetoken", s.handleNodeToken)
 	mux.HandleFunc("GET /api/{kind}", s.handleList)
 	mux.HandleFunc("DELETE /api/{kind}/{name}", s.handleDelete)

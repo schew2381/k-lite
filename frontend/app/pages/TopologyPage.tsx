@@ -98,6 +98,19 @@ export default function TopologyPage() {
     )
   }, [client, nodes])
 
+  // reopens the join dialog for a node that is declared and still waiting
+  const openJoin = useCallback(
+    (name: string) => {
+      if (!client.nodeToken) return
+      act(
+        client.nodeToken().then(({ token, endpoints }) => {
+          setJoinInfo({ node: name, token, endpoints })
+        }),
+      )
+    },
+    [client],
+  )
+
   if (!snapshot.synced) {
     return (
       <div className="flex flex-col gap-4">
@@ -134,6 +147,7 @@ export default function TopologyPage() {
                     node={node}
                     layout={nl}
                     count={(byNode.get(node.metadata.name) ?? []).length}
+                    onJoin={client.nodeToken ? openJoin : undefined}
                   />
                 ) : null
               })}

@@ -43,3 +43,4 @@ Each record gets one line. The track column says where a decision came from: the
 | [0037](0037-revision-pinned-deletes.md)             | Deletes carry the revision they acted on                     | build  | accepted                                                         |
 | [0038](0038-releases-carry-the-join-path.md)        | Real machines join from GitHub Releases, donor image on the wire | build | accepted                                                        |
 | [0039](0039-chatty-apps-deterministic-probers.md)   | Demo apps chatter, verify gates run their own probers | build | accepted                                                        |
+| [0040](0040-one-click-local-joins.md)              | The facade starts local agents for one-click joins | build | accepted                                                        |

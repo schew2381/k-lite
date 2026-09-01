@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -28,6 +29,8 @@ func main() {
 	caPath := flag.String("ca", "", "cluster CA certificate (default KLITE_CA, then ~/.klite/server/tls/ca.crt)")
 	token := flag.String("token", "", "admin bearer token (default KLITE_TOKEN, then ~/.klite/server/token)")
 	insecureSkip := flag.Bool("insecure", false, "skip TLS verification of klited")
+	agentBin := flag.String("agent-bin", "bin/klite-agent", "klite-agent binary for one-click local joins (empty turns the route off)")
+	agentDir := flag.String("agent-dir", "", "spawned agent logs and pidfiles (default KLITE_DEV_DIR, then ~/.klite/dev)")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -36,13 +39,29 @@ func main() {
 		slog.Error("klite-facade exited", "err", err)
 		os.Exit(1)
 	}
-	if err := run(*listen, facade.SplitEndpoints(*cluster), *uiDir, *dev, creds); err != nil {
+	if err := run(*listen, facade.SplitEndpoints(*cluster), *uiDir, *dev, creds, *agentBin, agentDirOrDefault(*agentDir)); err != nil {
 		slog.Error("klite-facade exited", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run(listen string, endpoints []string, uiDir string, dev bool, creds *facade.Creds) error {
+// agentDirOrDefault resolves where spawned agents log: the flag, then
+// KLITE_DEV_DIR, then dev-up's ~/.klite/dev.
+func agentDirOrDefault(dir string) string {
+	if dir != "" {
+		return dir
+	}
+	if env := os.Getenv("KLITE_DEV_DIR"); env != "" {
+		return env
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".klite-dev"
+	}
+	return filepath.Join(home, ".klite", "dev")
+}
+
+func run(listen string, endpoints []string, uiDir string, dev bool, creds *facade.Creds, agentBin, agentDir string) error {
 	if len(endpoints) == 0 {
 		return errors.New("--cluster must name at least one klited address")
 	}
@@ -55,9 +74,15 @@ func run(listen string, endpoints []string, uiDir string, dev bool, creds *facad
 	}
 	defer conn.Close()
 
+	api := facade.New(client, endpoints, uiDir, dev, creds)
+	if agentBin != "" {
+		if abs, err := filepath.Abs(agentBin); err == nil {
+			api.EnableLocalJoin(abs, agentDir)
+		}
+	}
 	srv := &http.Server{
 		Addr:              listen,
-		Handler:           facade.New(client, endpoints, uiDir, dev, creds).Handler(),
+		Handler:           api.Handler(),
 		ReadHeaderTimeout: 5 * time.Second,
 		// No write timeout: watch and log streams stay open indefinitely.
 	}

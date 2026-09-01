@@ -40,6 +40,7 @@ export interface KliteClient {
   // Live only: mint a join token plus the klited endpoints a new machine
   // dials. The mock joins nodes instantly, so it has no use for one.
   nodeToken?(): Promise<{ token: string; endpoints: string[] }>
+  joinNode?(name: string): Promise<{ ok: boolean; pid: number; log: string }>
 
   policyCheck(from: string, to: string): Promise<PolicyVerdict>
   topology(): Promise<Topology>

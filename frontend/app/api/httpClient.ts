@@ -38,6 +38,10 @@
 //                                      first step of a drain.
 // GET    /api/nodetoken                → {"token", "endpoints"} for joining a
 //                                      new machine with klite-agent
+// POST   /api/nodes/{name}/join        → {"ok","pid","log"}. The facade
+//                                      starts klite-agent on its own machine,
+//                                      making the dialog's "this machine"
+//                                      path one click (ADR 0040)
 //
 // Not served yet: GET /api/traffic (ADR 0024's feed). watchTraffic degrades
 // to the rail's waiting state.
@@ -147,6 +151,10 @@ export class HttpClient implements KliteClient {
 
   async nodeToken(): Promise<{ token: string; endpoints: string[] }> {
     return this.json('/api/nodetoken')
+  }
+
+  async joinNode(name: string): Promise<{ ok: boolean; pid: number; log: string }> {
+    return this.json(`/api/nodes/${name}/join`, { method: 'POST' })
   }
 
   // list-then-watch: the Watch RPC sends changes only, so the bootstrap lists

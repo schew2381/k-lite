@@ -69,7 +69,17 @@ function SubBox({
   )
 }
 
-export function NodeCard({ node, layout, count }: { node: NodeObj; layout: NodeLayout; count: number }) {
+export function NodeCard({
+  node,
+  layout,
+  count,
+  onJoin,
+}: {
+  node: NodeObj
+  layout: NodeLayout
+  count: number
+  onJoin?: (node: string) => void
+}) {
   const client = useClient()
   const snapshot = useSnapshot()
   const [inspecting, setInspecting] = useState(false)
@@ -133,6 +143,11 @@ export function NodeCard({ node, layout, count }: { node: NodeObj; layout: NodeL
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuGroup>
+                {onJoin && phase !== 'Ready' && (
+                  <DropdownMenuItem data-testid="menu-join" onClick={() => onJoin(name)}>
+                    Join…
+                  </DropdownMenuItem>
+                )}
                 {cordoned && client.can.uncordon && (
                   <DropdownMenuItem onClick={() => cordon(false)}>Uncordon</DropdownMenuItem>
                 )}
