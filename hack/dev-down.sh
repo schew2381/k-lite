@@ -73,8 +73,8 @@ if [[ "$ALL" == 1 ]]; then
   # A cluster is its state: records in etcd, the CA and admin token in
   # ~/.klite/server, node identities in ~/.klite/agent. Leaving any of them
   # behind means the next dev-up resumes the old cluster (stale records,
-  # stale indexes) instead of starting a new one, so --all removes all
-  # three — scoped to this profile's nodes for the identity dirs.
+  # stale indexes) instead of starting a new one. So --all removes all
+  # three, scoping the identity dirs to this profile's nodes.
   echo "removing cluster identity (CA, admin token, node identities)"
   rm -rf "$HOME/.klite/server"
   for n in "${nodes[@]}"; do rm -rf "$HOME/.klite/agent/$n"; done

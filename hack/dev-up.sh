@@ -192,7 +192,7 @@ A_INST="$("$KLITE" get instances 2>/dev/null | awk 'NR>1 && $2=="a" {print $1; e
 A_INST="${A_INST:-<instance>}"
 echo
 echo "playground is up"
-[[ -n "$BOARD_URL" ]] && echo "board: $BOARD_URL  (loopback only; LAN viewing: cd frontend && bun run dev:lan)"
+[[ -n "$BOARD_URL" ]] && echo "board: $BOARD_URL  (loopback only. LAN viewing: cd frontend && bun run dev:lan)"
 echo
 echo "processes:"
 echo "  klited      pid $(cat "$KLITED_PIDFILE")  127.0.0.1:$KLITED_PORT  log $KLITED_LOG"
