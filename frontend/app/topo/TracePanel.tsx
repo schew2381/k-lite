@@ -12,7 +12,7 @@ import { traceStore, useActiveTrace } from '@/store/traceStore'
 import type { FlowMode } from '@/topo/flow'
 import { buildTrace } from '@/topo/trace'
 
-const REDUCED_STEP_MS = 3000
+const REDUCED_STEP_MS = 2000
 const LIVE_REFRESH_MS = 1200 // how often the live panel swaps to a newer call
 
 // Reduced-motion drive: no dot layer runs, so traces advance on a timer here.

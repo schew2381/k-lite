@@ -25,7 +25,7 @@ interface Pace {
   shortHop: number
 }
 const PACE: Record<FlowMode, Pace> = {
-  traced: { pause: 4000, stepTravel: 2200, settle: 1400, travel: 1200, shortHop: 500 },
+  traced: { pause: 2600, stepTravel: 1500, settle: 900, travel: 900, shortHop: 350 },
   live: { pause: 200, stepTravel: 360, settle: 0, travel: 360, shortHop: 160 },
 }
 
@@ -57,9 +57,9 @@ interface Flight {
   step: SVGTextElement | null // "3. dial 10.44.64.7:8080", traced flow only
 }
 
-// trapezoidal velocity: ramp to full speed over the first 15% of the flight,
-// cruise, brake over the last 15% — quick off the mark, no floaty landing
-const RAMP = 0.15
+// trapezoidal velocity: ramp to full speed over the first 8% of the flight,
+// cruise, brake over the last 8% — quick off the mark, no floaty landing
+const RAMP = 0.08
 function easeTravel(k: number): number {
   const s = 1 / (1 - RAMP)
   if (k < RAMP) return ((k * k) / (2 * RAMP)) * s
