@@ -293,8 +293,9 @@ patch_drain() { # patch_drain <src> <dst>
 for app in a-client b-whoami c-whoami d-web; do
   patch_drain "examples/apps/$app.yaml" "$DEV_DIR/apps/$app.yaml"
 done
-# d seeds at 3 of its resting 4, so the scale beat can land the resting
-# shape live. Replicas sit outside the template, so the hash is untouched.
+# d seeds at 3, one short of its resting 4, so the scale beat lands the
+# final shape live. Replicas, like the drain knobs above, sit outside
+# the template and leave the hash untouched.
 awk '{sub(/^  replicas: 4$/, "  replicas: 3"); print}' "$DEV_DIR/apps/d-web.yaml" > "$DEV_DIR/apps/d-web-seed.yaml"
 mv "$DEV_DIR/apps/d-web-seed.yaml" "$DEV_DIR/apps/d-web.yaml"
 for app in a-client b-whoami c-whoami d-web; do
