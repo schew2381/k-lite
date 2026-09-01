@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Checks M8 end to end on the canonical stack (klited :7443, etcd 2379/81/83,
-# nodes node-1..3): token mint, wrong-token and tampered-pin rejections, a
-# fresh-state mTLS join with on-disk proof, Envoy's TLS xDS stream, the
-# admin-port lockdown, klited failover for agents, uncordon, and a WAN-shaped
-# join against this machine's LAN address. Leaves etcd, the klite0 network,
-# images, and ~/.klite/server in place.
+# nodes node-1..3). In run order:
+#   auth        token mint, wrong-token and tampered-pin rejections
+#   join        a fresh-state mTLS join with on-disk proof
+#   data plane  Envoy's TLS xDS stream, the admin-port lockdown
+#   failover    agents ride out a klited SIGKILL
+#   lifecycle   uncordon, then a WAN-shaped join on this machine's LAN address
+# Leaves etcd, the klite0 network, images, and ~/.klite/server in place.
 set -u
 
 cd "$(dirname "$0")/.."
@@ -39,7 +41,7 @@ wait_for() { # wait_for <seconds> <fn> [args...]
   return 1
 }
 
-my_docker_rm() { # canonical nodes plus this script's extras; other stacks untouched
+my_docker_rm() { # canonical nodes plus this script's extras, other stacks untouched
   local n
   for n in "${NODES[@]}" node-wan; do
     docker ps -aq --filter "label=io.klite.node=$n" | xargs docker rm -f >/dev/null 2>&1
@@ -114,7 +116,7 @@ docker image inspect alpine:3.20 >/dev/null 2>&1 || docker pull alpine:3.20 >/de
 
 # ============================================================
 STEP=1-boot
-# A binds all interfaces so the WAN-shaped join in step 9 can reach it; B is
+# A binds all interfaces so the WAN-shaped join in step 9 can reach it. B is
 # the loopback standby both CLI and agents fail over to.
 "$BIN/klited" --listen 0.0.0.0:7443 >"$TMP/klited-a.log" 2>&1 &
 KLITED_A_PID=$!
@@ -148,7 +150,7 @@ grep -q "admin token" "$TMP/badtoken.err" \
 KLITE_CA=/nonexistent "$KLITE" --server "$BOTH" get nodes >/dev/null 2>&1 \
   && die "CLI dialed without any CA to verify against"
 KLITE_CA=/nonexistent "$KLITE" --server "$BOTH" --insecure get nodes >/dev/null 2>&1 \
-  && pass "CA required by default; --insecure is the explicit escape hatch" \
+  && pass "CA required by default, with --insecure as the explicit escape hatch" \
   || die "--insecure escape hatch broken"
 
 # ============================================================
@@ -268,7 +270,7 @@ STEP=8-klited-failover
 B_INSTANCES="$("$KLITE" --server "$EP_B" get instances | awk '$2=="b"' | wc -l | tr -d ' ')"
 [[ "$B_INSTANCES" == 2 ]] || die "expected b at 2 before the failover scale"
 kill -9 "$KLITED_A_PID" || die "SIGKILL klited A"
-info "SIGKILLed klited A; agents' streams must resume on B"
+info "SIGKILLed klited A, so agents' streams must resume on B"
 T0=$(date +%s)
 DIP=""
 for _ in $(seq 1 15); do
@@ -310,7 +312,7 @@ wait_for 60 on_node3 && pass "new instances scheduled onto the uncordoned node" 
 STEP=10-wan-join
 WAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)"
 if [[ -z "$WAN_IP" ]]; then
-  info "no en0/en1 address; skipping the WAN-shaped join (needs a LAN interface)"
+  info "no en0/en1 address, skipping the WAN-shaped join (needs a LAN interface)"
 else
   printf 'apiVersion: klite/v1\nkind: Node\nmetadata:\n  name: node-wan\n  labels:\n    zone: wan\nspec:\n  maxInstances: 8\n' \
     | "$KLITE" --server "$BOTH" apply -f - >/dev/null || die "apply node-wan"

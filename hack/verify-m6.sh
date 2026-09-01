@@ -17,17 +17,18 @@
 # Isolation on the shared Docker daemon needs two seams beyond names and ports,
 # because other stacks (canonical node-1..3, m7-1..3) share the klite0 bridge:
 #
-#   1. Node indexes. Register hands out the smallest free index per cluster, so
-#      a fresh etcd repeats 1, 2, ... — the same donor IPs (10.44.0.11+) and
-#      host admin ports (19001+/19501+) other stacks hold, and a colliding
-#      agent EVICTS the other stack's donor (evictNetSquatters matches on IP).
+#   1. Node indexes. Register hands out the smallest free index per cluster,
+#      so a fresh etcd repeats 1, 2, ..., which are the same donor IPs
+#      (10.44.0.11+) and host admin ports (19001+/19501+) other stacks hold.
+#      A colliding agent EVICTS the other stack's donor (evictNetSquatters
+#      matches on IP).
 #      Register keeps a pre-set status.nodeIndex, so this script picks free
 #      indexes (8+) and writes them into the node objects in etcd before any
 #      agent registers.
 #
 #   2. VIPs. The allocator hands out first-free from 10.44.64.1 per cluster,
-#      and every donor binds its VIPs on the shared bridge — two clusters
-#      answering ARP for the same address cross-wires their data planes. The
+#      and every donor binds its VIPs on the shared bridge, so two clusters
+#      answering ARP for the same address cross-wire their data planes. The
 #      allocator never rewrites an existing allocation, so after the services
 #      land this script rewrites its allocations to a distant slice
 #      (10.44.96.1-8) before any agent starts binding.
@@ -77,7 +78,7 @@ teardown() {
     ids=$(docker ps -aq --filter "label=io.klite.node=$n")
     [ -n "$ids" ] && echo "$ids" | xargs docker rm -f >/dev/null 2>&1
   done
-  # Containers are named klite.<node>.<x>; this catches m6 leftovers that
+  # Containers are named klite.<node>.<x>, so this catches m6 leftovers that
   # predate labels without touching node-* or m7-*.
   ids=$(docker ps -aq --filter "name=klite.m6-")
   [ -n "$ids" ] && echo "$ids" | xargs docker rm -f >/dev/null 2>&1
@@ -102,8 +103,9 @@ etcd_get() { docker exec etcd-m6-1 etcdctl get "$1" --print-value-only 2>/dev/nu
 etcd_put() { docker exec etcd-m6-1 etcdctl put "$1" "$2" >/dev/null 2>&1; }
 
 # inject_node_index <node> <idx>: set status.nodeIndex on the stored node
-# object so Register keeps it instead of assigning first-free. Plain
-# read-modify-write; the verify-and-retry loop absorbs a racing controller CAS.
+# object so Register keeps it instead of assigning first-free. This is a plain
+# read-modify-write, and the verify-and-retry loop absorbs a racing controller
+# CAS.
 inject_node_index() {
   local node=$1 idx=$2 key="/klite/v1/nodes/$1" val new back
   for _ in 1 2 3 4 5; do
@@ -193,7 +195,7 @@ seg_ok() { # <line> <target> <allowed|denied>
 }
 
 # pair_is <from> <to> <allowed|denied>: the client's last two log lines both
-# show the wanted state — one-second loop period, so this spans ~2s of traffic.
+# show the wanted state (one-second loop period, so this spans ~2s of traffic).
 pair_is() {
   local inst lines n line
   inst=$(client_inst "$1")
@@ -256,15 +258,15 @@ rm -f "$WORK"/agent-m6-*.pid "$WORK"/klited.pid "$WORK"/*.log
 
 for p in 6443 5379 5381 5383; do
   if lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; then
-    die "port $p is already in use; the m6 stack needs it free"
+    die "port $p is already in use, and the m6 stack needs it free"
   fi
 done
 pass "m6 control-plane ports free (6443 5379 5381 5383)"
 
 # Pick two node indexes whose donor host ports (19000+i, 19500+i), donor IPs
-# (10.44.0.<10+i>), and M9 ingress slices (20000+32*(i-1) .. +31, ADR 0024 —
+# (10.44.0.<10+i>), and M9 ingress slices (20000+32*(i-1) .. +31, ADR 0034,
 # donors publish the whole slice at creation) are unclaimed. Other stacks
-# hold 1..3; start at 8.
+# hold 1..3, so start at 8.
 ingress_slice_busy() { # ingress_slice_busy <index>
   local lo=$((20000 + 32 * ($1 - 1))) p
   for p in $(seq "$lo" $((lo + 31))); do
@@ -290,7 +292,7 @@ build_set() { (cd "$1" && go build -o "$BIN/klited" ./cmd/klited && go build -o 
 if [ "${M6_TREE:-0}" = 1 ] && build_set "$REPO" >"$WORK/build.log" 2>&1; then
   pass "built klited, klite, klite-agent into $BIN from the working tree (M6_TREE=1)"
 else
-  [ "${M6_TREE:-0}" = 1 ] && info "working tree build failed; using committed HEAD instead"
+  [ "${M6_TREE:-0}" = 1 ] && info "working tree build failed, using committed HEAD instead"
   rm -rf "$WORK/src" && mkdir -p "$WORK/src"
   git -C "$REPO" archive HEAD | tar -x -C "$WORK/src" || die "git archive HEAD"
   build_set "$WORK/src" >"$WORK/build.log" 2>&1 || die "committed HEAD does not build (see $WORK/build.log)"
@@ -309,7 +311,7 @@ if docker network inspect klite0 >/dev/null 2>&1; then
   [ -z "$RESPONDER" ] || die "VIP slice $VIP_SLICE_PREFIX.1-8 already answers on klite0: $RESPONDER"
   pass "VIP slice $VIP_SLICE_PREFIX.1-8 silent on klite0"
 else
-  info "klite0 does not exist yet; agents will create it"
+  info "klite0 does not exist yet, agents will create it"
 fi
 
 # Snapshot other stacks' infra so the end of the run can show they survived.
@@ -334,7 +336,7 @@ for k in nodes workloads instances networkpolicies vipallocations; do
   ROWS=$((ROWS + $("$KLITE" get "$k" 2>/dev/null | tail -n +2 | grep -c .)))
 done
 [ "$ROWS" = 0 ] && pass "fresh etcd store is empty" \
-  || die "fresh store already holds $ROWS object(s); teardown is leaking state"
+  || die "fresh store already holds $ROWS object(s), so teardown is leaking state"
 
 "$KLITE" apply -f - >/dev/null <<'EOF' || die "apply node YAMLs"
 apiVersion: klite/v1
@@ -422,7 +424,7 @@ for s in a b c d; do
     rewrite_vip "$s" "$node" "$VIP_SLICE_PREFIX.$N" || die "rewrite VIP for $s.$node"
   done
 done
-sleep 1 # controller tick; it must not fight the rewrite
+sleep 1 # controller tick, which must not fight the rewrite
 N=0
 for s in a b c d; do
   for node in $NODES; do
@@ -439,7 +441,7 @@ wait_for 20 nodes_ready && pass "2 nodes Ready" || die "2 nodes Ready"
 
 node_index_is m6-1 "$IDX1" && node_index_is m6-2 "$IDX2" \
   && pass "Register kept the pre-seeded indexes" \
-  || die "Register reassigned node indexes; isolation is broken, aborting"
+  || die "Register reassigned node indexes, so isolation is broken. Aborting"
 
 wait_for 60 infra_up \
   && pass "infra pods up (klite.m6-*.net + klite.m6-*.envoy)" || die "infra pods up"
@@ -535,7 +537,7 @@ D_INST="" # set when d lands in step 6
 A_CTR="klite.$A_NODE.$A_INST"
 
 # Scenario 1: default allow on both planes, and DNS already answers from the
-# rewritten VIP slice — proof the surgery reached the data plane.
+# rewritten VIP slice, proof the surgery reached the data plane.
 assert_pair a b allowed 45
 assert_pair a c allowed 45
 NSLOOKUP=$(docker exec "$A_CTR" nslookup b.svc.klite 2>&1)
@@ -552,7 +554,7 @@ echo "$OUT" | grep -q "default allow" \
 STEP=5-deny
 "$KLITE" apply -f examples/policies/deny-a-to-c.yaml >/dev/null \
   || die "apply deny-a-to-c"
-assert_pair a c denied 10   # scenario 2 wants ~5s; budget 10 with the settle time reported
+assert_pair a c denied 10   # scenario 2 wants ~5s, budget 10 with the settle time reported
 DENY_LAG=$LAST_WAIT_S
 assert_pair a b allowed 10  # unrelated pair keeps flowing
 
@@ -561,7 +563,7 @@ echo "$OUT" | grep -q "deny-a-to-c" \
   && pass "denial names the policy: $OUT" \
   || { echo "$OUT"; die "policy check a c names deny-a-to-c"; }
 
-# ADR 0017: existence stays public — the name resolves, the connection resets.
+# ADR 0017: existence stays public. The name resolves, the connection resets.
 NSLOOKUP=$(docker exec "$A_CTR" nslookup c.svc.klite 2>&1)
 echo "$NSLOOKUP" | grep -q "Address: $VIP_SLICE_PREFIX\." \
   && pass "DNS for c still resolves from a's container while denied (ADR 0017)" \
@@ -607,7 +609,7 @@ D_INST=$("$KLITE" get instances | awk '$2=="d" {print $1}' | head -1)
 [ -n "$D_INST" ] || die "resolve d's instance"
 
 assert_pair d b denied 30  # allowlist mode shuts d out
-assert_pair d c allowed 30 # c is not allowlisted; default allow for d
+assert_pair d c allowed 30 # c is not allowlisted, so default allow holds for d
 OUT=$("$KLITE" policy check d b 2>&1)
 echo "$OUT" | grep -q "allowlist" \
   && pass "d -> b denial explains allowlist mode: $OUT" \
@@ -622,7 +624,7 @@ STEP=7-except
 sleep 3 # let the new policy reach Envoy before sampling
 assert_pair a b allowed 10
 sleep 2 # and stay flowing: rules out sampling lines that predate the policy
-pair_is a b allowed || die "a -> b stopped flowing once lockdown-a settled; except list broken"
+pair_is a b allowed || die "a -> b stopped flowing once lockdown-a settled, so the except list is broken"
 pass "a -> b still flowing 5s after lockdown-a (except list holds)"
 assert_pair a c denied 10
 assert_pair d b denied 10  # untouched by lockdown-a: still allowlist-shut

@@ -26,7 +26,7 @@ die()  { echo "FAIL: $1"; exit 1; }
 WARNED=0
 warn() { echo "WARN (informational): $1"; WARNED=1; }
 
-my_docker_rm() { # canonical nodes only; other stacks share the daemon
+my_docker_rm() { # canonical nodes only, since other stacks share the daemon
   for n in "${NODES[@]}"; do
     docker ps -aq --filter "label=io.klite.node=$n" | xargs docker rm -f >/dev/null 2>&1
   done
@@ -153,8 +153,8 @@ wait_for 60 infra_up \
   && pass "infra pods up on all nodes" || die "infra pods up on all nodes"
 
 # --- workloads a, b, c with fast drain knobs ----------------------------------
-# The example apps plus the 4s/4s drain knobs (ADR 0010: demo pace lives in
-# YAML), applied once so every instance is born with the fast drains.
+# The example apps get the 4s/4s drain knobs (ADR 0010: demo pace lives in
+# YAML) and are applied once, so every instance is born with the fast drains.
 for app in a-client b-whoami c-whoami; do
   patch_drain "examples/apps/$app.yaml" "$TMP/${app}-fast.yaml"
   "$KLITE" apply -f "$TMP/${app}-fast.yaml" >/dev/null || die "apply ${app}-fast.yaml"
@@ -331,7 +331,7 @@ echo "INFO: c-request failures during the fallback dip: $((C_FAILS1 - C_FAILS0))
 
 echo
 if [[ "$WARNED" == 1 ]]; then
-  echo "verify-m5: required steps passed; informational fallback step had warnings"
+  echo "verify-m5: required steps passed (informational fallback step had warnings)"
 else
   echo "verify-m5: all steps passed (etcd, klite0, and images left in place)"
 fi

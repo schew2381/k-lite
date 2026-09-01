@@ -1,9 +1,21 @@
 #!/usr/bin/env bash
-# The k-lite demo, end to end on the canonical stack (klited :7443/:7445,
-# etcd :2379/81/83, nodes node-1..3): fresh state, token-then-mTLS joins,
-# discovery, a live scale, a hitless rollout, policy enforcement both planes,
-# a node drain, a leader kill, the TLS proofs, and the live web board.
-# PASS/FAIL gated like the verify scripts, paced for watching.
+# The k-lite demo runs end to end on the canonical stack (klited :7443/:7445,
+# etcd :2379/81/83, nodes node-1..3). It gates PASS/FAIL like the verify
+# scripts and paces itself for watching.
+#
+# Beats, in order:
+#   wipe        fresh store, fresh CA, fresh identities
+#   boot        etcd trio plus two stateless klited replicas
+#   join        three nodes trade a token for an mTLS identity
+#   apps        a (client loop), b and c (web) go Ready
+#   discovery   a finds b by name through kdns and the VIP
+#   scale       c grows 2 -> 3 live, landing the resting shape
+#   rollout     every b replaced, request loop provably clean
+#   policy      deny a -> c on both planes, then restore
+#   drain       a node empties surge-first, stream on screen
+#   leader kill SIGKILL mid-scale, the survivor converges it
+#   security    TLS 1.3 chain, ingress allocations, plaintext dies
+#   finale      facade plus Vite open the board in live mode
 #
 # The demo leaves everything running so the audience can poke at it. Tear
 # down with the cheat sheet it prints at the end (or hack/dev-down.sh --all).
@@ -142,7 +154,7 @@ done
 rm -rf "$SRV_DIR" "$AGT_DIR" "$DEV_DIR"
 rm -rf "$HOME/.klite/etcd/etcd-1" "$HOME/.klite/etcd/etcd-2" "$HOME/.klite/etcd/etcd-3"
 mkdir -p "$DEV_DIR"
-pass "previous playgrounds torn down; ~/.klite/{server,agent,dev} and etcd data gone"
+pass "previous playgrounds torn down, ~/.klite/{server,agent,dev} and etcd data gone"
 
 kill_port 7080 # a stale facade would shadow the one we launch at the end
 kill_port 5173 # a stale Vite would grab the port and serve an old bundle
@@ -192,7 +204,7 @@ TOKEN="$("$KLITE" node token)" || die "mint join token"
 echo "  \$ klite node token"
 echo "  $TOKEN"
 echo
-info "the K10<ca-sha256> prefix pins the CA; ::node:<secret> is the one-time join proof"
+info "the K10<ca-sha256> prefix pins the CA, and ::node:<secret> is the one-time join proof"
 pause
 
 for i in 1 2 3; do
@@ -459,7 +471,7 @@ wait_for 60 facade_up \
   || { tail -5 "$DEV_DIR/facade.log"; die "facade never answered on :7080 (see $DEV_DIR/facade.log)"; }
 
 kill_port 5173 # nothing may squat the port, or Vite silently takes 5174
-# NO_COLOR keeps the startup banner grep-able; the probe uses localhost
+# NO_COLOR keeps the startup banner grep-able. The probe uses localhost
 # because Vite may bind the IPv6 loopback only.
 (cd frontend && NO_COLOR=1 exec bun run dev) >"$DEV_DIR/vite.log" 2>&1 &
 echo $! >"$DEV_DIR/vite.pid"

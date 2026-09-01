@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Fresh-machine setup for k-lite dev: brew tools, colima, base images, go sanity.
-# Safe to re-run; prints what it skipped.
+# Safe to re-run, and it prints what it skipped.
 set -uo pipefail
 
 SKIPPED=()
@@ -9,7 +9,7 @@ say() { echo "==> $*"; }
 fail=0
 
 if ! command -v brew >/dev/null 2>&1; then
-  echo "bootstrap: Homebrew not found; install it first: https://brew.sh" >&2
+  echo "bootstrap: Homebrew not found. Install it first: https://brew.sh" >&2
   exit 1
 fi
 
@@ -53,7 +53,7 @@ if command -v go >/dev/null 2>&1; then
   want="$(awk '$1=="go" {print $2; exit}' "$(dirname "$0")/../go.mod" 2>/dev/null)"
   [[ -n "$want" ]] && echo "    go.mod wants go >= $want (toolchain auto-downloads if needed)"
 else
-  echo "bootstrap: go not on PATH after install; open a new shell or add \$(brew --prefix)/bin" >&2
+  echo "bootstrap: go not on PATH after install. Open a new shell or add \$(brew --prefix)/bin" >&2
   fail=1
 fi
 

@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Checks M9 end to end on the canonical stack (klited :7443, etcd 2379/81/83,
-# nodes node-1..3): donors publish per-index ingress ranges, klited allocates
-# per-endpoint ingress ports, cross-node traffic rides proxy-terminated mTLS
-# (ADR 0024) with handshake counters to prove it, plaintext and foreign-CA
-# dials die in the handshake, scale/rollout/drain stay hitless through the
-# ingress hop, a WAN-shaped advertise address keeps traffic flowing, and
-# killing an instance releases its port. Leaves etcd, the klite0 network,
-# images, and ~/.klite/server in place.
+# nodes node-1..3). In run order:
+#   ranges      donors publish per-index ingress ranges
+#   allocations klited allocates per-endpoint ingress ports
+#   mTLS        cross-node traffic rides proxy-terminated mTLS (ADR 0034),
+#               handshake counters rising to prove it
+#   rejections  plaintext and foreign-CA dials die in the handshake
+#   churn       scale, rollout, and drain stay hitless through the ingress hop
+#   WAN         a WAN-shaped advertise address keeps traffic flowing
+#   release     killing an instance releases its port
+# Leaves etcd, the klite0 network, images, and ~/.klite/server in place.
 set -u
 
 cd "$(dirname "$0")/.."
@@ -291,7 +294,7 @@ grep -q "Hostname:" "$TMP/nodecert.out" \
   && pass "node-cert client reached the pod through the same listener (positive control)" \
   || die "node-cert handshake did not reach the pod (see $TMP/nodecert.out)"
 RX2="$(estat "$A_NODE" "$RX_STAT")"
-[[ "$RX2" -gt "$RX1" ]] || die "positive control moved no bytes; the rx counter is not measuring"
+[[ "$RX2" -gt "$RX1" ]] || die "positive control moved no bytes, so the rx counter is not measuring"
 
 # ============================================================
 STEP=7-churn-hitless
@@ -305,9 +308,9 @@ b3() { counts_ready 3; }
 wait_for 60 b3 && pass "scale b 2->3 converged" || die "scale b to 3 converged"
 
 # Rollout: template change (extra env var) drives the surge-first replace.
-# Applied over the fast-drain copy so the knobs survive, with the replica
-# count rewritten to 3 — apply lays the whole spec over the stored one, and
-# the file's replicas: 2 would silently undo the scale step.
+# It's applied over the fast-drain copy so the knobs survive, with the
+# replica count rewritten to 3, because apply lays the whole spec over the
+# stored one and the file's replicas: 2 would silently undo the scale step.
 B_BEFORE="$("$KLITE" get instances | awk '$2=="b" {print $1}' | sort)"
 awk '{sub(/^  replicas: 2$/, "  replicas: 3"); print}
      /value: b$/ {print "          - name: M9_ROLLOUT"; print "            value: \"1\""}' \
@@ -341,7 +344,7 @@ FAILS="$(failed_since "$MARKER")"
 STEP=8-wan
 WAN_IP="$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)"
 if [[ -z "$WAN_IP" ]]; then
-  info "no en0/en1 address; skipping the WAN-shaped advertise (needs a LAN interface)"
+  info "no en0/en1 address, skipping the WAN-shaped advertise (needs a LAN interface)"
 else
   WAN_NODE="$("$KLITE" get instances | awk -v an="$A_NODE" '$2=="b" && $3!=an && $4=="Ready" {print $3}' | head -1)"
   [[ -n "$WAN_NODE" ]] || die "no remote b node for the WAN step"

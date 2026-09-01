@@ -7,13 +7,21 @@
 #   etcd members      etcd-m7-1..3 on 127.0.0.1:4379/4381/4383, network klite-etcd-m7
 #   nodes             m7-1, m7-2, m7-3 (agent processes)
 #   workload          m7-web (traefik/whoami x4)
-# hack/etcd-up.sh has no port/name overrides, so the etcd trio is run inline
-# here with the same flags under m7 names.
+# The etcd trio runs inline rather than through hack/etcd-up.sh because this
+# harness wants no volume mount (see step 1), so docker rm -f guarantees a
+# fresh store.
 #
-# Steps: boot, baseline, kill-the-leader-during-scale-churn, CLI failover,
-# restart the dead klited, etcd member down (plus an informational quorum-loss
-# probe), agent kill and reschedule, rollout-resume-under-leader-kill (tree
-# builds only; the pinned ref predates M5 rollouts), and teardown.
+# Steps, in run order:
+#   boot           etcd trio, leader klited, standby klited
+#   baseline       m7-web at 4/4, spread across nodes
+#   leader-kill    SIGKILL the leader mid-scale-churn, measure takeover
+#   cli-failover   reads and writes ride the endpoint list
+#   restart        the dead klited returns as standby
+#   etcd chaos     one member down, then an informational quorum-loss probe
+#   agent kill     NotReady detection, reschedule, orphan cleanup
+#   rollout resume leader dies mid-rollout, the survivor finishes it
+#                  (tree builds only, since the pinned ref predates M5)
+#   teardown       everything m7-scoped removed
 # Exits nonzero on the first gating failure. KEEP_M7=1 skips teardown on exit.
 set -u
 
@@ -138,7 +146,7 @@ leader_state() {
   esac
 }
 
-# M8 trees join with a token and fail over across both klited replicas; the
+# M8 trees join with a token and fail over across both klited replicas. The
 # pinned pre-M8 ref knows neither flag nor endpoint lists, so agents pin to
 # the standby the harness never kills.
 start_agent() {
@@ -161,14 +169,14 @@ rm -f "$WORK"/agent-m7-*.pid "$WORK"/*.log
 
 for p in 9443 9445 4379 4381 4383; do
   if lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; then
-    die "port $p is already in use; the m7 stack needs it free"
+    die "port $p is already in use, and the m7 stack needs it free"
   fi
 done
 pass "m7 ports free (9443 9445 4379 4381 4383)"
 
 # Build from a pinned pre-M4 commit by default. M4 agents (0ef2c42+) start
 # infra pods with cluster-scoped STATIC addresses on the shared klite0
-# network (10.44.0.<10+index>) plus host admin ports 19000+i/19500+i; a
+# network (10.44.0.<10+index>) plus host admin ports 19000+i/19500+i. A
 # second cluster on the same Docker daemon collides with the canonical dev
 # cluster in both directions. Until that's per-cluster, chaos runs stay on the
 # pre-infra stack. Override with M7_REF=HEAD (dedicated daemon only) or
@@ -180,7 +188,7 @@ if [ "${M7_TREE:-0}" = 1 ] && build_set "$REPO" >"$WORK/build.log" 2>&1; then
   TREE_BUILD=1
   pass "built klited, klite, klite-agent from the working tree (M7_TREE=1)"
 else
-  [ "${M7_TREE:-0}" = 1 ] && info "working tree build failed; using M7_REF instead"
+  [ "${M7_TREE:-0}" = 1 ] && info "working tree build failed, using M7_REF instead"
   rm -rf "$WORK/src" && mkdir -p "$WORK/src"
   git -C "$REPO" archive "$M7_REF" | tar -x -C "$WORK/src" || die "git archive $M7_REF"
   build_set "$WORK/src" >"$WORK/build.log" 2>&1 || die "$M7_REF does not build (see $WORK/build.log)"
@@ -193,10 +201,10 @@ docker image inspect traefik/whoami:v1.10 >/dev/null 2>&1 || docker pull traefik
 STEP=1-boot
 docker network create "$ETCD_NET" >/dev/null 2>&1
 ETCD_CLUSTER="etcd-m7-1=http://etcd-m7-1:2380,etcd-m7-2=http://etcd-m7-2:2380,etcd-m7-3=http://etcd-m7-3:2380"
-# No volume mount, unlike etcd-up.sh: data lives in the container layer, so
-# docker rm -f guarantees a fresh store every run (a reused data dir would
-# silently resurrect the previous run's state) while stop/start in step 6
-# still keeps member data.
+# Unlike etcd-up.sh there is no volume mount: data lives in the container
+# layer, so docker rm -f guarantees a fresh store every run. A reused data
+# dir would silently resurrect the previous run's state, while stop/start in
+# step 6 still keeps member data.
 for i in 1 2 3; do
   port=$((4379 + (i - 1) * 2))
   docker run -d --name "etcd-m7-$i" --network "$ETCD_NET" \
@@ -233,7 +241,7 @@ for k in nodes workloads instances; do
   ROWS=$((ROWS + $("$KLITE" --server "$EP_A" get "$k" 2>/dev/null | tail -n +2 | grep -c .)))
 done
 [ "$ROWS" = 0 ] && pass "fresh etcd store is empty (no state leaked from earlier runs)" \
-  || die "fresh etcd store already holds $ROWS object(s); teardown is leaking state"
+  || die "fresh etcd store already holds $ROWS object(s), so teardown is leaking state"
 
 "$BIN/klited" --listen "$EP_B" --etcd "$ETCD_EPS" >"$LOG_B" 2>&1 &
 KLITED_B_PID=$!
@@ -277,16 +285,16 @@ pass "applied node YAMLs for m7-1 m7-2 m7-3"
 # Known gap, re-probed each run: klite-agent takes exactly one --server address
 # (grpc.NewClient rejects a comma list), so agents cannot fail over between
 # klited replicas. All agents therefore pin to the standby (B), which this
-# harness never kills; the leader kill in step 3 exercises controller failover.
+# harness never kills. The leader kill in step 3 exercises controller failover.
 "$BIN/klite-agent" --node m7-probe --server "$BOTH" >"$WORK/agent-probe.log" 2>&1 &
 PROBE_PID=$!
 disown
 sleep 2
 kill -9 "$PROBE_PID" 2>/dev/null
 if grep -q "too many colons in address" "$WORK/agent-probe.log"; then
-  info "confirmed: agent rejects multi-endpoint --server ('too many colons'); pinning agents to standby $EP_B"
+  info "confirmed: agent rejects multi-endpoint --server ('too many colons'), pinning agents to standby $EP_B"
 else
-  info "agent no longer rejects endpoint lists; consider pointing agents at $BOTH"
+  info "agent no longer rejects endpoint lists, so consider pointing agents at $BOTH"
 fi
 
 for n in $NODES; do start_agent "$n"; done
@@ -296,7 +304,7 @@ wait_for 20 all_nodes_ready && pass "3 nodes Ready" || die "3 nodes Ready"
 STEP=2-baseline
 # m7_web_yaml <WHOAMI_NAME value>: the workload spec. Tree builds add M5's
 # fast drain knobs (4s, outside the template hash) so step 8's rollout fits
-# its budget; the pinned pre-M5 ref predates the drain fields.
+# its budget. The pinned pre-M5 ref predates the drain fields.
 m7_web_yaml() {
   printf 'apiVersion: klite/v1\nkind: Workload\nmetadata:\n  name: m7-web\n  labels:\n    app: m7-web\nspec:\n'
   [ "$TREE_BUILD" = 1 ] && printf '  drain:\n    drainTimeoutSeconds: 4\n    terminationGraceSeconds: 4\n'
@@ -391,7 +399,7 @@ if "$KLITE" --server "$EP_A" get nodes >/dev/null 2>&1; then
 fi
 DEAD_S=$(( $(date +%s) - T0 ))
 [ "$DEAD_S" -le 20 ] \
-  && pass "get against the dead endpoint alone fails within its deadline (${DEAD_S}s; WaitForReady holds until the 15s timeout)" \
+  && pass "get against the dead endpoint alone fails within its deadline (${DEAD_S}s, WaitForReady holding until the 15s timeout)" \
   || die "get against the dead endpoint took ${DEAD_S}s (>20s) to fail"
 
 # ============================================================
@@ -464,8 +472,8 @@ recovered() { "$KLITE" --server "$BOTH" scale workload "$WL" --replicas 4 >/dev/
 wait_for 45 recovered && pass "recovered after quorum loss: writes work, 3 nodes Ready" \
   || die "recovered after quorum loss: writes work, 3 nodes Ready"
 # Quorum loss expires the leader's session, so both replicas end up standing
-# by until the stale election key's lease is revoked; controllers must come
-# back on their own.
+# by until the stale election key's lease is revoked, and controllers must
+# come back on their own.
 leader_back() { [ "$(leader_state "$LOG_A")" = leading ] || [ "$(leader_state "$LOG_B")" = leading ]; }
 wait_for 40 leader_back \
   && pass "controllers resumed: a leader re-established $(( $(date +%s) - T0 ))s after quorum restore" \

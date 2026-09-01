@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Checks M4 end to end: per-node infra pods (klite-net + Envoy), DNS + VIPs,
-# probe-gated READY, xDS-driven load balancing across nodes, policy check,
-# scale-out convergence, and instance-kill recovery. Leaves etcd, the klite0
-# network, and images in place.
+# Checks M4 end to end. In run order:
+#   infra      per-node infra pods (klite-net + Envoy)
+#   discovery  DNS answers with VIPs, probe-gated READY
+#   balancing  xDS-driven load balancing across nodes
+#   policy     klite policy check
+#   churn      scale-out convergence, instance-kill recovery
+# Leaves etcd, the klite0 network, and images in place.
 set -u
 
 cd "$(dirname "$0")/.."
@@ -127,7 +130,7 @@ wait_for 45 two_b_hostnames \
   && pass "a's logs alternate between 2 b hostnames within 30 lines" \
   || { "$KLITE" logs "$A_INST" --tail 30; die "a's logs alternate between 2 b hostnames"; }
 
-# whoami's Hostname is its container id (12 hex chars); map ids to nodes.
+# whoami's Hostname is its container id (12 hex chars), so map ids to nodes.
 CROSS=""
 while read -r cid cnode; do
   if [[ "$cnode" != "$A_NODE" ]] && b_hostnames_in_tail 30 | grep -q "^${cid}$"; then
@@ -153,8 +156,8 @@ echo "$DIG" | grep -Eq 'b\.svc\.klite\.\s+5\s+IN\s+A\s+10\.44\.' \
   || { echo "$DIG"; die "dig shows TTL 5 on b.svc.klite"; }
 
 # --- Envoy programmed over xDS ------------------------------------------------
-# The envoy image ships no curl; /dev/tcp against the shared-netns admin port
-# works with plain bash. The admin endpoint requires HTTP/1.1.
+# The envoy image ships no curl, so /dev/tcp against the shared-netns admin
+# port does the job in plain bash. The admin endpoint requires HTTP/1.1.
 DUMP="$(docker exec "klite.$A_NODE.envoy" bash -c \
   'exec 3<>/dev/tcp/127.0.0.1/9901 && printf "GET /config_dump HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 && cat <&3' 2>/dev/null)"
 echo "$DUMP" | grep -q '"svc/b"' \

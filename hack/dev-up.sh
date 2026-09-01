@@ -45,8 +45,8 @@ nodes_ready() {
 instances_running() {
   local rows
   rows="$("$KLITE" get instances 2>/dev/null | awk 'NR>1 && NF>0')"
-  # Ready is the steady phase once probes confirm (M4); Running covers apps
-  # without probe targets.
+  # Ready is the steady phase once probes confirm (M4), while Running covers
+  # apps without probe targets.
   [[ -n "$rows" ]] && [[ -z "$(awk '$4!="Running" && $4!="Ready"' <<<"$rows")" ]]
 }
 
@@ -62,16 +62,16 @@ if [[ -z "$SKIP_BUILD" ]]; then
   go build -o "$BIN/klite-agent" ./cmd/klite-agent
   if [[ -f build/klite-net.Dockerfile ]]; then
     say "building klite-net:dev image"
-    make net-image >/dev/null 2>&1 || echo "note: make net-image failed; continuing without it"
+    make net-image >/dev/null 2>&1 || echo "note: make net-image failed, continuing without it"
   fi
 else
-  say "KLITE_DEV_SKIP_BUILD set; using existing bin/ binaries"
+  say "KLITE_DEV_SKIP_BUILD set, using existing bin/ binaries"
   for b in klited klite klite-agent; do
     [[ -x "$BIN/$b" ]] || die "missing $BIN/$b (unset KLITE_DEV_SKIP_BUILD to build)"
   done
 fi
 docker image inspect klite-net:dev >/dev/null 2>&1 \
-  || echo "note: klite-net:dev image missing; per-node net/envoy infra is skipped (expected before M4 lands)"
+  || echo "note: klite-net:dev image missing, so per-node net/envoy infra is skipped (run make net-image to enable it)"
 
 mkdir -p "$DEV_DIR"
 
@@ -110,7 +110,7 @@ for n in "${NODES[@]}"; do
 done
 wait_for 30 nodes_ready || die "not all $KLITE_NODE_COUNT nodes Ready (try: $KLITE get nodes; logs in $DEV_DIR)"
 say "all $KLITE_NODE_COUNT nodes Ready"
-# A reused etcd store can carry cordons from a prior drain run; the
+# A reused etcd store can carry cordons from a prior drain run, and the
 # playground wants every declared node schedulable.
 for n in "${NODES[@]}"; do "$KLITE" uncordon "$n" >/dev/null 2>&1 || true; done
 
