@@ -60,6 +60,9 @@ type AgentConfig struct {
 	// default): the bottom of the per-node host ranges donors publish for
 	// cross-node mTLS ingress (ADR 0034).
 	IngressPortBase int32
+	// NetImage pins the klite-net image cluster-wide (ADR 0038). Empty lets
+	// each agent fall back to its compiled-in default, klite-net:dev.
+	NetImage string
 }
 
 // Agent serves AgentService, covering node registration, desired-state
@@ -244,6 +247,7 @@ func (a *Agent) netBootstrap(idx int32) *klitev1.NetBootstrap {
 		// must agree on the range, so only klited holds the default.
 		IngressPortBase:     controller.IngressPortBase(a.cfg.IngressPortBase),
 		IngressPortsPerNode: controller.IngressPortsPerNode,
+		NetImage:            a.cfg.NetImage,
 	}
 }
 

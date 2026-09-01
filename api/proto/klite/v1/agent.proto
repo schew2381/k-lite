@@ -41,6 +41,11 @@ message NetBootstrap {
   // arrive resolved; zero means the server predates M9 and no range exists.
   int32 ingress_port_base = 8;
   int32 ingress_ports_per_node = 9;
+  // Image the donor container runs, set by klited's --net-image so every
+  // node agrees on one version (ADR 0038). Empty keeps the agent's
+  // compiled-in default, klite-net:dev, which is what dev clusters and
+  // pre-M11 servers produce.
+  string net_image = 10;
 }
 
 message RegisterResponse {

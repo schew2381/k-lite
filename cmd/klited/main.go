@@ -54,6 +54,7 @@ type config struct {
 	envoyAdminPortBase int
 	infraIPBase        int
 	ingressPortBase    int
+	netImage           string
 }
 
 func main() {
@@ -67,6 +68,7 @@ func main() {
 	flag.IntVar(&cfg.envoyAdminPortBase, "envoy-admin-port-base", 0, "host port base for Envoy admin ports (default 19500); a second cluster on this machine must move it")
 	flag.IntVar(&cfg.infraIPBase, "infra-ip-base", 0, "last-octet base for donor addresses 10.44.0.<base+index> (default 10); a second cluster on this machine must move it")
 	flag.IntVar(&cfg.ingressPortBase, "ingress-port-base", 0, "host port base for per-node cross-node ingress ranges (default 20000, 32 ports per node index); a second cluster on this machine must move it")
+	flag.StringVar(&cfg.netImage, "net-image", "", "klite-net image every node's donor runs, e.g. ghcr.io/schew2381/klite-net:v0.1.0; empty keeps each agent's compiled-in default (klite-net:dev)")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -299,6 +301,7 @@ func run(cfg *config) error {
 		EnvoyAdminPortBase: int32(cfg.envoyAdminPortBase),
 		InfraIPBase:        int32(cfg.infraIPBase),
 		IngressPortBase:    int32(cfg.ingressPortBase),
+		NetImage:           cfg.netImage,
 	}))
 
 	var wg sync.WaitGroup

@@ -75,6 +75,34 @@ func TestNetContainerSpecPublishesIngressRange(t *testing.T) {
 	}
 }
 
+// The donor image rides NetBootstrap (ADR 0038): empty keeps the compiled-in
+// dev tag so old servers and dev clusters change nothing, a set value wins,
+// and a change moves the config hash so the donor recreates exactly once.
+func TestNetContainerSpecHonorsNetImage(t *testing.T) {
+	t.Parallel()
+	a := New(&Config{Node: "node-1"})
+	def := &klitev1.NetBootstrap{KliteNetIp: "10.44.0.11", NodeIndex: 1}
+	pinned := &klitev1.NetBootstrap{
+		KliteNetIp: "10.44.0.11", NodeIndex: 1,
+		NetImage: "ghcr.io/schew2381/klite-net:v0.1.0",
+	}
+
+	a.net = def
+	defSpec := a.netContainerSpec(def)
+	if defSpec.Image != "klite-net:dev" {
+		t.Fatalf("empty net_image gave %q, want the compiled-in default", defSpec.Image)
+	}
+
+	a.net = pinned
+	pinnedSpec := a.netContainerSpec(pinned)
+	if pinnedSpec.Image != "ghcr.io/schew2381/klite-net:v0.1.0" {
+		t.Fatalf("net_image ignored: %q", pinnedSpec.Image)
+	}
+	if defSpec.Labels[runtime.LabelConfigHash] == pinnedSpec.Labels[runtime.LabelConfigHash] {
+		t.Fatal("config hash must move with the image, forcing one donor recreate")
+	}
+}
+
 func TestEvictNetSquattersGuardsForeignClusters(t *testing.T) {
 	t.Parallel()
 	rt := newFakeRuntime()

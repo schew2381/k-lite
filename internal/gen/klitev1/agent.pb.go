@@ -158,8 +158,13 @@ type NetBootstrap struct {
 	// arrive resolved; zero means the server predates M9 and no range exists.
 	IngressPortBase     int32 `protobuf:"varint,8,opt,name=ingress_port_base,json=ingressPortBase,proto3" json:"ingress_port_base,omitempty"`
 	IngressPortsPerNode int32 `protobuf:"varint,9,opt,name=ingress_ports_per_node,json=ingressPortsPerNode,proto3" json:"ingress_ports_per_node,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Image the donor container runs, set by klited's --net-image so every
+	// node agrees on one version (ADR 0038). Empty keeps the agent's
+	// compiled-in default, klite-net:dev, which is what dev clusters and
+	// pre-M11 servers produce.
+	NetImage      string `protobuf:"bytes,10,opt,name=net_image,json=netImage,proto3" json:"net_image,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *NetBootstrap) Reset() {
@@ -253,6 +258,13 @@ func (x *NetBootstrap) GetIngressPortsPerNode() int32 {
 		return x.IngressPortsPerNode
 	}
 	return 0
+}
+
+func (x *NetBootstrap) GetNetImage() string {
+	if x != nil {
+		return x.NetImage
+	}
+	return ""
 }
 
 type RegisterResponse struct {
@@ -1504,7 +1516,7 @@ const file_klite_v1_agent_proto_rawDesc = "" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12#\n" +
 	"\rcluster_token\x18\x02 \x01(\tR\fclusterToken\x12\x17\n" +
 	"\acsr_pem\x18\x03 \x01(\fR\x06csrPem\x12+\n" +
-	"\x11advertise_address\x18\x04 \x01(\tR\x10advertiseAddress\"\xe6\x02\n" +
+	"\x11advertise_address\x18\x04 \x01(\tR\x10advertiseAddress\"\x83\x03\n" +
 	"\fNetBootstrap\x12\x16\n" +
 	"\x06subnet\x18\x01 \x01(\tR\x06subnet\x12 \n" +
 	"\fklite_net_ip\x18\x02 \x01(\tR\n" +
@@ -1517,7 +1529,9 @@ const file_klite_v1_agent_proto_rawDesc = "" +
 	"\x13net_admin_port_base\x18\x06 \x01(\x05R\x10netAdminPortBase\x121\n" +
 	"\x15envoy_admin_port_base\x18\a \x01(\x05R\x12envoyAdminPortBase\x12*\n" +
 	"\x11ingress_port_base\x18\b \x01(\x05R\x0fingressPortBase\x123\n" +
-	"\x16ingress_ports_per_node\x18\t \x01(\x05R\x13ingressPortsPerNode\"\x8d\x01\n" +
+	"\x16ingress_ports_per_node\x18\t \x01(\x05R\x13ingressPortsPerNode\x12\x1b\n" +
+	"\tnet_image\x18\n" +
+	" \x01(\tR\bnetImage\"\x8d\x01\n" +
 	"\x10RegisterResponse\x12\x1d\n" +
 	"\n" +
 	"node_token\x18\x01 \x01(\tR\tnodeToken\x12\x19\n" +

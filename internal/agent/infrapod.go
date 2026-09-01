@@ -23,8 +23,12 @@ import (
 // host-gateway hosts entry, published ports) rides the donor, because Docker
 // rejects those options alongside --network container:.
 const (
-	kliteNetImage = "klite-net:dev"
-	envoyImage    = "envoyproxy/envoy:v1.31.5"
+	// defaultKliteNetImage is what donors run when NetBootstrap carries no
+	// net_image: dev clusters, where `make net-image` loads this tag into
+	// the local daemon. klited's --net-image overrides it cluster-wide
+	// (ADR 0038).
+	defaultKliteNetImage = "klite-net:dev"
+	envoyImage           = "envoyproxy/envoy:v1.31.5"
 
 	// Host ports are derived from the node index so several agents share
 	// one machine without colliding: klite-net admin at base+i, Envoy
@@ -176,7 +180,7 @@ func (a *Agent) infraLabels(nb *klitev1.NetBootstrap, role string) map[string]st
 func (a *Agent) netContainerSpec(nb *klitev1.NetBootstrap) *runtime.InfraContainer {
 	spec := &runtime.InfraContainer{
 		Name:       a.netContainerName(),
-		Image:      kliteNetImage,
+		Image:      kliteNetImage(nb),
 		StaticIP:   nb.GetKliteNetIp(),
 		CapAdd:     []string{"NET_ADMIN"},
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
@@ -199,6 +203,17 @@ func (a *Agent) netContainerSpec(nb *klitev1.NetBootstrap) *runtime.InfraContain
 	}
 	spec.Labels[runtime.LabelConfigHash] = configHash(spec)
 	return spec
+}
+
+// kliteNetImage picks the donor's image: the server's cluster-wide pin when
+// NetBootstrap carries one, the compiled-in dev tag otherwise. The image is
+// part of the container spec, so a change moves the donor's config hash and
+// recreates it exactly once.
+func kliteNetImage(nb *klitev1.NetBootstrap) string {
+	if img := nb.GetNetImage(); img != "" {
+		return img
+	}
+	return defaultKliteNetImage
 }
 
 // ingressPortRange is the node's half-open published slice [lo, hi),

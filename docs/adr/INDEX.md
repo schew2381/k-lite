@@ -41,3 +41,4 @@ Each record gets one line. The track column says where a decision came from: the
 | [0035](0035-ingress-allocations-as-a-kind.md)       | Ingress ports are allocations, listeners follow allocations  | build  | accepted, outcome recorded                                       |
 | [0036](0036-dual-purpose-node-certs.md)             | Node certificates carry both TLS purposes                    | build  | accepted, outcome recorded                                       |
 | [0037](0037-revision-pinned-deletes.md)             | Deletes carry the revision they acted on                     | build  | accepted                                                         |
+| [0038](0038-releases-carry-the-join-path.md)        | Real machines join from GitHub Releases, donor image on the wire | build | accepted                                                        |
