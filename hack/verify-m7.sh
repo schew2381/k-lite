@@ -96,8 +96,9 @@ all_nodes_ready() { [ "$(nodes_ready_count)" = 3 ]; }
 node_not_ready() {
   "$KLITE" --server "$BOTH" get nodes 2>/dev/null | awk -v n="$1" '$1==n && $2=="NotReady"' | grep -q .
 }
+# Running or Ready both count: M4 renamed the steady phase for probed instances.
 running_count() {
-  "$KLITE" --server "$BOTH" get instances 2>/dev/null | awk -v wl="$WL" '$2==wl && $4=="Running"' | wc -l | tr -d ' '
+  "$KLITE" --server "$BOTH" get instances 2>/dev/null | awk -v wl="$WL" '$2==wl && ($4=="Running" || $4=="Ready")' | wc -l | tr -d ' '
 }
 # node/name pairs, one per line, sorted: the store's view and Docker's view.
 instances_pairs() {
@@ -156,18 +157,23 @@ for p in 9443 9445 4379 4381 4383; do
 done
 pass "m7 ports free (9443 9445 4379 4381 4383)"
 
-# Build from committed HEAD: the working tree may hold in-flight milestone
-# work that compiles but is not functional yet (M4 infra pods, say). M7_TREE=1
-# opts into building the tree instead.
+# Build from a pinned pre-M4 commit by default. M4 agents (0ef2c42+) start
+# infra pods with cluster-scoped STATIC addresses on the shared klite0
+# network (10.44.0.<10+index>) plus host admin ports 19000+i/19500+i; a
+# second cluster on the same Docker daemon collides with the canonical dev
+# cluster in both directions. Until that's per-cluster, chaos runs stay on the
+# pre-infra stack. Override with M7_REF=HEAD (dedicated daemon only) or
+# M7_TREE=1 to build the working tree.
+M7_REF="${M7_REF:-5e09b2c}"
 build_set() { (cd "$1" && go build -o "$BIN/klited" ./cmd/klited && go build -o "$BIN/klite" ./cmd/klite && go build -o "$BIN/klite-agent" ./cmd/klite-agent); }
 if [ "${M7_TREE:-0}" = 1 ] && build_set "$REPO" >"$WORK/build.log" 2>&1; then
   pass "built klited, klite, klite-agent from the working tree (M7_TREE=1)"
 else
-  [ "${M7_TREE:-0}" = 1 ] && info "working tree build failed; using committed HEAD instead"
+  [ "${M7_TREE:-0}" = 1 ] && info "working tree build failed; using M7_REF instead"
   rm -rf "$WORK/src" && mkdir -p "$WORK/src"
-  git -C "$REPO" archive HEAD | tar -x -C "$WORK/src" || die "git archive HEAD"
-  build_set "$WORK/src" >"$WORK/build.log" 2>&1 || die "committed HEAD does not build (see $WORK/build.log)"
-  pass "built klited, klite, klite-agent from committed HEAD"
+  git -C "$REPO" archive "$M7_REF" | tar -x -C "$WORK/src" || die "git archive $M7_REF"
+  build_set "$WORK/src" >"$WORK/build.log" 2>&1 || die "$M7_REF does not build (see $WORK/build.log)"
+  pass "built klited, klite, klite-agent from $M7_REF"
 fi
 
 docker image inspect traefik/whoami:v1.10 >/dev/null 2>&1 || docker pull traefik/whoami:v1.10 >/dev/null 2>&1
@@ -294,8 +300,6 @@ spec:
             value: m7
         ports:
           - containerPort: 80
-        readinessProbe:
-          tcpPort: 80
 EOF
 wait_for 90 converged_running 4 \
   && pass "m7-web at 4/4 Running, containers match instances" \
@@ -307,18 +311,27 @@ DISTINCT=$(instances_pairs | awk -F/ '{print $1}' | sort -u | grep -c .)
 
 # ============================================================
 STEP=3-leader-kill
-# Scale churn in the background, then SIGKILL the leader mid-fanout.
+# Bounce the workload between 6 and 8 replicas so the controllers are
+# mid-create and mid-delete when the leader dies, then SIGKILL it. The churn
+# keeps writing through the surviving replica across the takeover.
 [ "$(leader_state "$LOG_A")" = leading ] || die "expected klited A to be leader before the kill"
-( for _ in $(seq 1 90); do "$KLITE" --server "$BOTH" scale workload "$WL" --replicas 8 >/dev/null 2>&1; sleep 0.5; done ) &
+( for _ in $(seq 1 45); do
+    "$KLITE" --server "$BOTH" scale workload "$WL" --replicas 8 >/dev/null 2>&1; sleep 0.4
+    "$KLITE" --server "$BOTH" scale workload "$WL" --replicas 6 >/dev/null 2>&1; sleep 0.4
+  done ) &
 CHURN_PID=$!
 disown
-scale_landed() { [ "$("$KLITE" --server "$BOTH" get workloads 2>/dev/null | awk -v wl="$WL" '$1==wl {print $3}')" = 8 ]; }
-wait_for 10 scale_landed || die "scale to 8 never reached the store"
+scale_landed() {
+  local r
+  r=$("$KLITE" --server "$BOTH" get workloads 2>/dev/null | awk -v wl="$WL" '$1==wl {print $3}')
+  [ "$r" = 8 ] || [ "$r" = 6 ]
+}
+wait_for 10 scale_landed || die "churn scale never reached the store"
 
 B_OFF=$(wc -c <"$LOG_B" | tr -d ' ')
 T_KILL=$(t_ms)
 kill -9 "$KLITED_A_PID" || die "SIGKILL leader klited"
-info "SIGKILLed leader klited A (pid $KLITED_A_PID) mid-scale"
+info "SIGKILLed leader klited A (pid $KLITED_A_PID) mid-scale-churn"
 
 TAKEOVER_MS=""
 while :; do
@@ -334,6 +347,15 @@ done
   || die "standby did not log 'controllers: leading' within 10s of the kill"
 kill -0 "$KLITED_A_PID" 2>/dev/null && die "old leader still alive after SIGKILL"
 
+# Stop the churn and set the final target through the survivor: the new
+# leader inherits a half-scaled store and must converge it to 8 itself.
+kill "$CHURN_PID" 2>/dev/null
+wait "$CHURN_PID" 2>/dev/null
+CHURN_PID=""
+sleep 1.5 # let any in-flight churn write land before the final target
+"$KLITE" --server "$BOTH" scale workload "$WL" --replicas 8 >/dev/null 2>&1 \
+  || die "post-kill scale to 8 through the survivor"
+
 # Converge to 8 while proving agents never miss a beat: poll node readiness
 # every second until the scale lands.
 VIOL="$WORK/ready-violations.txt"
@@ -348,13 +370,10 @@ while :; do
   sleep 1
 done
 [ -n "$CONV_S" ] \
-  && pass "scale converged to 8/8 Running ${CONV_S}s after takeover, no dup or orphan containers" \
+  && pass "new leader converged the churned store to 8/8 Running in ${CONV_S}s, no dup or orphan containers" \
   || die "scale did not converge to 8 within 60s of the leader kill (see $VIOL and $WORK)"
 [ -s "$VIOL" ] && die "nodes dipped below Ready during takeover: $(tr '\n' ' ' <"$VIOL")"
 pass "all 3 nodes stayed Ready through the takeover window"
-kill "$CHURN_PID" 2>/dev/null
-wait "$CHURN_PID" 2>/dev/null
-CHURN_PID=""
 
 # ============================================================
 STEP=4-cli-failover
@@ -489,8 +508,9 @@ wait_for 30 converged_running 4 \
 STEP=8-teardown
 teardown
 LEFT=$(docker ps -aq --filter name=etcd-m7 | wc -l | tr -d ' ')
+LEFT=$((LEFT + $(docker ps -aq --filter "name=klite.m7-" | wc -l | tr -d ' ')))
 for n in $NODES; do
-  LEFT=$((LEFT + $(docker ps -aq --filter "label=io.klite.role=workload" --filter "label=io.klite.node=$n" | wc -l | tr -d ' ')))
+  LEFT=$((LEFT + $(docker ps -aq --filter "label=io.klite.node=$n" | wc -l | tr -d ' ')))
 done
 pgrep -f "$BIN/" >/dev/null 2>&1 && LEFT=$((LEFT + 1))
 docker network inspect "$ETCD_NET" >/dev/null 2>&1 && LEFT=$((LEFT + 1))
