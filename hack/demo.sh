@@ -467,9 +467,9 @@ grep -q 'denied' <<<"$OUT" && grep -q 'deny-a-to-c' <<<"$OUT" \
 OUT="$("$KLITE" policy check a b 2>&1)"
 grep -q 'allowed' <<<"$OUT" && pass "and a -> b stays open: $OUT" || die "policy check a b should allow, got: $OUT"
 
-# The deny must bite the apps' own chatter as well as the probes. Chatter is
-# sparse (one 20% roll per 8-second wave), so denials appear only when a
-# roll picks c, but completions must sit at zero from the moment of the apply.
+# The deny must bite the apps' own chatter as well as the probes. Chatter
+# is sparse, so denials appear only when a wave's roll hits c. Completions
+# must sit at zero from the moment of the apply.
 CHAT_OK="$(docker logs "$(a_ctr)" --since "$CHAT_MARK" 2>/dev/null | grep -c '^-> c ok')"
 CHAT_FAIL="$(docker logs "$(a_ctr)" --since "$CHAT_MARK" 2>/dev/null | grep -c '^-> c FAILED')"
 [[ "$CHAT_OK" == 0 ]] \

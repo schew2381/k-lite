@@ -77,8 +77,8 @@ wait_for 10 nodes_ready \
   && pass "both nodes Ready within 10s" || die "both nodes Ready within 10s"
 
 # --- workload a: a ticker that prints one line a second ---
-# The log-plumbing checks need a steady cadence. The seeded demo apps chat
-# on a sparse per-wave roll, so this stays a dedicated inline fixture.
+# The log-plumbing checks need a steady cadence. The seeded demo apps only
+# chat when a wave's roll hits, so this stays a dedicated inline fixture.
 cat <<'EOF' | "$KLITE" apply -f - >/dev/null \
   && pass "apply the inline ticker workload a" || die "apply the inline ticker workload a"
 apiVersion: klite/v1

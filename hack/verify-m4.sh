@@ -86,8 +86,8 @@ wl_logs() { # this stack's instances only: workload labels repeat across cluster
   done
 }
 
-# The seeded apps chat at random (one 20% roll per 8-second wave, see
-# examples/seed/apps), which is the wrong clock to hang assertions on. The script runs its own
+# The seeded apps chat at random (see examples/seed/apps), the wrong
+# schedule to hang assertions on. The script runs its own
 # probe loop instead: one wget per second to b's service, executed inside
 # a's container so it rides the same kdns -> VIP -> Envoy path. Each probe
 # appends one line to PROBE_FILE: the served body ("<cid> is b") or FAILED.
