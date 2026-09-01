@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"strings"
 
+	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -51,7 +52,10 @@ type principal struct {
 
 type principalCtxKey struct{}
 
-const registerMethod = "/klite.v1.AgentService/Register"
+const (
+	registerMethod  = "/klite.v1.AgentService/Register"
+	xdsMethodPrefix = "/envoy.service."
+)
 
 // Unary returns the unary interceptor half of the gate.
 func (a *Auth) Unary() grpc.UnaryServerInterceptor {
@@ -64,12 +68,21 @@ func (a *Auth) Unary() grpc.UnaryServerInterceptor {
 	}
 }
 
-// Stream returns the stream interceptor half of the gate.
+// Stream returns the stream interceptor half of the gate. xDS streams get
+// the extra node binding: snapshots are keyed by the node id the request
+// names, so without it any certified node could read any other's snapshot
+// (ADR 0028's recorded residual, closed in M9).
 func (a *Auth) Stream() grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		ctx, err := a.authorize(ss.Context(), info.FullMethod)
 		if err != nil {
 			return err
+		}
+		if strings.HasPrefix(info.FullMethod, xdsMethodPrefix) {
+			return handler(srv, &xdsBoundStream{
+				authedStream: authedStream{ServerStream: ss, ctx: ctx},
+				node:         callerPrincipal(ctx).node,
+			})
 		}
 		return handler(srv, &authedStream{ServerStream: ss, ctx: ctx})
 	}
@@ -83,6 +96,46 @@ type authedStream struct {
 
 func (s *authedStream) Context() context.Context { return s.ctx }
 
+// xdsBoundStream pins an xDS stream to the certificate's node. Envoy names
+// its node.id on the first request only (set_node_on_first_message_only), so
+// the first message must claim exactly the cert's node, later node-less
+// requests ride the established binding, and any renaming mid-stream dies.
+// No lock on bound: gRPC allows one concurrent RecvMsg per stream, and
+// go-control-plane reads from a single goroutine.
+type xdsBoundStream struct {
+	authedStream
+	node  string
+	bound bool
+}
+
+// nodeNamer covers both SotW and delta discovery requests.
+type nodeNamer interface {
+	GetNode() *corev3.Node
+}
+
+func (s *xdsBoundStream) RecvMsg(m any) error {
+	if err := s.authedStream.RecvMsg(m); err != nil {
+		return err
+	}
+	req, ok := m.(nodeNamer)
+	if !ok {
+		// Every message on the mounted xDS services names a node; anything
+		// else is unexpected enough to fail closed.
+		return status.Errorf(codes.PermissionDenied, "unexpected xds request type %T", m)
+	}
+	id := req.GetNode().GetId()
+	switch {
+	case id == "" && s.bound:
+		return nil
+	case id == "":
+		return status.Error(codes.PermissionDenied, "first xds request must name the node")
+	case id != s.node:
+		return status.Errorf(codes.PermissionDenied, "certificate is for node %q, not %q", s.node, id)
+	}
+	s.bound = true
+	return nil
+}
+
 // authorize resolves the caller's principal and checks it against the
 // method's required class. The returned context carries the principal for
 // handlers that match request fields against it.
@@ -92,7 +145,7 @@ func (a *Auth) authorize(ctx context.Context, fullMethod string) (context.Contex
 	switch {
 	case fullMethod == registerMethod:
 		return ctx, nil
-	case strings.HasPrefix(fullMethod, "/klite.v1.AgentService/"), strings.HasPrefix(fullMethod, "/envoy.service."):
+	case strings.HasPrefix(fullMethod, "/klite.v1.AgentService/"), strings.HasPrefix(fullMethod, xdsMethodPrefix):
 		if p.kind == principalNode {
 			return ctx, nil
 		}

@@ -5,14 +5,19 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"io"
 	"net"
 	"testing"
 
+	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
+	discoveryv3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/schew2381/k-lite/internal/ca"
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
@@ -84,6 +89,99 @@ func TestAuthorizeMatrix(t *testing.T) {
 				t.Fatalf("authorize(%s) = %v (%v), want %v", tt.method, got, err, tt.want)
 			}
 		})
+	}
+}
+
+// recvQueue fakes the wire side of an xDS stream: RecvMsg copies the next
+// queued DiscoveryRequest into m.
+type recvQueue struct {
+	grpc.ServerStream
+	ctx   context.Context
+	queue []*discoveryv3.DiscoveryRequest
+}
+
+func (r *recvQueue) Context() context.Context { return r.ctx }
+
+func (r *recvQueue) RecvMsg(m any) error {
+	if len(r.queue) == 0 {
+		return io.EOF
+	}
+	next := r.queue[0]
+	r.queue = r.queue[1:]
+	proto.Merge(m.(proto.Message), next)
+	return nil
+}
+
+// ADS streams are bound to the certificate's node (ADR 0028's residual):
+// the first request must name it, node-less follow-ups ride the binding,
+// and naming any other node — first or later — is denied.
+func TestXDSStreamBoundToCertNode(t *testing.T) {
+	t.Parallel()
+	req := func(id string) *discoveryv3.DiscoveryRequest {
+		if id == "" {
+			return &discoveryv3.DiscoveryRequest{VersionInfo: "1"}
+		}
+		return &discoveryv3.DiscoveryRequest{Node: &corev3.Node{Id: id}}
+	}
+	tests := []struct {
+		name  string
+		queue []*discoveryv3.DiscoveryRequest
+		want  []codes.Code
+	}{
+		{"own node then node-less acks", []*discoveryv3.DiscoveryRequest{req("node-1"), req(""), req("node-1")}, []codes.Code{codes.OK, codes.OK, codes.OK}},
+		{"foreign node on first request", []*discoveryv3.DiscoveryRequest{req("node-2")}, []codes.Code{codes.PermissionDenied}},
+		{"rename mid-stream", []*discoveryv3.DiscoveryRequest{req("node-1"), req("node-2")}, []codes.Code{codes.OK, codes.PermissionDenied}},
+		{"anonymous first request", []*discoveryv3.DiscoveryRequest{req("")}, []codes.Code{codes.PermissionDenied}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			s := &xdsBoundStream{
+				authedStream: authedStream{ServerStream: &recvQueue{queue: tt.queue}},
+				node:         "node-1",
+			}
+			for i, want := range tt.want {
+				err := s.RecvMsg(&discoveryv3.DiscoveryRequest{})
+				if got := status.Code(err); got != want {
+					t.Fatalf("recv %d = %v (%v), want %v", i, got, err, want)
+				}
+			}
+		})
+	}
+}
+
+// The interceptor wraps only xDS streams with the binding; agent streams
+// keep their request-level node checks.
+func TestStreamInterceptorWrapsXDS(t *testing.T) {
+	t.Parallel()
+	a := NewAuth("secret")
+	interceptor := a.Stream()
+	nodeCtx := nodeCertCtx(t, "node-1")
+	var got grpc.ServerStream
+	capture := func(_ any, ss grpc.ServerStream) error { got = ss; return nil }
+
+	err := interceptor(nil, &recvQueue{ctx: nodeCtx}, &grpc.StreamServerInfo{
+		FullMethod: "/envoy.service.discovery.v3.AggregatedDiscoveryService/StreamAggregatedResources",
+	}, capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, ok := got.(*xdsBoundStream)
+	if !ok {
+		t.Fatalf("xds stream wrapped as %T, want *xdsBoundStream", got)
+	}
+	if bound.node != "node-1" {
+		t.Fatalf("bound node = %q, want the certificate's", bound.node)
+	}
+
+	err = interceptor(nil, &recvQueue{ctx: nodeCtx}, &grpc.StreamServerInfo{
+		FullMethod: "/klite.v1.AgentService/WatchDesired",
+	}, capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got.(*xdsBoundStream); ok {
+		t.Fatal("agent stream must not carry the xds binding")
 	}
 }
 
