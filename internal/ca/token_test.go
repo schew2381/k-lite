@@ -46,6 +46,7 @@ func TestParseTokenRejects(t *testing.T) {
 		{"non-hex hash", "K10" + strings.Repeat("zz", 32) + "::node:x"},
 		{"wrong user", "K10" + hash + "::user:x"},
 		{"missing secret", "K10" + hash + "::node:"},
+		{"oversize", "K10" + hash + "::node:" + strings.Repeat("x", 5000)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -15,6 +15,9 @@ const (
 	tokenPrefix = "K10"
 	tokenUser   = "node"
 	caHashLen   = sha256.Size * 2
+
+	// maxTokenLen bounds hostile input. A minted token is ~90 bytes.
+	maxTokenLen = 4096
 )
 
 // Token is a parsed join token.
@@ -32,6 +35,9 @@ func MintToken(caPEM []byte, secret string) string {
 // ParseToken splits a join token, validating shape only. VerifyCAHash checks
 // the pin and the server checks the secret.
 func ParseToken(s string) (Token, error) {
+	if len(s) > maxTokenLen {
+		return Token{}, fmt.Errorf("token exceeds %d bytes", maxTokenLen)
+	}
 	rest, ok := strings.CutPrefix(s, tokenPrefix)
 	if !ok {
 		return Token{}, fmt.Errorf("token missing %s prefix", tokenPrefix)

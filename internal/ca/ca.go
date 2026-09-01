@@ -4,9 +4,12 @@
 package ca
 
 import (
+	"bytes"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -39,6 +42,10 @@ const (
 	pemTypeCert = "CERTIFICATE"
 	pemTypeCSR  = "CERTIFICATE REQUEST"
 	pemTypeKey  = "EC PRIVATE KEY"
+
+	// maxCSRLen caps join CSRs, which arrive from peers that hold only a
+	// token. A real CSR is under 2 KB.
+	maxCSRLen = 64 * 1024
 )
 
 // CA holds the cluster root certificate and its signing key.
@@ -80,6 +87,9 @@ func fileExists(path string) (bool, error) {
 }
 
 func load(certPath, keyPath string) (*CA, error) {
+	if err := checkKeyPerms(keyPath); err != nil {
+		return nil, err
+	}
 	certPEM, err := os.ReadFile(certPath)
 	if err != nil {
 		return nil, err
@@ -88,22 +98,46 @@ func load(certPath, keyPath string) (*CA, error) {
 	if err != nil {
 		return nil, err
 	}
-	cert, err := parseCertPEM(certPEM)
+	// CertPEM is re-encoded from the parsed block rather than kept as raw
+	// file bytes: join tokens pin sha256(CertPEM), and the bootstrap
+	// verifier hashes its own re-encoding of the presented cert. Hand-edited
+	// whitespace in ca.crt must not break that equality.
+	cert, canonPEM, err := parseCertPEMStrict(certPEM)
 	if err != nil {
 		return nil, fmt.Errorf("load %s: %w", certPath, err)
 	}
-	block, _ := pem.Decode(keyPEM)
-	if block == nil || block.Type != pemTypeKey {
-		return nil, fmt.Errorf("load %s: not %s PEM", keyPath, pemTypeKey)
-	}
-	key, err := x509.ParseECPrivateKey(block.Bytes)
+	key, err := parseKeyPEMStrict(keyPEM)
 	if err != nil {
 		return nil, fmt.Errorf("load %s: %w", keyPath, err)
 	}
 	if !key.PublicKey.Equal(cert.PublicKey) {
 		return nil, fmt.Errorf("%s does not match %s", keyPath, certPath)
 	}
-	return &CA{Cert: cert, Key: key, CertPEM: certPEM}, nil
+	return &CA{Cert: cert, Key: key, CertPEM: canonPEM}, nil
+}
+
+// checkKeyPerms refuses a signing key that anyone besides the owner can
+// touch. create writes 0600, so a looser mode means someone changed it.
+func checkKeyPerms(keyPath string) error {
+	info, err := os.Stat(keyPath)
+	if err != nil {
+		return err
+	}
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		return fmt.Errorf("%s has mode %04o, want 0600: the ca key must not be group- or world-accessible", keyPath, perm)
+	}
+	return nil
+}
+
+func parseKeyPEMStrict(keyPEM []byte) (*ecdsa.PrivateKey, error) {
+	block, rest := pem.Decode(keyPEM)
+	if block == nil || block.Type != pemTypeKey {
+		return nil, fmt.Errorf("not %s PEM", pemTypeKey)
+	}
+	if len(bytes.TrimSpace(rest)) > 0 {
+		return nil, fmt.Errorf("trailing data after %s block", pemTypeKey)
+	}
+	return x509.ParseECPrivateKey(block.Bytes)
 }
 
 func create(dir, certPath, keyPath string) (*CA, error) {
@@ -146,16 +180,32 @@ func create(dir, certPath, keyPath string) (*CA, error) {
 }
 
 func newTemplate(subject *pkix.Name, now time.Time, years int) (*x509.Certificate, error) {
+	// Random 128-bit serials need no issuance state to stay collision-free.
+	// The +1 shifts the range to [1, 2^128]: RFC 5280 forbids serial 0.
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
 		return nil, err
 	}
+	serial.Add(serial, big.NewInt(1))
 	return &x509.Certificate{
 		SerialNumber: serial,
 		Subject:      *subject,
 		NotBefore:    now.Add(-backdate),
 		NotAfter:     now.AddDate(years, 0, 0),
 	}, nil
+}
+
+// newLeafTemplate is newTemplate clamped to the CA's own expiry, since a leaf
+// that outlives its issuer can never verify past that point anyway.
+func (c *CA) newLeafTemplate(subject *pkix.Name) (*x509.Certificate, error) {
+	tmpl, err := newTemplate(subject, time.Now(), leafYears)
+	if err != nil {
+		return nil, err
+	}
+	if tmpl.NotAfter.After(c.Cert.NotAfter) {
+		tmpl.NotAfter = c.Cert.NotAfter
+	}
+	return tmpl, nil
 }
 
 // ServerCert issues a one-year serving cert for klited's listeners, with
@@ -166,7 +216,7 @@ func (c *CA) ServerCert(hosts []string) (*tls.Certificate, error) {
 	if err != nil {
 		return nil, err
 	}
-	tmpl, err := newTemplate(&pkix.Name{CommonName: "klited"}, time.Now(), leafYears)
+	tmpl, err := c.newLeafTemplate(&pkix.Name{CommonName: "klited"})
 	if err != nil {
 		return nil, err
 	}
@@ -202,9 +252,15 @@ func (c *CA) SignNodeCSR(csrPEM []byte, node string) ([]byte, error) {
 	if node == "" {
 		return nil, errors.New("empty node name")
 	}
-	block, _ := pem.Decode(csrPEM)
+	if len(csrPEM) > maxCSRLen {
+		return nil, fmt.Errorf("csr exceeds %d bytes", maxCSRLen)
+	}
+	block, rest := pem.Decode(csrPEM)
 	if block == nil || block.Type != pemTypeCSR {
 		return nil, fmt.Errorf("not %s PEM", pemTypeCSR)
+	}
+	if len(bytes.TrimSpace(rest)) > 0 {
+		return nil, fmt.Errorf("trailing data after %s block", pemTypeCSR)
 	}
 	csr, err := x509.ParseCertificateRequest(block.Bytes)
 	if err != nil {
@@ -213,8 +269,11 @@ func (c *CA) SignNodeCSR(csrPEM []byte, node string) ([]byte, error) {
 	if err := csr.CheckSignature(); err != nil {
 		return nil, fmt.Errorf("csr signature: %w", err)
 	}
+	if err := checkCSRKey(csr.PublicKey); err != nil {
+		return nil, fmt.Errorf("csr key: %w", err)
+	}
 	subject := &pkix.Name{CommonName: nodeCNPrefix + node, Organization: []string{nodeOrg}}
-	tmpl, err := newTemplate(subject, time.Now(), leafYears)
+	tmpl, err := c.newLeafTemplate(subject)
 	if err != nil {
 		return nil, err
 	}
@@ -225,6 +284,26 @@ func (c *CA) SignNodeCSR(csrPEM []byte, node string) ([]byte, error) {
 		return nil, err
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: pemTypeCert, Bytes: der}), nil
+}
+
+// checkCSRKey refuses keys too weak to carry node identity. NewNodeCSR always
+// generates P-256, so this only ever fires on a foreign client.
+func checkCSRKey(pub any) error {
+	switch k := pub.(type) {
+	case *ecdsa.PublicKey:
+		if k.Curve.Params().BitSize < 256 {
+			return fmt.Errorf("ecdsa curve %s is below 256 bits", k.Curve.Params().Name)
+		}
+		return nil
+	case ed25519.PublicKey:
+		return nil
+	case *rsa.PublicKey:
+		if k.N.BitLen() < 2048 {
+			return fmt.Errorf("rsa key is %d bits, need at least 2048", k.N.BitLen())
+		}
+		return nil
+	}
+	return fmt.Errorf("unsupported key type %T", pub)
 }
 
 // NewNodeCSR generates a node's ECDSA P-256 key and a CSR for Bootstrap.Join.
@@ -274,10 +353,21 @@ func PoolFromPEM(caPEM []byte) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-func parseCertPEM(certPEM []byte) (*x509.Certificate, error) {
-	block, _ := pem.Decode(certPEM)
+// parseCertPEMStrict parses exactly one certificate block and returns its
+// canonical re-encoding alongside. Anything after the block besides
+// whitespace is an error: a second certificate here would silently change
+// which root the cluster trusts.
+func parseCertPEMStrict(certPEM []byte) (*x509.Certificate, []byte, error) {
+	block, rest := pem.Decode(certPEM)
 	if block == nil || block.Type != pemTypeCert {
-		return nil, fmt.Errorf("not %s PEM", pemTypeCert)
+		return nil, nil, fmt.Errorf("not %s PEM", pemTypeCert)
 	}
-	return x509.ParseCertificate(block.Bytes)
+	if len(bytes.TrimSpace(rest)) > 0 {
+		return nil, nil, fmt.Errorf("trailing data after %s block", pemTypeCert)
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, nil, err
+	}
+	return cert, pem.EncodeToMemory(&pem.Block{Type: pemTypeCert, Bytes: block.Bytes}), nil
 }
