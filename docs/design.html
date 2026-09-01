@@ -572,17 +572,18 @@ spec:
   <div class="wrap">
     <p class="eyebrow"><b>09</b>crossing machines</p>
     <h2>How traffic crosses machines: published ports behind mTLS</h2>
-    <p class="lede">
-      When the picked endpoint lives on another machine, EDS hands over
-      <code>advertiseAddress:ingressPort</code> instead of an instance IP. This is the mechanism on
-      every network — same Wi-Fi, LAN, or tailnet. Slide 11 covers the other layer: how machines get
-      a dialable address across the open internet at all.
-    </p>
+    <ul class="plain" style="margin-bottom:16px">
+      <li>if EDS chooses an instance on another machine, the IP address looks like: <code>internetNodesAdvertisedAddress:ingressPort</code></li>
+      <li>the remote machine chooses an IP it can receive open traffic on (its advertise address) and reports it to klited
+        <ul class="plain">
+          <li>klited picks a port from that node's slice per instance, and the node's Envoy holds the mapping of <code>port → local instance docker IP</code></li>
+          <li>klited broadcasts <code>advertiseAddress:port</code> to every other node over EDS</li>
+        </ul>
+      </li>
+      <li>EDS stores local instance IPs as their local version, so routing is all done on the node only</li>
+    </ul>
 
     <div class="decs">
-      <div class="dec no"><span class="opt">published ports, plaintext</span><span class="why">smallest change — every cross-node byte readable, no peer authenticated</span><span class="tag">rejected</span></div>
-      <div class="dec no"><span class="opt">WireGuard mesh now</span><span class="why">real encryption + NAT traversal, at the price of key lifecycles, MTU, rendezvous — recorded as step two</span><span class="tag">deferred</span></div>
-      <div class="dec no"><span class="opt">relay through klited</span><span class="why">the control plane must never sit in the data path</span><span class="tag">rejected</span></div>
       <div class="dec yes"><span class="opt">published ports behind node-cert mTLS</span><span class="why">the join identity reused wholesale · ports live as stored allocations · listeners follow allocations, not health, so drains stay hitless</span><span class="tag">chosen</span></div>
     </div>
 
