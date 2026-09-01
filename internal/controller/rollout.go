@@ -124,9 +124,9 @@ func surgeBlocked(fresh []*klitev1.Instance) bool {
 	return false
 }
 
-// retire moves one instance out of service: READY instances go DRAINING so
-// Envoy stops handing them new connections while in-flight ones finish;
-// anything else was never in EDS and is deleted outright.
+// retire moves one instance out of service. A READY instance goes DRAINING
+// so Envoy stops handing it new connections while in-flight ones finish.
+// Anything else was never in EDS and is deleted outright.
 func (c *workloadController) retire(ctx context.Context, inst *klitev1.Instance, reason string) error {
 	if inst.GetStatus().GetPhase() != klitev1.InstancePhase_INSTANCE_PHASE_READY {
 		return c.deleteInstance(ctx, inst)

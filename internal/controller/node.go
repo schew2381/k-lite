@@ -105,7 +105,7 @@ func phaseTransition(st *klitev1.NodeStatus, name string, silence time.Duration,
 		st.Phase = klitev1.NodePhase_NODE_PHASE_DRAINING
 		st.Unschedulable = true
 	case st.GetPhase() == klitev1.NodePhase_NODE_PHASE_DRAINING && count == 0:
-		// Drain complete. The cordon outlives it (nomad precedent).
+		// The drain is done, and the cordon outlives it (Nomad precedent).
 		st.Phase = klitev1.NodePhase_NODE_PHASE_READY
 		slog.Info("node drained", "node", name)
 	default:

@@ -104,6 +104,50 @@ func TestPendingDeleteReassertsDrain(t *testing.T) {
 	}
 }
 
+// TestSilentNodeEvacuatedAfterGrace: the two timers from the package
+// invariants. Silence past 15s turns the node NOT_READY, and 30s more
+// deletes its instances so the workload controller can recreate them
+// elsewhere. The node record itself stays for the agent's return.
+func TestSilentNodeEvacuatedAfterGrace(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		silence      time.Duration
+		wantPhase    klitev1.NodePhase
+		wantInstGone bool
+	}{
+		{"fresh heartbeat keeps READY", 0, klitev1.NodePhase_NODE_PHASE_READY, false},
+		{"silence past 15s flips NOT_READY", 20 * time.Second, klitev1.NodePhase_NODE_PHASE_NOT_READY, false},
+		{"silence past 45s evacuates", 50 * time.Second, klitev1.NodePhase_NODE_PHASE_NOT_READY, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			st, c := nodeTestSetup(t,
+				nodeObj("node-2", klitev1.NodePhase_NODE_PHASE_READY, false, nodeNow.Add(-tt.silence).Unix(), nil),
+				&klitev1.Object{Kind: &klitev1.Object_Instance{Instance: &klitev1.Instance{
+					Meta:   &klitev1.Meta{Name: "b-aa"},
+					Spec:   &klitev1.InstanceSpec{Workload: "b", Node: "node-2"},
+					Status: &klitev1.InstanceStatus{Phase: klitev1.InstancePhase_INSTANCE_PHASE_READY},
+				}}})
+			if err := c.reconcile(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			node, _, err := st.Get(context.Background(), object.KindNode, "node-2")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := node.GetNode().GetStatus().GetPhase(); got != tt.wantPhase {
+				t.Errorf("phase = %v, want %v", got, tt.wantPhase)
+			}
+			_, _, err = st.Get(context.Background(), object.KindInstance, "b-aa")
+			if gone := errors.Is(err, store.ErrNotFound); gone != tt.wantInstGone {
+				t.Errorf("instance gone = %v (err %v), want %v", gone, err, tt.wantInstGone)
+			}
+		})
+	}
+}
+
 func TestDrainingNodeGoesNotReadyWhenSilent(t *testing.T) {
 	t.Parallel()
 	st, c := nodeTestSetup(t,

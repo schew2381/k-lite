@@ -87,7 +87,7 @@ func (h *harness) instances() []*klitev1.Instance {
 	return out
 }
 
-// byHashPhase counts instances matching hash (or any for "") and phase.
+// count tallies instances matching hash (or any hash for "") and phase.
 func (h *harness) count(hash string, phase klitev1.InstancePhase) int {
 	n := 0
 	for _, inst := range h.instances() {
@@ -350,7 +350,7 @@ func TestNodeDrainRetiresInstances(t *testing.T) {
 		t.Fatalf("instances = %d, want surge alongside the old one", got)
 	}
 	surge := h.firstWhere(func(i *klitev1.Instance) bool { return i.GetMeta().GetName() != "b-old" })
-	// Scheduler binds the surge elsewhere, agent reports it READY.
+	// The scheduler binds the surge elsewhere and the agent reports it READY.
 	obj, rev, err := h.st.Get(h.ctx, object.KindInstance, surge.GetMeta().GetName())
 	if err != nil {
 		t.Fatal(err)
@@ -374,6 +374,135 @@ func TestNodeDrainRetiresInstances(t *testing.T) {
 	insts := h.instances()
 	if len(insts) != 1 || insts[0].GetSpec().GetNode() != "node-1" {
 		t.Fatalf("instances = %v, want only the replacement on node-1", names(insts))
+	}
+}
+
+// TestLeaderFailoverMidRolloutRestartsClock hands a half-finished rollout to
+// a successor controller. The successor must restart the victim's drain clock
+// rather than resume the old deadline, must not delete it early, and must not
+// surge a second time for the same step.
+func TestLeaderFailoverMidRolloutRestartsClock(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	wl := workloadObj("b", 1, "v2", 5)
+	newHash := hashOf(t, wl)
+	h.put(wl)
+	h.seedInstance("b", "b-old", "h-old", "node-1", klitev1.InstancePhase_INSTANCE_PHASE_READY)
+
+	h.pass() // surge created
+	surge := h.firstWhere(func(i *klitev1.Instance) bool { return i.GetSpec().GetTemplateHash() == newHash })
+	h.setPhase(surge.GetMeta().GetName(), klitev1.InstancePhase_INSTANCE_PHASE_READY)
+	h.pass() // old marked DRAINING, deadline now+5s in the first leader's memory
+
+	// 4s later the leader dies. The successor starts with empty deadlines.
+	h.now = h.now.Add(4 * time.Second)
+	h.c = newWorkloadController(h.st)
+	h.c.now = func() time.Time { return h.now }
+	h.pass() // successor sees the drain and restarts its clock
+
+	// 4s into the restarted clock the original deadline is long past, but
+	// the instance must survive: restart means restart, not resume.
+	h.now = h.now.Add(4 * time.Second)
+	h.pass()
+	if got := len(h.instances()); got != 2 {
+		t.Fatalf("instances = %d, drain expired on the dead leader's clock", got)
+	}
+	if got := h.count(newHash, klitev1.InstancePhase_INSTANCE_PHASE_READY); got != 1 {
+		t.Fatalf("fresh ready = %d, failover must not spawn a second surge", got)
+	}
+
+	// The restarted clock expires 5s after the successor first saw the drain.
+	h.now = h.now.Add(2 * time.Second)
+	h.pass()
+	insts := h.instances()
+	if len(insts) != 1 || insts[0].GetMeta().GetName() != surge.GetMeta().GetName() {
+		t.Fatalf("instances = %v, want only the surge after the restarted drain", names(insts))
+	}
+}
+
+// TestScaleDownDuringRollout shrinks replicas and changes the template in one
+// edit. Old instances must leave one at a time with no surge until the count
+// fits, and the workload must never serve fewer than the new replica count.
+func TestScaleDownDuringRollout(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	wl := workloadObj("b", 2, "v2", 5)
+	newHash := hashOf(t, wl)
+	h.put(wl)
+	h.seedInstance("b", "b-old1", "h-old", "node-1", klitev1.InstancePhase_INSTANCE_PHASE_READY)
+	h.seedInstance("b", "b-old2", "h-old", "node-2", klitev1.InstancePhase_INSTANCE_PHASE_READY)
+	h.seedInstance("b", "b-old3", "h-old", "node-3", klitev1.InstancePhase_INSTANCE_PHASE_READY)
+
+	serving := func() int {
+		return h.count("", klitev1.InstancePhase_INSTANCE_PHASE_READY) +
+			h.count("", klitev1.InstancePhase_INSTANCE_PHASE_DRAINING)
+	}
+	h.pass()
+	if got := h.count("", klitev1.InstancePhase_INSTANCE_PHASE_DRAINING); got != 1 {
+		t.Fatalf("draining = %d, want the surplus retired one at a time", got)
+	}
+	if got := h.count(newHash, klitev1.InstancePhase_INSTANCE_PHASE_PENDING); got != 0 {
+		t.Fatalf("fresh created = %d, want no surge while over the new count", got)
+	}
+	if got := serving(); got < 2 {
+		t.Fatalf("serving = %d, dipped below the new replica count", got)
+	}
+
+	h.now = h.now.Add(6 * time.Second)
+	h.pass() // the drain expires and the victim is deleted
+	h.pass() // at the target count the surge-first dance resumes
+	if got := h.count(newHash, klitev1.InstancePhase_INSTANCE_PHASE_PENDING); got != 1 {
+		t.Fatalf("surge count = %d, want exactly one once the count fits", got)
+	}
+	if got := serving(); got < 2 {
+		t.Fatalf("serving = %d, dipped below replicas during the surge", got)
+	}
+}
+
+// TestScaleUpDuringRolloutRefillsInBulk raises replicas alongside a template
+// change. Restoring base capacity is not a rolling update, so the shortfall
+// arrives as one batch of fresh instances.
+func TestScaleUpDuringRolloutRefillsInBulk(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	wl := workloadObj("b", 3, "v2", 5)
+	newHash := hashOf(t, wl)
+	h.put(wl)
+	h.seedInstance("b", "b-old", "h-old", "node-1", klitev1.InstancePhase_INSTANCE_PHASE_READY)
+
+	h.pass()
+	if got := h.count(newHash, klitev1.InstancePhase_INSTANCE_PHASE_PENDING); got != 2 {
+		t.Fatalf("fresh created = %d, want the shortfall filled in one pass", got)
+	}
+	old, _, err := h.st.Get(h.ctx, object.KindInstance, "b-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.GetInstance().GetStatus().GetPhase() != klitev1.InstancePhase_INSTANCE_PHASE_READY {
+		t.Fatalf("old phase = %v, must keep serving through the refill", old.GetInstance().GetStatus().GetPhase())
+	}
+}
+
+// TestDeadlinesPrunedWithInstances: the drain bookkeeping must not outlive
+// the instances it tracks, or a long leadership accumulates dead entries.
+func TestDeadlinesPrunedWithInstances(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	wl := workloadObj("b", 1, "v1", 5)
+	hash := hashOf(t, wl)
+	h.put(wl)
+	h.seedInstance("b", "b-aa", hash, "node-1", klitev1.InstancePhase_INSTANCE_PHASE_READY)
+	h.seedInstance("b", "b-bb", hash, "node-2", klitev1.InstancePhase_INSTANCE_PHASE_READY)
+
+	h.pass() // surplus b-bb goes DRAINING, deadline recorded
+	if len(h.c.deadlines) != 1 {
+		t.Fatalf("deadlines = %d, want the one draining instance", len(h.c.deadlines))
+	}
+	h.now = h.now.Add(6 * time.Second)
+	h.pass() // drain expires, instance deleted
+	h.pass() // the next pass prunes the dead entry
+	if len(h.c.deadlines) != 0 {
+		t.Fatalf("deadlines = %d, want the map empty after deletion", len(h.c.deadlines))
 	}
 }
 

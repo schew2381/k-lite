@@ -156,7 +156,11 @@ func (c *workloadController) createInstance(ctx context.Context, w *klitev1.Work
 
 func (c *workloadController) deleteInstance(ctx context.Context, inst *klitev1.Instance) error {
 	name := inst.GetMeta().GetName()
-	if err := c.st.Delete(ctx, object.KindInstance, name); err != nil && !errors.Is(err, store.ErrNotFound) {
+	err := c.st.Delete(ctx, object.KindInstance, name)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return nil // another leader life got here first
+	case err != nil:
 		return err
 	}
 	slog.Info("instance deleted", "workload", inst.GetSpec().GetWorkload(), "instance", name)
