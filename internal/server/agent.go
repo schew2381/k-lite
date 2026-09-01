@@ -306,8 +306,8 @@ func (a *Agent) ReportStatus(ctx context.Context, req *klitev1.ReportStatusReque
 
 // advertiseIP screens a reported advertise address down to a literal,
 // routable IP. Endpoints carry it into EDS, and Envoy rejects hostnames
-// there. That's why a bad value is dropped loudly rather than poisoning
-// every consumer's snapshot. Loopback and unspecified addresses are just as
+// there, so a bad value is dropped loudly rather than poisoning every
+// consumer's snapshot. Loopback and unspecified addresses are just as
 // poisonous, since every remote proxy would dial itself. The agent already
 // refuses them (advertise.go), so only a buggy or foreign agent sends one.
 func advertiseIP(node, addr string) string {
