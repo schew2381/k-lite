@@ -155,7 +155,12 @@ export class HttpClient implements KliteClient {
     await this.json(`/api/nodes/${node}/uncordon`, { method: 'POST' })
   }
 
-  async nodeToken(): Promise<{ token: string; endpoints: string[]; machineAddresses?: string[] }> {
+  async nodeToken(): Promise<{
+    token: string
+    endpoints: string[]
+    machineAddresses?: string[]
+    tailnetAddress?: string
+  }> {
     return this.json('/api/nodetoken')
   }
 

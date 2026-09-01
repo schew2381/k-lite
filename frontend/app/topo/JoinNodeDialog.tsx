@@ -22,6 +22,7 @@ export interface JoinInfo {
   token: string
   endpoints: string[]
   machineAddresses?: string[]
+  tailnetAddress?: string
 }
 
 // A remote machine can't dial 127.0.0.1, so the internet command needs the
@@ -30,6 +31,9 @@ export interface JoinInfo {
 // facade's own interface addresses stand in.
 function routableServer(info: JoinInfo): string {
   const port = info.endpoints[0]?.split(':')[1] ?? '7443'
+  // the facade's tailnet address wins when it has one: that's the only
+  // address an off-LAN machine can dial (ADR 0043)
+  if (info.tailnetAddress) return `${info.tailnetAddress}:${port}`
   const host = typeof window !== 'undefined' ? window.location.hostname : ''
   if (host && host !== 'localhost' && host !== '127.0.0.1') return `${host}:${port}`
   const lan = info.machineAddresses?.[0]
@@ -40,7 +44,10 @@ function routableServer(info: JoinInfo): string {
 // machine, which only that machine knows. Without it, a Linux box guesses
 // its Docker bridge and every node dials into nothing (ADR 0034).
 export function internetJoinCommand(info: JoinInfo): string {
-  return `klite-agent --node ${info.node} --server ${routableServer(info)} --token ${info.token} --advertise-address <new-machine-address>`
+  // Paste-ready: ./klite-agent since setup leaves the binary in cwd, the
+  // token single-quoted, and the advertise address resolving on the target
+  // machine at paste time, so nothing needs hand-editing.
+  return `./klite-agent --node ${info.node} --server ${routableServer(info)} --token '${info.token}' --advertise-address "$(tailscale ip -4)"`
 }
 
 // A tailnet address means the joining machine must be on the tailnet too,
@@ -173,8 +180,8 @@ export function JoinNodeDialog({
             <p className="eyebrow text-[10px]">by hand, any OS</p>
             <CommandBlock command={internetJoinCommand(info)} testid="copy-join-command" />
             <p className="text-xs text-muted-foreground">
-              Run either on the new machine, filling in that machine's own routable address. Other nodes
-              dial that address for the mTLS ingress, so each side has to reach the other (ADR 0034).
+              Run either on the new machine. The advertise address resolves there when you paste, and
+              other nodes dial it for the mTLS ingress, so each side has to reach the other (ADR 0034).
             </p>
           </TabsContent>
         </Tabs>

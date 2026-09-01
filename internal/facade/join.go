@@ -36,6 +36,34 @@ func (s *Server) EnableLocalJoin(bin, dir string) {
 	s.spawn = &agentSpawner{bin: bin, dir: dir, server: server}
 }
 
+// cgnatRange is 100.64.0.0/10, the shared space tailnets assign from. An
+// address in it means the machine is on a tailnet, which is the address an
+// off-LAN joiner has to dial (ADR 0043).
+var cgnatRange = net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
+// tailnetAddressFrom picks the first tailnet IPv4 out of interface
+// addresses, or answers empty when the machine isn't on one.
+func tailnetAddressFrom(addrs []net.Addr) string {
+	for _, a := range addrs {
+		ipn, ok := a.(*net.IPNet)
+		if !ok || ipn.IP.To4() == nil {
+			continue
+		}
+		if cgnatRange.Contains(ipn.IP) {
+			return ipn.IP.String()
+		}
+	}
+	return ""
+}
+
+func tailnetAddress() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return ""
+	}
+	return tailnetAddressFrom(addrs)
+}
+
 // machineAddresses lists this machine's non-loopback IPv4 addresses. The
 // join dialog needs one when its browser only knows localhost, since a
 // machine across the network can't dial the loopback endpoint the facade

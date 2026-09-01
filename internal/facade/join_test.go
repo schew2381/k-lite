@@ -3,6 +3,7 @@ package facade
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -133,6 +134,19 @@ func TestNodeTokenListsMachineAddresses(t *testing.T) {
 		if strings.HasPrefix(a, "127.") {
 			t.Fatalf("loopback %s offered as a machine address", a)
 		}
+	}
+}
+
+func TestTailnetAddressPicksCGNATOnly(t *testing.T) {
+	mk := func(ip string, bits int) net.Addr {
+		return &net.IPNet{IP: net.ParseIP(ip), Mask: net.CIDRMask(bits, 32)}
+	}
+	got := tailnetAddressFrom([]net.Addr{mk("192.168.1.20", 24), mk("100.20.1.5", 16), mk("100.69.43.39", 10)})
+	if got != "100.69.43.39" {
+		t.Fatalf("got %q, want the CGNAT address", got)
+	}
+	if got := tailnetAddressFrom([]net.Addr{mk("192.168.1.20", 24)}); got != "" {
+		t.Fatalf("a LAN-only machine claimed a tailnet address: %q", got)
 	}
 }
 

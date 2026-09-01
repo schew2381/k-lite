@@ -89,8 +89,8 @@ export default function TopologyPage() {
       client.apply(newNodeYaml(name)).then(async () => {
         // live: declaring is half the join, so hand over the agent command
         if (client.nodeToken) {
-          const { token, endpoints, machineAddresses } = await client.nodeToken()
-          setJoinInfo({ node: name, token, endpoints, machineAddresses })
+          const { token, endpoints, machineAddresses, tailnetAddress } = await client.nodeToken()
+          setJoinInfo({ node: name, token, endpoints, machineAddresses, tailnetAddress })
         } else {
           toast(`${name} is joining. Its infra pod is starting`)
         }
@@ -103,8 +103,8 @@ export default function TopologyPage() {
     (name: string) => {
       if (!client.nodeToken) return
       act(
-        client.nodeToken().then(({ token, endpoints, machineAddresses }) => {
-          setJoinInfo({ node: name, token, endpoints, machineAddresses })
+        client.nodeToken().then(({ token, endpoints, machineAddresses, tailnetAddress }) => {
+          setJoinInfo({ node: name, token, endpoints, machineAddresses, tailnetAddress })
         }),
       )
     },

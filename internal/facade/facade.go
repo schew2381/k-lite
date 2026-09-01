@@ -227,6 +227,7 @@ func (s *Server) handleNodeToken(w http.ResponseWriter, r *http.Request) {
 		"token":            resp.GetToken(),
 		"endpoints":        s.endpoints,
 		"machineAddresses": machineAddresses(),
+		"tailnetAddress":   tailnetAddress(),
 	})
 }
 
