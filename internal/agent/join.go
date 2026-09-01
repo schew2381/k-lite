@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -58,15 +59,27 @@ type JoinConfig struct {
 	LocalCAFile string
 }
 
+// errServerAuthMissing marks a pre-M9 identity: valid for dialing klited,
+// unusable as the serving cert on the node's ingress listeners.
+var errServerAuthMissing = errors.New("node certificate lacks the server usage")
+
 // EnsureIdentity returns the node's TLS identity, reusing what a previous run
-// persisted and joining with the token only when nothing usable exists or the
-// cluster no longer honors it.
+// persisted and joining with the token only when nothing usable exists, the
+// cluster no longer honors it, or it predates the ingress serving usage.
 func EnsureIdentity(ctx context.Context, cfg *JoinConfig) (*Identity, error) {
 	dir, err := identityDir(cfg.StateDir, cfg.Node)
 	if err != nil {
 		return nil, err
 	}
 	ident, err := loadIdentity(dir, cfg.Node)
+	if errors.Is(err, errServerAuthMissing) {
+		if cfg.Token == "" {
+			return nil, fmt.Errorf(
+				"the identity in %s predates M9 ingress (%w) and no --token is set to re-join (mint one: klite node token)", dir, err)
+		}
+		slog.Warn("persisted identity cannot serve ingress listeners, re-joining with the token", "dir", dir)
+		ident, err = nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -137,6 +150,12 @@ func loadIdentity(dir, node string) (*Identity, error) {
 	}
 	if got, ok := ca.NodeFromCert(leaf); !ok || got != node {
 		return nil, fmt.Errorf("%s holds a certificate for %q, not %q", dir, leaf.Subject.CommonName, node)
+	}
+	if !slices.Contains(leaf.ExtKeyUsage, x509.ExtKeyUsageServerAuth) {
+		// Pre-M9 identities dial fine but can't serve the ingress
+		// listeners (ADR 0024), and Envoy mounts these exact files. A
+		// token in hand turns this into a silent one-time re-join.
+		return nil, errServerAuthMissing
 	}
 	caPEM, err := os.ReadFile(caPath) // #nosec G703 -- path is derived from our own state dir
 	if err != nil {

@@ -287,8 +287,10 @@ func (a *Agent) ensureEnvoyContainer(ctx context.Context, nb *klitev1.NetBootstr
 		spec.Env = []string{"ENVOY_UID=0"}
 	}
 	// The donor ID folds into the hash so a recreated donor forces a fresh
-	// Envoy into the new netns.
-	spec.Labels[runtime.LabelConfigHash] = configHash(spec, donor.ID, bootstrap)
+	// Envoy into the new netns; the identity fingerprint so a re-join (new
+	// certs at the same paths, e.g. the pre-M9 self-heal) forces one that
+	// re-reads them — Envoy never hot-reloads file-based TLS material.
+	spec.Labels[runtime.LabelConfigHash] = configHash(spec, donor.ID, bootstrap, a.identityFingerprint())
 	st, err := a.rt.InspectInfra(ctx, spec.Name)
 	if err != nil {
 		return err
@@ -401,6 +403,27 @@ func isLoopbackHost(h string) bool {
 		return ip.IsLoopback()
 	}
 	return false
+}
+
+// identityFingerprint digests the public identity files Envoy loads by path.
+// The private key stays out of the hash input: it can't change without its
+// certificate changing too.
+func (a *Agent) identityFingerprint() string {
+	if a.tlsDir == "" {
+		return ""
+	}
+	h := sha256.New()
+	for _, f := range []string{nodeCertFile, caCertFile} {
+		b, err := os.ReadFile(filepath.Join(a.tlsDir, f))
+		if err != nil {
+			continue // absent now, drifts the hash when it appears
+		}
+		h.Write([]byte(f))
+		h.Write([]byte{0})
+		h.Write(b)
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16]
 }
 
 // configHash fingerprints a container spec plus any extra inputs. JSON

@@ -231,11 +231,15 @@ func TestSignNodeCSRRoundtrip(t *testing.T) {
 	if len(cert.Subject.Organization) != 1 || cert.Subject.Organization[0] != "klite:nodes" {
 		t.Errorf("Organization = %v", cert.Subject.Organization)
 	}
-	if _, err := cert.Verify(x509.VerifyOptions{
-		Roots:     c.Pool(),
-		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
-	}); err != nil {
-		t.Errorf("verify client cert against CA: %v", err)
+	// Both purposes, one identity: the node dials klited as a client and
+	// serves its ingress listeners (ADR 0024).
+	for _, usage := range []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth} {
+		if _, err := cert.Verify(x509.VerifyOptions{
+			Roots:     c.Pool(),
+			KeyUsages: []x509.ExtKeyUsage{usage},
+		}); err != nil {
+			t.Errorf("verify node cert for usage %v against CA: %v", usage, err)
+		}
 	}
 	wantExpiry := time.Now().AddDate(1, 0, 0)
 	if d := cert.NotAfter.Sub(wantExpiry).Abs(); d > 24*time.Hour {

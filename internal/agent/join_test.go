@@ -2,12 +2,21 @@ package agent
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/subtle"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"errors"
+	"math/big"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -181,6 +190,89 @@ func startJoinServerAddr(t *testing.T) string {
 	t.Helper()
 	addr, _ := startJoinServer(t, "join-me")
 	return addr
+}
+
+// writeLegacyIdentity persists a pre-M9 identity: CA-chained, correct CN,
+// ClientAuth only — the exact shape SignNodeCSR produced before ingress.
+func writeLegacyIdentity(t *testing.T, stateDir, node string) {
+	t.Helper()
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "legacy-ca"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTmpl, caTmpl, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafTmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "klite:node:" + node},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTmpl, caCert, &leafKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(leafKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(stateDir, node, "tls")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]*pem.Block{
+		"node.crt": {Type: "CERTIFICATE", Bytes: leafDER},
+		"node.key": {Type: "EC PRIVATE KEY", Bytes: keyDER},
+		"ca.crt":   {Type: "CERTIFICATE", Bytes: caDER},
+	}
+	for name, block := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), pem.EncodeToMemory(block), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A persisted pre-M9 identity can dial but not serve ingress, so it re-joins
+// when a token is in hand and fails with a pointed error when not.
+func TestEnsureIdentityRejoinsPreM9Cert(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	stateDir := t.TempDir()
+	writeLegacyIdentity(t, stateDir, "node-1")
+
+	if _, err := loadIdentity(filepath.Join(stateDir, "node-1", "tls"), "node-1"); !errors.Is(err, errServerAuthMissing) {
+		t.Fatalf("loadIdentity = %v, want errServerAuthMissing", err)
+	}
+
+	_, err := EnsureIdentity(ctx, &JoinConfig{Node: "node-1", Endpoints: []string{"127.0.0.1:1"}, StateDir: stateDir})
+	if err == nil || !strings.Contains(err.Error(), "predates M9") {
+		t.Fatalf("tokenless err = %v, want the pointed pre-M9 message", err)
+	}
+
+	addr, authority := startJoinServer(t, "join-me")
+	token := ca.MintToken(authority.CertPEM, "join-me")
+	ident, err := EnsureIdentity(ctx, &JoinConfig{Node: "node-1", Endpoints: []string{addr}, Token: token, StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("re-join over a pre-M9 identity: %v", err)
+	}
+	if _, err := loadIdentity(ident.Dir, "node-1"); err != nil {
+		t.Fatalf("re-joined identity should now carry the server usage: %v", err)
+	}
 }
 
 func TestLoadIdentityRefusesForeignNode(t *testing.T) {

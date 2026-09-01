@@ -244,10 +244,12 @@ func (c *CA) ServerCert(hosts []string) (*tls.Certificate, error) {
 	}, nil
 }
 
-// SignNodeCSR signs a join CSR into a one-year client cert for node. The CSR
-// is only proof of key possession — CheckSignature is required (the line k3s
-// skips), and every name the CSR carries is ignored in favor of a CN the
-// server stamps itself.
+// SignNodeCSR signs a join CSR into a one-year node cert. The CSR is only
+// proof of key possession — CheckSignature is required (the line k3s skips),
+// and every name the CSR carries is ignored in favor of a CN the server
+// stamps itself. The cert carries both TLS purposes: the node dials klited
+// as a client and serves its Envoy's mTLS ingress listeners (ADR 0024) —
+// BoringSSL enforces the purpose per role, so ClientAuth alone cannot serve.
 func (c *CA) SignNodeCSR(csrPEM []byte, node string) ([]byte, error) {
 	if node == "" {
 		return nil, errors.New("empty node name")
@@ -278,7 +280,7 @@ func (c *CA) SignNodeCSR(csrPEM []byte, node string) ([]byte, error) {
 		return nil, err
 	}
 	tmpl.KeyUsage = x509.KeyUsageDigitalSignature
-	tmpl.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
+	tmpl.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, c.Cert, csr.PublicKey, c.Key)
 	if err != nil {
 		return nil, err
