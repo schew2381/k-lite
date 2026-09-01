@@ -26,7 +26,7 @@ interface Pace {
 }
 const PACE: Record<FlowMode, Pace> = {
   traced: { pause: 2600, stepTravel: 1500, settle: 900, travel: 900, shortHop: 350 },
-  live: { pause: 200, stepTravel: 360, settle: 0, travel: 360, shortHop: 160 },
+  live: { pause: 600, stepTravel: 1080, settle: 0, travel: 1080, shortHop: 480 },
 }
 
 const LIVE_FLIGHT_CAP = 24 // beyond this, extra calls stay rail-only

@@ -19,17 +19,24 @@ export function newNodeYaml(name: string): string {
   })
 }
 
-// The chatty demo container: busybox serves its own name over HTTP and rolls
-// a five-percent die every second to wget one random other service through
-// the real data path (kdns, VIP, Envoy). TARGETS is baked at creation time.
+// The chatty demo container: busybox serves its own name over HTTP and
+// calls one random other service through the real data path (kdns, VIP,
+// Envoy). Calls come in waves: every instance sleeps to the same 8-second
+// wall-clock boundary, then rolls one die, so the board launches a
+// generation of dots together and they land before the next wave fires.
+// 13107 of 65536 is 20 percent, the per-wave equivalent of the old 2.5
+// percent per second. TARGETS is baked at creation time.
 function chattyContainer(name: string, targets: string[]) {
   const script = [
     `echo "$(hostname) is ${name}" > /www/index.html`,
     'httpd -p 80 -h /www',
-    // the roll rides the do-line: a '; ' join would otherwise render 'do;',
-    // which busybox ash rejects. 0..65535 from urandom, under 1638 is 2.5 percent
-    'while sleep 1; do r=$(head -c2 /dev/urandom | od -An -tu2 | tr -d " ")',
-    '[ "$r" -lt 1638 ] || continue',
+    // the sleep rides the do-line: a '; ' join would otherwise render 'do;',
+    // which busybox ash rejects. sleep runs backgrounded under wait, since a
+    // trap only fires between foreground commands and a drain shouldn't
+    // stall out the rest of the sleep.
+    'while :; do sleep $((8 - $(date +%s) % 8)) & wait $!',
+    'r=$(head -c2 /dev/urandom | od -An -tu2 | tr -d " ")',
+    '[ "$r" -lt 13107 ] || continue',
     'n=0; for t in $TARGETS; do n=$((n+1)); done',
     '[ "$n" -gt 0 ] || continue',
     'k=$(( ($(head -c2 /dev/urandom | od -An -tu2 | tr -d " ") % n) + 1 ))',
