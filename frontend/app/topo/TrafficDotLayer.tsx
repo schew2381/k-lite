@@ -40,9 +40,9 @@ type Phase =
       toId: string
       label: string
       stepIndex?: number
-      slow?: boolean // the story's headline leg takes extra time
+      zoom?: boolean // the story's headline leg crosses fast, then holds
     }
-  | { kind: 'settle'; anchorId: string } // rest after landing, label unchanged
+  | { kind: 'settle'; anchorId: string; hold?: boolean } // rest after landing, label unchanged
 
 interface Flight {
   trace: Trace
@@ -114,8 +114,11 @@ function phasesOf(trace: Trace, flow: FlowMode): Phase[] {
         toId: anchorId,
         label: step.short,
         stepIndex: i,
-        slow: step.pace === 'long',
+        zoom: step.pace === 'long',
       })
+      // a zoom leg is over in a blink, so the step's text earns a real hold
+      // at the destination before the next step takes the panel
+      if (step.pace === 'long') phases.push({ kind: 'settle', anchorId, hold: true })
     } else {
       if (prevAnchor && moved) {
         phases.push({
@@ -240,9 +243,9 @@ export function TrafficDotLayer({
 
     const stepFlight = (f: Flight, now: number, anchors: Record<string, Point>) => {
       const phase = f.phases[f.phase]
-      let dur = phase.kind === 'settle' ? pace.settle : pace.pause
+      let dur = phase.kind === 'settle' ? (phase.hold ? pace.pause * 0.9 : pace.settle) : pace.pause
       if (phase.kind === 'travel') {
-        if (phase.stepIndex !== undefined) dur = phase.slow ? pace.stepTravel * 1.8 : pace.stepTravel
+        if (phase.stepIndex !== undefined) dur = phase.zoom ? pace.stepTravel * 0.75 : pace.stepTravel
         else {
           const a = anchors[phase.fromId]
           const b = anchors[phase.toId]
