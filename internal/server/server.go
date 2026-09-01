@@ -122,7 +122,16 @@ func (s *Cluster) applyOne(ctx context.Context, o *klitev1.Object) *klitev1.Appl
 		res.Error = strings.ToLower(object.Plural(kind)) + " are server-materialized and read-only"
 		return res
 	}
-	sanitize(o)
+	// done records the outcome, flagging a dropped client status so a
+	// re-applied `klite get` export tells its sender what the server kept.
+	dropped := sanitize(o)
+	done := func(action string) *klitev1.ApplyResult {
+		if dropped {
+			action += " (client status ignored)"
+		}
+		res.Action = action
+		return res
+	}
 	object.Default(o)
 	if err := object.Validate(o); err != nil {
 		res.Error = err.Error()
@@ -140,8 +149,7 @@ func (s *Cluster) applyOne(ctx context.Context, o *klitev1.Object) *klitev1.Appl
 				res.Error = err.Error()
 				return res
 			}
-			res.Action = "created"
-			return res
+			return done("created")
 		case err != nil:
 			res.Error = err.Error()
 			return res
@@ -149,8 +157,7 @@ func (s *Cluster) applyOne(ctx context.Context, o *klitev1.Object) *klitev1.Appl
 
 		merged := mergeSpec(existing, o)
 		if proto.Equal(merged, existing) {
-			res.Action = "unchanged"
-			return res
+			return done("unchanged")
 		}
 		if _, err := s.store.Put(ctx, merged, rev); err != nil {
 			if errors.Is(err, store.ErrConflict) {
@@ -159,32 +166,44 @@ func (s *Cluster) applyOne(ctx context.Context, o *klitev1.Object) *klitev1.Appl
 			res.Error = err.Error()
 			return res
 		}
-		res.Action = "updated"
-		return res
+		return done("updated")
 	}
 	res.Error = "kept losing revision races, try again"
 	return res
 }
 
 // sanitize strips the server-owned fields a client may echo back from a get:
-// meta identity comes from the store and status from controllers.
-func sanitize(o *klitev1.Object) {
+// meta identity comes from the store and status from controllers (ADR 0042).
+// It reports whether the incoming object carried a status, so the apply
+// result can flag the drop instead of losing it silently.
+func sanitize(o *klitev1.Object) bool {
 	m := object.MetaOf(o)
 	m.Uid = ""
 	m.ResourceVersion = 0
 	m.CreatedUnix = 0
 	switch k := o.GetKind().(type) {
 	case *klitev1.Object_Workload:
+		had := k.Workload.Status != nil
 		k.Workload.Status = nil
+		return had
 	case *klitev1.Object_Node:
+		had := k.Node.Status != nil
 		k.Node.Status = nil
+		return had
 	case *klitev1.Object_Instance:
+		had := k.Instance.Status != nil
 		k.Instance.Status = nil
+		return had
 	}
+	return false
 }
 
 // mergeSpec lays the incoming spec and labels over the stored object, keeping
 // meta identity and status, so equality against existing detects a no-op apply.
+// This is the apply half of the ownership split (ADR 0042): spec and labels
+// belong to whoever writes YAML, status belongs to Register, ReportStatus, and
+// the controllers. A node's index, heartbeat, and phase must survive any
+// re-apply, or freeNodeIndex hands a live index to the next joiner.
 func mergeSpec(existing, incoming *klitev1.Object) *klitev1.Object {
 	merged := proto.CloneOf(existing)
 	object.MetaOf(merged).Labels = object.MetaOf(incoming).GetLabels()

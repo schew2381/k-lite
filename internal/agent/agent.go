@@ -309,12 +309,22 @@ func (a *Agent) report(ctx context.Context) {
 	req := &klitev1.ReportStatusRequest{
 		Node: a.node, Instances: a.statusUpdates(), KliteNet: a.kliteNetStatus(),
 		AdvertiseAddress: a.currentAdvertiseIP(),
+		NodeIndex:        a.bootstrapIndex(),
 	}
 	rctx, cancel := context.WithTimeout(ctx, reportTimeout)
 	defer cancel()
 	if _, err := a.client.ReportStatus(rctx, req); err != nil && ctx.Err() == nil {
 		slog.Warn("status report failed", "err", err)
 	}
+}
+
+// bootstrapIndex is the node index this agent's infra runs, saved from the
+// Register-time NetBootstrap. Every report carries it so the server can
+// restore a node record that lost its index to apply churn (ADR 0042).
+func (a *Agent) bootstrapIndex() int32 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.net.GetNodeIndex()
 }
 
 func (a *Agent) statusUpdates() []*klitev1.InstanceStatusUpdate {

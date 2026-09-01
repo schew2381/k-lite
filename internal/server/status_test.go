@@ -58,7 +58,7 @@ func TestStampNodePreservesDraining(t *testing.T) {
 	seedNode(t, st, "node-2", klitev1.NodePhase_NODE_PHASE_DRAINING)
 	a := NewAgent(&AgentConfig{Store: st, ClusterToken: "tok", Hub: NewCommandHub()})
 
-	if err := a.stampNode(ctx, "node-2", ""); err != nil {
+	if _, err := a.stampNode(ctx, "node-2", ""); err != nil {
 		t.Fatal(err)
 	}
 	got, _, _ := st.Get(ctx, object.KindNode, "node-2")
@@ -109,19 +109,19 @@ func TestStampNodeAdvertiseAddress(t *testing.T) {
 		got, _, _ := st.Get(ctx, object.KindNode, "node-2")
 		return got.GetNode().GetStatus().GetAdvertiseAddress()
 	}
-	if err := a.stampNode(ctx, "node-2", advertiseIP("node-2", "192.168.5.2")); err != nil {
+	if _, err := a.stampNode(ctx, "node-2", advertiseIP("node-2", "192.168.5.2")); err != nil {
 		t.Fatal(err)
 	}
 	if addr() != "192.168.5.2" {
 		t.Fatalf("advertise = %q, want 192.168.5.2", addr())
 	}
-	if err := a.stampNode(ctx, "node-2", advertiseIP("node-2", "host.docker.internal")); err != nil {
+	if _, err := a.stampNode(ctx, "node-2", advertiseIP("node-2", "host.docker.internal")); err != nil {
 		t.Fatal(err)
 	}
 	if addr() != "192.168.5.2" {
 		t.Fatalf("advertise = %q, a hostname must never replace the stored IP", addr())
 	}
-	if err := a.stampNode(ctx, "node-2", ""); err != nil {
+	if _, err := a.stampNode(ctx, "node-2", ""); err != nil {
 		t.Fatal(err)
 	}
 	if addr() != "192.168.5.2" {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
-	"slices"
 	"sync"
 	"time"
 
@@ -197,15 +196,11 @@ func (a *Agent) freeNodeIndex(ctx context.Context) (int32, error) {
 // later writer's list always shows the collision and at least one side backs
 // off here instead of keeping a doubled index.
 func (a *Agent) yieldIndexCollision(ctx context.Context, name string, idx int32) (bool, error) {
-	objs, _, err := a.cfg.Store.List(ctx, object.KindNode)
+	holder, err := a.indexHolder(ctx, name, idx)
 	if err != nil {
 		return false, err
 	}
-	collision := slices.ContainsFunc(objs, func(o *klitev1.Object) bool {
-		n := o.GetNode()
-		return n.GetMeta().GetName() != name && n.GetStatus().GetNodeIndex() == idx
-	})
-	if !collision {
+	if holder == "" {
 		return false, nil
 	}
 	slog.Warn("node index assigned twice, yielding", "node", name, "index", idx)
@@ -228,6 +223,21 @@ func (a *Agent) yieldIndexCollision(ctx context.Context, name string, idx int32)
 		return true, nil
 	}
 	return false, fmt.Errorf("node %s index yield: %w", name, store.ErrConflict)
+}
+
+// indexHolder names the node other than name whose record holds idx, or "".
+func (a *Agent) indexHolder(ctx context.Context, name string, idx int32) (string, error) {
+	objs, _, err := a.cfg.Store.List(ctx, object.KindNode)
+	if err != nil {
+		return "", err
+	}
+	for _, o := range objs {
+		n := o.GetNode()
+		if n.GetMeta().GetName() != name && n.GetStatus().GetNodeIndex() == idx {
+			return n.GetMeta().GetName(), nil
+		}
+	}
+	return "", nil
 }
 
 func (a *Agent) netBootstrap(idx int32) *klitev1.NetBootstrap {
@@ -302,10 +312,76 @@ func (a *Agent) ReportStatus(ctx context.Context, req *klitev1.ReportStatusReque
 			slog.Warn("instance status update failed", "instance", u.GetName(), "err", err)
 		}
 	}
-	if err := a.stampNode(ctx, req.GetNode(), advertiseIP(req.GetNode(), req.GetAdvertiseAddress())); err != nil {
+	storedIdx, err := a.stampNode(ctx, req.GetNode(), advertiseIP(req.GetNode(), req.GetAdvertiseAddress()))
+	if err != nil {
 		return nil, storeStatus(err)
 	}
+	a.healNodeIndex(ctx, req.GetNode(), storedIdx, req.GetNodeIndex())
 	return &klitev1.ReportStatusResponse{}, nil
+}
+
+// healNodeIndex restores a node's index from its own agent's report when the
+// stored one went missing: an apply recreated the record after delete churn
+// removed it, and the agent kept running infra on the index it got at
+// Register (ADR 0042). Register can't repair this — it only runs when an
+// agent restarts, and until then freeNodeIndex would hand the hole to the
+// next joiner while this node's donor still squats on the address. Healing
+// on the heartbeat closes that window in about five seconds. The heal never
+// overwrites a set index; a reported index some other record now holds is
+// only logged, because no store write can settle which of two live agents
+// owns the infra.
+func (a *Agent) healNodeIndex(ctx context.Context, name string, stored, reported int32) {
+	switch {
+	case reported == 0 || stored == reported:
+		return
+	case stored != 0:
+		slog.Warn("node reports an index other than its record's; restart its agent to re-register",
+			"node", name, "stored", stored, "reported", reported)
+		return
+	}
+	a.indexMu.Lock()
+	defer a.indexMu.Unlock()
+	for range casRetries {
+		obj, rev, err := a.cfg.Store.Get(ctx, object.KindNode, name)
+		if err != nil {
+			slog.Warn("node index heal failed", "node", name, "err", err)
+			return
+		}
+		node := obj.GetNode()
+		if node.GetStatus().GetNodeIndex() != 0 {
+			return // another writer got there first; the next report re-judges
+		}
+		holder, err := a.indexHolder(ctx, name, reported)
+		if err != nil {
+			slog.Warn("node index heal failed", "node", name, "err", err)
+			return
+		}
+		if holder != "" {
+			slog.Warn("cannot restore node index, another node's record now holds it",
+				"node", name, "index", reported, "holder", holder)
+			return
+		}
+		if node.Status == nil {
+			node.Status = &klitev1.NodeStatus{}
+		}
+		node.Status.NodeIndex = reported
+		if _, err := a.cfg.Store.Put(ctx, obj, rev); err != nil {
+			if errors.Is(err, store.ErrConflict) {
+				continue
+			}
+			slog.Warn("node index heal failed", "node", name, "err", err)
+			return
+		}
+		yielded, err := a.yieldIndexCollision(ctx, name, reported)
+		if err != nil || yielded {
+			slog.Warn("node index restore collided, yielded until the next heartbeat",
+				"node", name, "index", reported, "err", err)
+			return
+		}
+		slog.Info("node index restored from its agent's report", "node", name, "index", reported)
+		return
+	}
+	slog.Warn("node index heal kept losing revision races", "node", name)
 }
 
 // advertiseIP screens a reported advertise address down to a literal,
@@ -382,11 +458,13 @@ func servingPhase(p klitev1.InstancePhase) bool {
 // heartbeats: the node controller flips it back once the drain completes.
 // A non-empty advertise address rides along (ADR 0034): agents resolve it
 // only after their donor exists, so it usually lands here, not at Register.
-func (a *Agent) stampNode(ctx context.Context, name, advertise string) error {
+// It returns the stored node index so ReportStatus can judge whether the
+// record needs healNodeIndex, without a second read on the hot path.
+func (a *Agent) stampNode(ctx context.Context, name, advertise string) (int32, error) {
 	for range casRetries {
 		obj, rev, err := a.cfg.Store.Get(ctx, object.KindNode, name)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		node := obj.GetNode()
 		if node.Status == nil {
@@ -399,7 +477,7 @@ func (a *Agent) stampNode(ctx context.Context, name, advertise string) error {
 		now := time.Now().Unix()
 		sameAdvertise := advertise == "" || node.Status.GetAdvertiseAddress() == advertise
 		if node.Status.LastHeartbeatUnix == now && node.Status.Phase == phase && sameAdvertise {
-			return nil
+			return node.Status.GetNodeIndex(), nil
 		}
 		node.Status.LastHeartbeatUnix = now
 		node.Status.Phase = phase
@@ -410,9 +488,9 @@ func (a *Agent) stampNode(ctx context.Context, name, advertise string) error {
 			if errors.Is(err, store.ErrConflict) {
 				continue
 			}
-			return err
+			return 0, err
 		}
-		return nil
+		return node.Status.GetNodeIndex(), nil
 	}
-	return fmt.Errorf("node %s heartbeat: %w", name, store.ErrConflict)
+	return 0, fmt.Errorf("node %s heartbeat: %w", name, store.ErrConflict)
 }
