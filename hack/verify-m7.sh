@@ -19,6 +19,8 @@
 #   restart        the dead klited returns as standby
 #   etcd chaos     one member down, then an informational quorum-loss probe
 #   agent kill     NotReady detection, reschedule, orphan cleanup
+#   node re-apply  node YAMLs re-applied mid-run: indexes survive, no donor
+#                  fight (tree builds only — the pinned ref predates indexes)
 #   rollout resume leader dies mid-rollout, the survivor finishes it
 #                  (tree builds only, since the pinned ref predates M5)
 #   teardown       everything m7-scoped removed
@@ -159,6 +161,39 @@ start_agent() {
   disown
 }
 
+# apply_m7_nodes declares the three m7 nodes. Step 1 boots with it, and
+# step 7b re-applies it mid-run as the incident-113013 churn action.
+apply_m7_nodes() {
+  "$KLITE" --server "$BOTH" apply -f - >/dev/null <<'EOF'
+apiVersion: klite/v1
+kind: Node
+metadata:
+  name: m7-1
+  labels:
+    zone: local
+spec:
+  maxInstances: 32
+---
+apiVersion: klite/v1
+kind: Node
+metadata:
+  name: m7-2
+  labels:
+    zone: local
+spec:
+  maxInstances: 32
+---
+apiVersion: klite/v1
+kind: Node
+metadata:
+  name: m7-3
+  labels:
+    zone: local
+spec:
+  maxInstances: 32
+EOF
+}
+
 etcd_healthy() { docker exec etcd-m7-1 etcdctl endpoint health --cluster >/dev/null 2>&1; }
 
 # ============================================================
@@ -176,11 +211,11 @@ pass "m7 ports free (9443 9445 4379 4381 4383)"
 
 # Build from a pinned pre-M4 commit by default. M4 agents (0ef2c42+) start
 # infra pods with cluster-scoped STATIC addresses on the shared klite0
-# network (10.44.0.<10+index>) plus host admin ports 19000+i/19500+i. A
-# second cluster on the same Docker daemon collides with the canonical dev
-# cluster in both directions. Until that's per-cluster, chaos runs stay on the
-# pre-infra stack. Override with M7_REF=HEAD (dedicated daemon only) or
-# M7_TREE=1 to build the working tree.
+# network (10.44.0.<10+index>) plus host admin ports 19000+i/19500+i. M8 made
+# every one of those per-cluster knobs, so tree builds now pass ISO_FLAGS
+# below and coexist with the canonical dev cluster. The pinned ref predates
+# the flags and starts no infra, so it takes none. Override with M7_REF=HEAD
+# or M7_TREE=1 to build the working tree.
 M7_REF="${M7_REF:-5e09b2c}"
 TREE_BUILD=0
 build_set() { (cd "$1" && go build -o "$BIN/klited" ./cmd/klited && go build -o "$BIN/klite" ./cmd/klite && go build -o "$BIN/klite-agent" ./cmd/klite-agent); }
@@ -194,6 +229,13 @@ else
   build_set "$WORK/src" >"$WORK/build.log" 2>&1 || die "$M7_REF does not build (see $WORK/build.log)"
   pass "built klited, klite, klite-agent from $M7_REF"
 fi
+
+# Keep tree-built infra clear of the canonical cluster: donors at
+# 10.44.0.<130+i> instead of <10+i>, admin ports at 21000/21500 instead of
+# 19000/19500, ingress slices at 23000 instead of 20000. Expanded unquoted
+# on purpose, so an empty value adds no argument on pinned-ref runs.
+ISO_FLAGS=""
+[ "$TREE_BUILD" = 1 ] && ISO_FLAGS="--net-admin-port-base 21000 --envoy-admin-port-base 21500 --infra-ip-base 130 --ingress-port-base 23000"
 
 docker image inspect traefik/whoami:v1.10 >/dev/null 2>&1 || docker pull traefik/whoami:v1.10 >/dev/null 2>&1
 
@@ -226,7 +268,7 @@ done
 wait_for 30 etcd_healthy && pass "etcd trio healthy on $ETCD_EPS" || die "etcd trio healthy on $ETCD_EPS"
 
 # klited A first so leadership lands on it deterministically, then B as standby.
-"$BIN/klited" --listen "$EP_A" --etcd "$ETCD_EPS" >"$LOG_A" 2>&1 &
+"$BIN/klited" --listen "$EP_A" --etcd "$ETCD_EPS" $ISO_FLAGS >"$LOG_A" 2>&1 &
 KLITED_A_PID=$!
 disown
 a_leads() { [ "$(leader_state "$LOG_A")" = leading ]; }
@@ -243,7 +285,7 @@ done
 [ "$ROWS" = 0 ] && pass "fresh etcd store is empty (no state leaked from earlier runs)" \
   || die "fresh etcd store already holds $ROWS object(s), so teardown is leaking state"
 
-"$BIN/klited" --listen "$EP_B" --etcd "$ETCD_EPS" >"$LOG_B" 2>&1 &
+"$BIN/klited" --listen "$EP_B" --etcd "$ETCD_EPS" $ISO_FLAGS >"$LOG_B" 2>&1 &
 KLITED_B_PID=$!
 disown
 b_standby() { [ "$(leader_state "$LOG_B")" = standby ]; }
@@ -252,34 +294,7 @@ wait_for 15 klited_b_serves && wait_for 10 b_standby \
   && pass "klited B ($EP_B) serving and standing by" || die "klited B ($EP_B) serving and standing by"
 grep -q "controllers: leading" "$LOG_B" && die "both klited replicas claim leadership at boot"
 
-"$KLITE" --server "$BOTH" apply -f - >/dev/null <<'EOF' || die "apply 3 node YAMLs"
-apiVersion: klite/v1
-kind: Node
-metadata:
-  name: m7-1
-  labels:
-    zone: local
-spec:
-  maxInstances: 32
----
-apiVersion: klite/v1
-kind: Node
-metadata:
-  name: m7-2
-  labels:
-    zone: local
-spec:
-  maxInstances: 32
----
-apiVersion: klite/v1
-kind: Node
-metadata:
-  name: m7-3
-  labels:
-    zone: local
-spec:
-  maxInstances: 32
-EOF
+apply_m7_nodes || die "apply 3 node YAMLs"
 pass "applied node YAMLs for m7-1 m7-2 m7-3"
 
 # Known gap, re-probed each run: klite-agent takes exactly one --server address
@@ -405,7 +420,7 @@ DEAD_S=$(( $(date +%s) - T0 ))
 # ============================================================
 STEP=5-restart-klited
 LOG_A="$WORK/klited-9443-restart.log"
-"$BIN/klited" --listen "$EP_A" --etcd "$ETCD_EPS" >"$LOG_A" 2>&1 &
+"$BIN/klited" --listen "$EP_A" --etcd "$ETCD_EPS" $ISO_FLAGS >"$LOG_A" 2>&1 &
 KLITED_A_PID=$!
 disown
 a_standby() { [ "$(leader_state "$LOG_A")" = standby ]; }
@@ -513,6 +528,73 @@ wait_for 20 victim_ready && pass "$VICTIM Ready again after agent restart" \
 wait_for 30 converged_running 4 \
   && pass "orphans cleaned: containers match instance objects exactly" \
   || die "orphans cleaned: containers match instance objects exactly"
+
+# ============================================================
+STEP=7b-node-reapply
+# The incident-113013 churn: re-applying node YAMLs is how operators cancel a
+# pending delete (ADR 0033), and it once recreated churn-deleted records with
+# no status. A wiped index let Register hand a live index to the next joiner,
+# and the two donors then evicted each other over one address every ~2s until
+# DNS flapped. Assert the fixed behavior (ADR 0042): every index survives the
+# re-apply, and a 30s log window shows no fight. Tree builds only, since the
+# pinned ref predates node indexes and infra pods alike.
+if [ "$TREE_BUILD" = 1 ]; then
+  node_index() {
+    "$KLITE" --server "$BOTH" get node "$1" -o yaml 2>/dev/null | awk '$1=="nodeIndex:"{print $2; exit}'
+  }
+  donors_running() {
+    [ "$(docker ps --filter "name=klite.m7-" --filter "status=running" --format '{{.Names}}' | grep -c '\.net$')" = 3 ]
+  }
+  wait_for 60 donors_running && pass "3 donor containers running before the re-apply" \
+    || die "3 donor containers running before the re-apply"
+
+  IDX_BEFORE=""
+  for n in $NODES; do
+    idx=$(node_index "$n")
+    { [ -n "$idx" ] && [ "$idx" != 0 ]; } || die "node $n has no index before the re-apply"
+    IDX_BEFORE="$IDX_BEFORE $n=$idx"
+    eval "OFF_${n//-/_}=$(wc -c <"$WORK/agent-$n.log" | tr -d ' ')"
+  done
+  info "indexes before re-apply:$IDX_BEFORE"
+
+  apply_m7_nodes || die "re-apply 3 node YAMLs mid-run"
+  IDX_AFTER=""
+  for n in $NODES; do IDX_AFTER="$IDX_AFTER $n=$(node_index "$n")"; done
+  [ "$IDX_AFTER" = "$IDX_BEFORE" ] \
+    && pass "node indexes survived the re-apply:$IDX_AFTER" \
+    || die "node indexes changed across the re-apply: before$IDX_BEFORE after$IDX_AFTER"
+
+  # The fight's two log signatures, in any agent log, from this step on. The
+  # broken behavior printed both every couple of seconds, so a quiet 30s
+  # window is decisive.
+  fight_lines() {
+    local n off
+    for n in $NODES; do
+      eval "off=\$OFF_${n//-/_}"
+      tail -c +"$((off + 1))" "$WORK/agent-$n.log" 2>/dev/null \
+        | grep -E "Address already in use|removing stale donor holding our address"
+    done
+    return 0
+  }
+  T0=$(date +%s)
+  while [ $(( $(date +%s) - T0 )) -lt 30 ]; do
+    FIGHT="$(fight_lines)"
+    [ -z "$FIGHT" ] || die "donor fight after node re-apply: $(printf '%s' "$FIGHT" | head -2 | tr '\n' ' ')"
+    sleep 1
+  done
+  pass "no donor fight in the 30s window after re-apply"
+
+  IDX_FINAL=""
+  for n in $NODES; do IDX_FINAL="$IDX_FINAL $n=$(node_index "$n")"; done
+  [ "$IDX_FINAL" = "$IDX_BEFORE" ] \
+    && pass "indexes still intact after 30s of heartbeats:$IDX_FINAL" \
+    || die "indexes drifted during the window: before$IDX_BEFORE after$IDX_FINAL"
+  all_nodes_ready && converged 4 \
+    && pass "3 nodes Ready and m7-web at 4/4 through the re-apply churn" \
+    || die "cluster degraded after the re-apply churn"
+else
+  echo "SKIP [$STEP]: node-reapply churn — $M7_REF predates node indexes and infra pods (run with M7_TREE=1)"
+fi
 
 # ============================================================
 STEP=8-rollout-resume
