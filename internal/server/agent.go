@@ -321,13 +321,13 @@ func (a *Agent) ReportStatus(ctx context.Context, req *klitev1.ReportStatusReque
 }
 
 // healNodeIndex restores a node's index from its own agent's report when the
-// stored one went missing: an apply recreated the record after delete churn
-// removed it, and the agent kept running infra on the index it got at
-// Register (ADR 0042). Register can't repair this — it only runs when an
+// stored one went missing (ADR 0042). Delete churn removed the record, an
+// apply recreated it statusless, and the agent kept running infra on the
+// index it got at Register. Register can't repair this. It only runs when an
 // agent restarts, and until then freeNodeIndex would hand the hole to the
 // next joiner while this node's donor still squats on the address. Healing
 // on the heartbeat closes that window in about five seconds. The heal never
-// overwrites a set index; a reported index some other record now holds is
+// overwrites a set index. A reported index some other record now holds is
 // only logged, because no store write can settle which of two live agents
 // owns the infra.
 func (a *Agent) healNodeIndex(ctx context.Context, name string, stored, reported int32) {
@@ -349,7 +349,7 @@ func (a *Agent) healNodeIndex(ctx context.Context, name string, stored, reported
 		}
 		node := obj.GetNode()
 		if node.GetStatus().GetNodeIndex() != 0 {
-			return // another writer got there first; the next report re-judges
+			return // another writer got there first, so the next report re-judges
 		}
 		holder, err := a.indexHolder(ctx, name, reported)
 		if err != nil {

@@ -20,7 +20,7 @@
 #   etcd chaos     one member down, then an informational quorum-loss probe
 #   agent kill     NotReady detection, reschedule, orphan cleanup
 #   node re-apply  node YAMLs re-applied mid-run: indexes survive, no donor
-#                  fight (tree builds only — the pinned ref predates indexes)
+#                  fight (tree builds only, since the pinned ref predates indexes)
 #   rollout resume leader dies mid-rollout, the survivor finishes it
 #                  (tree builds only, since the pinned ref predates M5)
 #   teardown       everything m7-scoped removed
@@ -531,9 +531,9 @@ wait_for 30 converged_running 4 \
 
 # ============================================================
 STEP=7b-node-reapply
-# The incident-113013 churn: re-applying node YAMLs is how operators cancel a
-# pending delete (ADR 0033), and it once recreated churn-deleted records with
-# no status. A wiped index let Register hand a live index to the next joiner,
+# This replays incident 113013's churn. Re-applying node YAMLs is how
+# operators cancel a pending delete (ADR 0033), and it once recreated
+# churn-deleted records with no status. A wiped index let Register hand a live index to the next joiner,
 # and the two donors then evicted each other over one address every ~2s until
 # DNS flapped. Assert the fixed behavior (ADR 0042): every index survives the
 # re-apply, and a 30s log window shows no fight. Tree builds only, since the
@@ -564,9 +564,9 @@ if [ "$TREE_BUILD" = 1 ]; then
     && pass "node indexes survived the re-apply:$IDX_AFTER" \
     || die "node indexes changed across the re-apply: before$IDX_BEFORE after$IDX_AFTER"
 
-  # The fight's two log signatures, in any agent log, from this step on. The
-  # broken behavior printed both every couple of seconds, so a quiet 30s
-  # window is decisive.
+  # fight_lines greps the fight's two signatures out of every agent log, from
+  # this step on. The broken behavior printed both every couple of seconds,
+  # so a quiet 30s window is decisive.
   fight_lines() {
     local n off
     for n in $NODES; do

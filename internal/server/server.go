@@ -122,9 +122,9 @@ func (s *Cluster) applyOne(ctx context.Context, o *klitev1.Object) *klitev1.Appl
 		res.Error = strings.ToLower(object.Plural(kind)) + " are server-materialized and read-only"
 		return res
 	}
+	dropped := sanitize(o)
 	// done records the outcome, flagging a dropped client status so a
 	// re-applied `klite get` export tells its sender what the server kept.
-	dropped := sanitize(o)
 	done := func(action string) *klitev1.ApplyResult {
 		if dropped {
 			action += " (client status ignored)"
@@ -201,9 +201,10 @@ func sanitize(o *klitev1.Object) bool {
 // mergeSpec lays the incoming spec and labels over the stored object, keeping
 // meta identity and status, so equality against existing detects a no-op apply.
 // This is the apply half of the ownership split (ADR 0042): spec and labels
-// belong to whoever writes YAML, status belongs to Register, ReportStatus, and
-// the controllers. A node's index, heartbeat, and phase must survive any
-// re-apply, or freeNodeIndex hands a live index to the next joiner.
+// belong to whoever writes YAML, while status belongs to Register,
+// ReportStatus, and the controllers. A node's index, heartbeat, and phase
+// must survive any re-apply, or freeNodeIndex hands a live index to the
+// next joiner.
 func mergeSpec(existing, incoming *klitev1.Object) *klitev1.Object {
 	merged := proto.CloneOf(existing)
 	object.MetaOf(merged).Labels = object.MetaOf(incoming).GetLabels()

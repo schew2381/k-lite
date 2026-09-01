@@ -1075,9 +1075,9 @@ type ReportStatusRequest struct {
 	// value alone.
 	AdvertiseAddress string `protobuf:"bytes,4,opt,name=advertise_address,json=advertiseAddress,proto3" json:"advertise_address,omitempty"`
 	// The index this agent's infra actually runs, from its Register-time
-	// NetBootstrap. The server restores a stored index that went missing —
-	// a node record recreated by apply after delete churn (ADR 0042) — and
-	// never overwrites a set one. Zero means the agent predates this field.
+	// NetBootstrap. When apply recreates a node record after delete churn
+	// (ADR 0042), the server restores the missing index from this field, and
+	// it never overwrites a set one. Zero means the agent predates this field.
 	NodeIndex     int32 `protobuf:"varint,5,opt,name=node_index,json=nodeIndex,proto3" json:"node_index,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

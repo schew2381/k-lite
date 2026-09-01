@@ -157,9 +157,9 @@ message ReportStatusRequest {
   // value alone.
   string advertise_address = 4;
   // The index this agent's infra actually runs, from its Register-time
-  // NetBootstrap. The server restores a stored index that went missing —
-  // a node record recreated by apply after delete churn (ADR 0042) — and
-  // never overwrites a set one. Zero means the agent predates this field.
+  // NetBootstrap. When apply recreates a node record after delete churn
+  // (ADR 0042), the server restores the missing index from this field, and
+  // it never overwrites a set one. Zero means the agent predates this field.
   int32 node_index = 5;
 }
 

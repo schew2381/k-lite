@@ -12,11 +12,11 @@ import (
 	"github.com/schew2381/k-lite/internal/store/storetest"
 )
 
-// These tests pin the ownership split ADR 0042 records, after incident
-// 113013: applying YAML must never cost a node its server-set status, and a
-// record that lost its index anyway must get it back from its agent's next
-// heartbeat — before freeNodeIndex hands the hole to a joiner whose donor
-// then fights the incumbent's over one address.
+// These tests pin ADR 0042's ownership split, after incident 113013.
+// Applying YAML must never cost a node its server-set status. A record that
+// lost its index anyway must get it back on its agent's next heartbeat,
+// before freeNodeIndex hands the hole to a joiner whose donor then fights
+// the incumbent's over one address.
 
 func nodeDoc(name string, maxInstances int) []byte {
 	return fmt.Appendf(nil,
@@ -96,8 +96,8 @@ func TestApplyOverRegisteredNodePreservesStatus(t *testing.T) {
 		t.Fatalf("register left status %v, want READY with a heartbeat", before)
 	}
 
-	// Identical YAML: the status carried forward must not defeat the no-op
-	// check, or every re-apply would burn a revision.
+	// The status carried forward must not defeat the no-op check on
+	// identical YAML, or every re-apply would burn a revision.
 	if res := applyOneDoc(t, s, nodeDoc("node-1", 32)); res.GetAction() != "unchanged" {
 		t.Errorf("no-op re-apply action = %q, want unchanged", res.GetAction())
 	}
@@ -155,7 +155,7 @@ func TestApplyOverWorkloadPreservesStatus(t *testing.T) {
 	s := NewCluster(st, nil, nil)
 	applyOneDoc(t, s, workloadDoc("web", 2))
 
-	// The workload controller's write, in miniature.
+	// Mimic the workload controller's write.
 	obj, rev, err := st.Get(ctx, object.KindWorkload, "web")
 	if err != nil {
 		t.Fatal(err)
@@ -178,9 +178,9 @@ func TestApplyOverWorkloadPreservesStatus(t *testing.T) {
 	}
 }
 
-// The churn that broke the live cluster: re-apply every node's YAML, then
-// let a new node join. The joiner must get a fresh index, never one a live
-// agent still runs.
+// Replay the churn that broke the live cluster: re-apply every node's YAML,
+// then let a new node join. The joiner must get a fresh index, never one a
+// live agent still runs.
 func TestRegisterAfterReapplyIssuesFreshIndex(t *testing.T) {
 	t.Parallel()
 	st := storetest.New()
@@ -205,9 +205,9 @@ func TestRegisterAfterReapplyIssuesFreshIndex(t *testing.T) {
 	}
 }
 
-// The self-heal: a record recreated without its index (delete finished, then
-// the YAML came back) gets it restored by the agent's next heartbeat, so a
-// later joiner sees the index as held.
+// A record recreated without its index (delete finished, then the YAML came
+// back) gets it restored by the agent's next heartbeat, so a later joiner
+// sees the index as held.
 func TestReportStatusRestoresWipedIndex(t *testing.T) {
 	t.Parallel()
 	st := storetest.New()
@@ -218,9 +218,9 @@ func TestReportStatusRestoresWipedIndex(t *testing.T) {
 		declareAndRegister(t, s, a, fmt.Sprintf("node-%d", i))
 	}
 
-	// The incident's damage: the drain emptied node-2, the controller removed
-	// the record, and the re-applied YAML recreated it statusless while the
-	// agent kept running index 2.
+	// Deal the incident's damage by hand: the drain emptied node-2, the
+	// controller removed the record, and the re-applied YAML recreated it
+	// statusless while the agent kept running index 2.
 	if err := st.Delete(ctx, object.KindNode, "node-2"); err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestReportStatusRestoresWipedIndex(t *testing.T) {
 }
 
 // The heal is restore-only. A held index stays with its holder, and a
-// mismatched report never rewrites a set one — no store write can settle
+// mismatched report never rewrites a set one. No store write can settle
 // which of two live agents owns the infra, so the server just says so.
 func TestReportStatusNeverStealsOrOverwritesIndex(t *testing.T) {
 	t.Parallel()
@@ -261,8 +261,8 @@ func TestReportStatusNeverStealsOrOverwritesIndex(t *testing.T) {
 	}
 	applyOneDoc(t, s, nodeDoc("node-2", 32))
 
-	// node-4 joins before node-2's heartbeat lands and takes the freed 2:
-	// the incident, one register too late for the heal to prevent.
+	// node-4 joins before node-2's heartbeat lands and takes the freed 2,
+	// replaying the incident one register ahead of the heal.
 	if got := declareAndRegister(t, s, a, "node-4"); got != 2 {
 		t.Fatalf("node-4 index = %d, want 2 (the hole the wipe opened)", got)
 	}
