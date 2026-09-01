@@ -17,7 +17,7 @@
 #                                 addresses rather than guessing
 #   KLITE_VPN        --vpn        "tailscale" puts the box on a tailnet and
 #                                 advertises its tailnet IP (docs/real-nodes.md)
-#   KLITE_TS_AUTHKEY --ts-authkey tailnet auth key for tailscale up; needed
+#   KLITE_TS_AUTHKEY --ts-authkey tailnet auth key for tailscale up, needed
 #                                 unless the box is already on the tailnet
 #   KLITE_VERSION    --version    release tag to install (default: latest)
 #   KLITE_YES=1      --yes        consent to installing Docker (get.docker.com)
