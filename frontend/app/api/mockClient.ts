@@ -85,7 +85,7 @@ export function createMockClient(): KliteClient {
 
   return {
     mode: 'mock',
-    can: { cordon: true, drain: true },
+    can: { cordon: true, uncordon: true, drain: true },
 
     async apply(yamlText) {
       const { objects, errors } = parseApplyYaml(yamlText)

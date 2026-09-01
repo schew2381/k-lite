@@ -19,7 +19,9 @@ export interface KliteClient {
 
   // can lists what this client actually serves. The facade grows routes
   // over time, and buttons for missing ones hide instead of throwing.
-  readonly can: { cordon: boolean; drain: boolean }
+  // cordon and uncordon differ live: a cordon only happens as the first step
+  // of a drain, while uncordon is its own RPC (M8).
+  readonly can: { cordon: boolean; uncordon: boolean; drain: boolean }
 
   apply(yamlText: string): Promise<ApplyResult[]>
   list(kind: Kind): Promise<KliteObject[]>
@@ -29,11 +31,15 @@ export interface KliteClient {
   // First-class RPCs from ClusterService (api/proto/klite/v1/cluster.proto)
   scale(workload: string, replicas: number): Promise<void>
   drainNode(node: string): Promise<void> // cordon + surge-out. The node stays
-  cordon(node: string, on: boolean): Promise<void> // Uncordon RPC landed server-side, but no facade route serves either direction yet
+  cordon(node: string, on: boolean): Promise<void> // on=false rides the uncordon route live; on=true is mock-only
 
   watch(onEvent: (e: WatchEvent) => void): Unsubscribe
   watchTraffic(onEvent: (e: TrafficEvent) => void): Unsubscribe
   streamLogs(instance: string, onLine: (l: LogLine) => void): Unsubscribe
+
+  // Live only: mint a join token plus the klited endpoints a new machine
+  // dials. The mock joins nodes instantly, so it has no use for one.
+  nodeToken?(): Promise<{ token: string; endpoints: string[] }>
 
   policyCheck(from: string, to: string): Promise<PolicyVerdict>
   topology(): Promise<Topology>

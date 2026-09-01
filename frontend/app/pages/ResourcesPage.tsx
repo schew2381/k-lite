@@ -68,7 +68,7 @@ export default function ResourcesPage() {
               <TableRow>
                 <TableHead>name</TableHead>
                 <TableHead>image</TableHead>
-                <TableHead>replicas</TableHead>
+                <TableHead>instances</TableHead>
                 <TableHead>ready</TableHead>
                 <TableHead>service</TableHead>
                 <TableHead className="w-12" />
@@ -201,7 +201,7 @@ export default function ResourcesPage() {
                 <TableCell className="font-mono text-xs">{infraIpOf(node) ?? 'starting…'}</TableCell>
                 <TableCell>
                   <span className="flex gap-1.5">
-                    {client.can.cordon && (
+                    {(node.status?.unschedulable ? client.can.uncordon : client.can.cordon) && (
                       <Button
                         variant="outline"
                         size="sm"

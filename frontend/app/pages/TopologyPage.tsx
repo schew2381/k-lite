@@ -14,6 +14,7 @@ import { AddServiceDialog } from '@/topo/AddServiceDialog'
 import { ControlPlaneStrip } from '@/topo/ControlPlaneStrip'
 import { useFlow } from '@/topo/flow'
 import { InstanceChip } from '@/topo/InstanceChip'
+import { type JoinInfo, JoinNodeDialog } from '@/topo/JoinNodeDialog'
 import { NodeCard } from '@/topo/NodeCard'
 import { PolicyArcs } from '@/topo/PolicyArcs'
 import { PolicyBuilder } from '@/topo/PolicyBuilder'
@@ -78,13 +79,21 @@ export default function TopologyPage() {
   const services = sortedServices(snapshot)
   const byNode = instancesByNode(snapshot)
 
+  const [joinInfo, setJoinInfo] = useState<JoinInfo | null>(null)
   const addNode = useCallback(() => {
     const taken = new Set(nodes.map((n) => n.metadata.name))
     let i = 1
     while (taken.has(`node-${i}`)) i++
+    const name = `node-${i}`
     act(
-      client.apply(newNodeYaml(`node-${i}`)).then(() => {
-        toast(`node-${i} is joining. Its infra pod is starting`)
+      client.apply(newNodeYaml(name)).then(async () => {
+        // live: declaring is half the join, so hand over the agent command
+        if (client.nodeToken) {
+          const { token, endpoints } = await client.nodeToken()
+          setJoinInfo({ node: name, token, endpoints })
+        } else {
+          toast(`${name} is joining. Its infra pod is starting`)
+        }
       }),
     )
   }, [client, nodes])
@@ -112,6 +121,7 @@ export default function TopologyPage() {
         </div>
 
         <ControlPlaneStrip />
+        <JoinNodeDialog info={joinInfo} onOpenChange={(open) => !open && setJoinInfo(null)} />
         <div className="boardbox relative overflow-hidden" ref={board.ref}>
           <div className="relative" style={{ height: layout.height }}>
             <PolicyArcs snapshot={snapshot} layout={layout} />

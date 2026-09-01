@@ -1,6 +1,7 @@
-// Add a whole new service (d, e, …) without writing YAML: name, image, and
-// replicas become a Workload + Service pair applied through the same
-// channel everything else uses.
+// Add a whole new service (d, e, …) without writing YAML: a name and an
+// instance count become a Workload + Service pair applied through the same
+// channel everything else uses. The image stays fixed (a whoami that answers
+// HTTP), and anyone who needs a different one has the apply page.
 
 import { PlusIcon } from 'lucide-react'
 import { useState } from 'react'
@@ -23,6 +24,8 @@ import { newServiceYaml } from '@/lib/yamlgen'
 import { sortedServices } from '@/store/selectors'
 import { useSnapshot } from '@/store/store'
 
+const DEFAULT_IMAGE = 'traefik/whoami:v1.10'
+
 function nextName(taken: Set<string>): string {
   for (let i = 0; i < 26; i++) {
     const candidate = String.fromCharCode(97 + ((3 + i) % 26)) // start at d
@@ -39,32 +42,29 @@ export function AddServiceDialog() {
   const taken = new Set(sortedServices(snapshot).map((s) => s.metadata.name))
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
-  const [image, setImage] = useState('traefik/whoami:v1.10')
-  const [replicas, setReplicas] = useState('2')
+  const [instances, setInstances] = useState('2')
 
   const effectiveName = name.trim() || nextName(taken)
-  const parsedReplicas = Number(replicas)
+  const parsedInstances = Number(instances)
   const valid =
     /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(effectiveName) &&
     !taken.has(effectiveName) &&
-    Number.isInteger(parsedReplicas) &&
-    parsedReplicas >= 0 &&
-    parsedReplicas <= 64
+    Number.isInteger(parsedInstances) &&
+    parsedInstances >= 0 &&
+    parsedInstances <= 64
 
   const create = () => {
     if (!valid) return
     act(
-      client
-        .apply(newServiceYaml(effectiveName, image.trim() || 'traefik/whoami:v1.10', parsedReplicas))
-        .then((results) => {
-          const failed = results.find((r) => r.action === 'error')
-          if (failed) toast.error(failed.error ?? 'rejected')
-          else {
-            toast(`workload/${effectiveName} and service/${effectiveName} created`)
-            setOpen(false)
-            setName('')
-          }
-        }),
+      client.apply(newServiceYaml(effectiveName, DEFAULT_IMAGE, parsedInstances)).then((results) => {
+        const failed = results.find((r) => r.action === 'error')
+        if (failed) toast.error(failed.error ?? 'rejected')
+        else {
+          toast(`workload/${effectiveName} and service/${effectiveName} created`)
+          setOpen(false)
+          setName('')
+        }
+      }),
     )
   }
 
@@ -80,8 +80,9 @@ export function AddServiceDialog() {
         <DialogHeader>
           <DialogTitle className="font-mono">new service</DialogTitle>
           <DialogDescription>
-            Creates a Workload and its Service through apply. The scheduler places it, every node answers
-            with its own VIP, and it joins the traffic rotation on its own.
+            Creates a Workload and its Service through apply, running a whoami image that answers HTTP.
+            The scheduler places it, every node answers with its own VIP, and it joins the traffic
+            rotation on its own.
           </DialogDescription>
         </DialogHeader>
         <FieldGroup>
@@ -97,22 +98,13 @@ export function AddServiceDialog() {
             />
           </Field>
           <Field>
-            <FieldLabel htmlFor="svc-image">image</FieldLabel>
+            <FieldLabel htmlFor="svc-instances">instances</FieldLabel>
             <Input
-              id="svc-image"
-              className="font-mono"
-              value={image}
-              onChange={(e) => setImage(e.target.value)}
-            />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="svc-replicas">replicas</FieldLabel>
-            <Input
-              id="svc-replicas"
+              id="svc-instances"
               className="font-mono"
               inputMode="numeric"
-              value={replicas}
-              onChange={(e) => setReplicas(e.target.value)}
+              value={instances}
+              onChange={(e) => setInstances(e.target.value)}
             />
           </Field>
         </FieldGroup>

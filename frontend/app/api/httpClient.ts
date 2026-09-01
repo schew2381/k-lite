@@ -27,9 +27,20 @@
 //                                       "matchedPolicy":...,"reason":...}
 // GET    /api/topology                 → the composed graph (Topology type)
 //
-// Not served yet: scale, drain, and uncordon routes (the RPCs all exist, and
-// scale rides apply below until a route lands), plus GET /api/traffic
-// (ADR 0024's feed). watchTraffic degrades to the rail's waiting state.
+// POST   /api/workloads/{name}/scale  body {"replicas": n} → Scale RPC (CAS
+//                                      on replicas alone)
+// POST   /api/nodes/{name}/drain       streaming Drain RPC bridged as chunked
+//                                      text progress lines; ?force=1 forces.
+//                                      The drain is level-based, so dropping
+//                                      the stream cancels nothing.
+// POST   /api/nodes/{name}/uncordon    → Uncordon RPC (M8). Cordon has no
+//                                      route: live, it only happens as the
+//                                      first step of a drain.
+// GET    /api/nodetoken                → {"token", "endpoints"} for joining a
+//                                      new machine with klite-agent
+//
+// Not served yet: GET /api/traffic (ADR 0024's feed). watchTraffic degrades
+// to the rail's waiting state.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { KliteClient, Unsubscribe } from './client'
@@ -59,7 +70,7 @@ function toApplyResults(wire: WireResults): ApplyResult[] {
 
 export class HttpClient implements KliteClient {
   readonly mode = 'http' as const
-  readonly can = { cordon: false, drain: false }
+  readonly can = { cordon: false, uncordon: true, drain: true }
 
   private baseUrl: string
 
@@ -109,29 +120,33 @@ export class HttpClient implements KliteClient {
     }
   }
 
-  // The Scale RPC exists but has no facade route yet, so scaling rides the
-  // same channel the CLI's edit-and-apply does. Once a route lands, this
-  // collapses to a single POST.
   async scale(workload: string, replicas: number): Promise<void> {
-    const wl = await this.get('Workload', workload)
-    if (wl?.kind !== 'Workload') throw new Error(`workload ${workload} not found`)
-    const doc = {
-      apiVersion: wl.apiVersion,
-      kind: wl.kind,
-      metadata: { name: wl.metadata.name, labels: wl.metadata.labels },
-      spec: { ...wl.spec, replicas },
+    await this.json(`/api/workloads/${workload}/scale`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ replicas }),
+    })
+  }
+
+  // Resolves once the drain starts. The progress lines keep streaming in the
+  // background and the watch narrates the drain anyway, so nothing waits on
+  // them.
+  async drainNode(node: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/nodes/${node}/drain`, { method: 'POST' })
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: string } | null
+      throw new Error(body?.error ?? `drain ${node}: ${res.status}`)
     }
-    const results = await this.apply(JSON.stringify(doc))
-    const failed = results.find((r) => r.action === 'error')
-    if (failed) throw new Error(failed.error ?? 'scale rejected')
+    res.body?.pipeTo(new WritableStream()).catch(() => {}) // the drain is level-based, so a dropped stream is fine
   }
 
-  async drainNode(): Promise<void> {
-    throw new Error('the facade has no drain route yet — use "Drain & remove" instead')
+  async cordon(node: string, on: boolean): Promise<void> {
+    if (on) throw new Error('live clusters cordon through drain — there is no cordon route')
+    await this.json(`/api/nodes/${node}/uncordon`, { method: 'POST' })
   }
 
-  async cordon(): Promise<void> {
-    throw new Error('no cordon route on the facade yet — drain instead')
+  async nodeToken(): Promise<{ token: string; endpoints: string[] }> {
+    return this.json('/api/nodetoken')
   }
 
   // list-then-watch: the Watch RPC sends changes only, so the bootstrap lists

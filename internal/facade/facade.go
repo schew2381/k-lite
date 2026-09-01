@@ -64,6 +64,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/policycheck", s.handlePolicyCheck)
 	mux.HandleFunc("POST /api/apply", s.handleApply)
 	mux.HandleFunc("GET /api/instances/{name}/logs", s.handleLogs)
+	mux.HandleFunc("POST /api/workloads/{name}/scale", s.handleScale)
+	mux.HandleFunc("POST /api/nodes/{name}/drain", s.handleDrain)
+	mux.HandleFunc("POST /api/nodes/{name}/uncordon", s.handleUncordon)
+	mux.HandleFunc("GET /api/nodetoken", s.handleNodeToken)
 	mux.HandleFunc("GET /api/{kind}", s.handleList)
 	mux.HandleFunc("DELETE /api/{kind}/{name}", s.handleDelete)
 	mux.HandleFunc("/", s.handleStatic)
@@ -163,6 +167,91 @@ func (s *Server) handlePolicyCheck(w http.ResponseWriter, r *http.Request) {
 		"matchedPolicy": resp.GetMatchedPolicy(),
 		"reason":        resp.GetReason(),
 	})
+}
+
+// handleScale bridges POST /api/workloads/{name}/scale to the Scale RPC,
+// which mutates replicas alone under CAS, so a concurrent template edit
+// survives (unlike a read-modify-apply).
+func (s *Server) handleScale(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Replicas int32 `json:"replicas"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("body must be {\"replicas\": n}: %v", err))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), callTimeout)
+	defer cancel()
+	_, err := s.client.Scale(ctx, &klitev1.ScaleRequest{Workload: r.PathValue("name"), Replicas: body.Replicas})
+	if err != nil {
+		writeRPCError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleUncordon bridges POST /api/nodes/{name}/uncordon to the Uncordon RPC.
+// Cordoning has no route on purpose: live, a cordon only ever happens as the
+// first step of a drain.
+func (s *Server) handleUncordon(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), callTimeout)
+	defer cancel()
+	_, err := s.client.Uncordon(ctx, &klitev1.UncordonRequest{Node: r.PathValue("name")})
+	if err != nil {
+		writeRPCError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// handleNodeToken mints a join token and pairs it with the klited endpoints
+// this facade dials, which is everything a new machine needs.
+func (s *Server) handleNodeToken(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), callTimeout)
+	defer cancel()
+	resp, err := s.client.NodeToken(ctx, &klitev1.NodeTokenRequest{})
+	if err != nil {
+		writeRPCError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"token":     resp.GetToken(),
+		"endpoints": s.endpoints,
+	})
+}
+
+// handleDrain bridges POST /api/nodes/{name}/drain to the streaming Drain RPC
+// as chunked text, one progress line per message. The drain is level-based,
+// so a client that hangs up mid-stream cancels nothing.
+func (s *Server) handleDrain(w http.ResponseWriter, r *http.Request) {
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "response writer cannot stream")
+		return
+	}
+	force := r.URL.Query().Get("force") == "1" || r.URL.Query().Get("force") == "true"
+	stream, err := s.client.Drain(r.Context(), &klitev1.DrainRequest{Node: r.PathValue("name"), Force: force})
+	if err != nil {
+		writeRPCError(w, err)
+		return
+	}
+	startLogResponse(w)
+	for {
+		p, err := stream.Recv()
+		switch {
+		case errors.Is(err, io.EOF):
+			return
+		case err != nil:
+			fmt.Fprintf(w, "drain stream ended: %s\n", status.Convert(err).Message())
+			fl.Flush()
+			return
+		}
+		fmt.Fprintln(w, p.GetMessage())
+		fl.Flush()
+		if p.GetDone() {
+			return
+		}
+	}
 }
 
 // handleStatic serves the built SPA with an index.html fallback, so client-side

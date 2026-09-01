@@ -125,12 +125,12 @@ export function NodeCard({ node, layout, count }: { node: NodeObj; layout: NodeL
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuGroup>
-                {client.can.cordon &&
-                  (cordoned ? (
-                    <DropdownMenuItem onClick={() => cordon(false)}>Uncordon</DropdownMenuItem>
-                  ) : (
-                    <DropdownMenuItem onClick={() => cordon(true)}>Cordon</DropdownMenuItem>
-                  ))}
+                {cordoned && client.can.uncordon && (
+                  <DropdownMenuItem onClick={() => cordon(false)}>Uncordon</DropdownMenuItem>
+                )}
+                {!cordoned && client.can.cordon && (
+                  <DropdownMenuItem onClick={() => cordon(true)}>Cordon</DropdownMenuItem>
+                )}
                 {client.can.drain && <DropdownMenuItem onClick={drain}>Drain</DropdownMenuItem>}
                 <DropdownMenuItem variant="destructive" onClick={drainAndRemove}>
                   Drain &amp; remove
