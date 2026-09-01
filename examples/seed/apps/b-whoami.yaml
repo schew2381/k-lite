@@ -16,19 +16,18 @@ spec:
         # Same chatty shape as a (see a-client.yaml), differing only in the
         # served name and TARGETS.
         args:
-          - |
-            trap "exit 0" TERM
-            mkdir -p /www
-            echo "$(hostname) is b" > /www/index.html
-            httpd -p 80 -h /www
-            while sleep 1; do
-              r=$(head -c2 /dev/urandom | od -An -tu2 | tr -d " ")
-              [ "$r" -lt 1638 ] || continue
-              n=0; for t in $TARGETS; do n=$((n+1)); done
-              [ "$n" -gt 0 ] || continue
-              k=$(( ($(head -c2 /dev/urandom | od -An -tu2 | tr -d " ") % n) + 1 ))
-              i=0; for t in $TARGETS; do i=$((i+1)); [ "$i" = "$k" ] && pick=$t; done
-              wget -q -T 2 -O- "http://$pick:8080" >/dev/null 2>&1 && echo "-> $pick ok" || echo "-> $pick FAILED"
+          - >-
+            trap "exit 0" TERM; mkdir -p /www;
+            echo "$(hostname) is b" > /www/index.html;
+            httpd -p 80 -h /www;
+            while :; do sleep $((8 - $(date +%s) % 8)) & wait $!;
+            r=$(head -c2 /dev/urandom | od -An -tu2 | tr -d " ");
+            [ "$r" -lt 13107 ] || continue;
+            n=0; for t in $TARGETS; do n=$((n+1)); done;
+            [ "$n" -gt 0 ] || continue;
+            k=$(( ($(head -c2 /dev/urandom | od -An -tu2 | tr -d " ") % n) + 1 ));
+            i=0; for t in $TARGETS; do i=$((i+1)); [ "$i" = "$k" ] && pick=$t; done;
+            wget -q -T 2 -O- "http://$pick:8080" >/dev/null 2>&1 && echo "-> $pick ok" || echo "-> $pick FAILED";
             done
         env:
           - name: TARGETS
