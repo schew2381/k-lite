@@ -5,7 +5,7 @@ import { stringify } from 'yaml'
 import type { KliteObject } from '@/api/types'
 
 function toYaml(obj: KliteObject): string {
-  // status is server-owned; a client never applies it
+  // status is server-owned, so a client never applies it
   const { status: _status, ...rest } = obj as KliteObject & { status?: unknown }
   return stringify(rest)
 }

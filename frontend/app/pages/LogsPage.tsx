@@ -56,7 +56,7 @@ export default function LogsPage() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `lines` is the trigger — new lines scroll the tail
   useEffect(() => {
-    // scroll only the log pane; scrollIntoView would also yank the window
+    // scroll only the log pane, since scrollIntoView would also yank the window
     const pane = tailRef.current?.parentElement
     if (follow && pane) pane.scrollTop = pane.scrollHeight
   }, [lines, follow])

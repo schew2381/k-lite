@@ -15,8 +15,8 @@
 //                                      data: {"type":"ADDED|MODIFIED|DELETED|SYNC|RESET",
 //                                             "rev":n, "kind":..., "object":{...}}
 //                                    On connect: ADDED for every object, then
-//                                    {"type":"SYNC"}. Resume with Last-Event-ID;
-//                                    if compacted past it, the server sends
+//                                    {"type":"SYNC"}. Resume with Last-Event-ID.
+//                                    If compacted past it, the server sends
 //                                    {"type":"RESET"} and a fresh replay.
 //                                    Comment-line ping every 15s.
 // GET  /v1/traffic                   SSE of TrafficEvent JSON, fed from Envoy

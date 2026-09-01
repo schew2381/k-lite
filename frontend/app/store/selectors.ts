@@ -31,16 +31,33 @@ export function pendingInstances(s: Snapshot): Instance[] {
 
 export { selectorMatches } from '@/api/types'
 
-export function endpointsOf(s: Snapshot, svc: Service): { ready: Instance[]; draining: Instance[] } {
-  const ready: Instance[] = []
-  const draining: Instance[] = []
+export interface Endpoints {
+  ready: Instance[]
+  draining: Instance[]
+}
+
+// Snapshots are immutable, so per-snapshot memos are safe. Every node card
+// derives endpoints for every service on every render, and without the memo
+// that work is quadratic in cluster size.
+const endpointsCache = new WeakMap<Snapshot, Map<string, Endpoints>>()
+
+export function endpointsOf(s: Snapshot, svc: Service): Endpoints {
+  let perService = endpointsCache.get(s)
+  if (!perService) {
+    perService = new Map()
+    endpointsCache.set(s, perService)
+  }
+  const hit = perService.get(svc.metadata.name)
+  if (hit) return hit
+  const out: Endpoints = { ready: [], draining: [] }
   for (const inst of Object.values(s.instances)) {
     if (!selectorMatches(svc.spec.selector, inst.metadata.labels)) continue
     const state = endpointStateOf(inst)
-    if (state === 'READY') ready.push(inst)
-    else if (state === 'DRAINING') draining.push(inst)
+    if (state === 'READY') out.ready.push(inst)
+    else if (state === 'DRAINING') out.draining.push(inst)
   }
-  return { ready, draining }
+  perService.set(svc.metadata.name, out)
+  return out
 }
 
 export function serviceOfWorkload(s: Snapshot, wl: Workload): Service | undefined {
@@ -117,7 +134,11 @@ export interface RbacView {
   allow: { policy: string; from: string; to: string; except?: string[] }[]
 }
 
+const rbacCache = new WeakMap<Snapshot, RbacView>()
+
 export function rbacView(s: Snapshot): RbacView {
+  const cached = rbacCache.get(s)
+  if (cached) return cached
   const view: RbacView = { deny: [], allow: [] }
   for (const p of sortedPolicies(s)) {
     const bucket = p.spec.action === 'DENY' ? view.deny : view.allow
@@ -125,5 +146,6 @@ export function rbacView(s: Snapshot): RbacView {
       bucket.push({ policy: p.metadata.name, from: r.from, to: r.to, except: r.except })
     }
   }
+  rbacCache.set(s, view)
   return view
 }

@@ -65,7 +65,7 @@ export default function TopologyPage() {
   const [highlight, setHighlight] = useState<{ from: string; to: string } | null>(null)
 
   const layout = useMemo(() => computeLayout(snapshot, board.width), [snapshot, board.width])
-  // dots read anchors per frame without re-rendering; written post-commit so
+  // dots read anchors per frame without re-rendering. Written post-commit so
   // an aborted render can't leave the rAF loop pointing at uncommitted math
   const layoutRef = useRef<Layout | null>(layout)
   useLayoutEffect(() => {

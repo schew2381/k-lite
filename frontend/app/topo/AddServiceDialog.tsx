@@ -1,5 +1,5 @@
 // Add a whole new service (d, e, …) without writing YAML: name, image, and
-// replica count become a Workload + Service pair applied through the same
+// replicas become a Workload + Service pair applied through the same
 // channel everything else uses.
 
 import { PlusIcon } from 'lucide-react'

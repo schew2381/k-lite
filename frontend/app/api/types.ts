@@ -146,11 +146,11 @@ export interface WatchEvent {
   type: WatchEventType
   rev: number // WatchEvent.revision, doubling as the SSE id for Last-Event-ID resume
   kind?: Kind // absent on SYNC / RESET
-  object?: KliteObject // full object; DELETED carries the last-known state
+  object?: KliteObject // the full object, where DELETED carries the last-known state
 }
 
 // ---------------------------------------------------------------------------
-// Traffic stream. Mocked today; the real backend adds GET /v1/traffic (SSE,
+// Traffic stream. Mocked today. The real backend adds GET /v1/traffic (SSE,
 // fed from Envoy access logs) — ADR 0024, reopening ADR 0015's frozen list.
 
 export interface TrafficEvent {
