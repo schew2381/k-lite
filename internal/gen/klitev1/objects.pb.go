@@ -1438,6 +1438,118 @@ func (x *Instance) GetStatus() *InstanceStatus {
 	return nil
 }
 
+type VIPAllocationSpec struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Service       string                 `protobuf:"bytes,1,opt,name=service,proto3" json:"service,omitempty"`
+	Node          string                 `protobuf:"bytes,2,opt,name=node,proto3" json:"node,omitempty"`
+	Vip           string                 `protobuf:"bytes,3,opt,name=vip,proto3" json:"vip,omitempty"` // from 10.44.64.0/18, fixed for the pair's lifetime
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VIPAllocationSpec) Reset() {
+	*x = VIPAllocationSpec{}
+	mi := &file_klite_v1_objects_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VIPAllocationSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VIPAllocationSpec) ProtoMessage() {}
+
+func (x *VIPAllocationSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_klite_v1_objects_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VIPAllocationSpec.ProtoReflect.Descriptor instead.
+func (*VIPAllocationSpec) Descriptor() ([]byte, []int) {
+	return file_klite_v1_objects_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *VIPAllocationSpec) GetService() string {
+	if x != nil {
+		return x.Service
+	}
+	return ""
+}
+
+func (x *VIPAllocationSpec) GetNode() string {
+	if x != nil {
+		return x.Node
+	}
+	return ""
+}
+
+func (x *VIPAllocationSpec) GetVip() string {
+	if x != nil {
+		return x.Vip
+	}
+	return ""
+}
+
+type VIPAllocation struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Meta          *Meta                  `protobuf:"bytes,1,opt,name=meta,proto3" json:"meta,omitempty"` // name is "<service>.<node>"
+	Spec          *VIPAllocationSpec     `protobuf:"bytes,2,opt,name=spec,proto3" json:"spec,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VIPAllocation) Reset() {
+	*x = VIPAllocation{}
+	mi := &file_klite_v1_objects_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VIPAllocation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VIPAllocation) ProtoMessage() {}
+
+func (x *VIPAllocation) ProtoReflect() protoreflect.Message {
+	mi := &file_klite_v1_objects_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VIPAllocation.ProtoReflect.Descriptor instead.
+func (*VIPAllocation) Descriptor() ([]byte, []int) {
+	return file_klite_v1_objects_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *VIPAllocation) GetMeta() *Meta {
+	if x != nil {
+		return x.Meta
+	}
+	return nil
+}
+
+func (x *VIPAllocation) GetSpec() *VIPAllocationSpec {
+	if x != nil {
+		return x.Spec
+	}
+	return nil
+}
+
 type Object struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Kind:
@@ -1447,6 +1559,7 @@ type Object struct {
 	//	*Object_Node
 	//	*Object_NetworkPolicy
 	//	*Object_Instance
+	//	*Object_VipAllocation
 	Kind          isObject_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1454,7 +1567,7 @@ type Object struct {
 
 func (x *Object) Reset() {
 	*x = Object{}
-	mi := &file_klite_v1_objects_proto_msgTypes[21]
+	mi := &file_klite_v1_objects_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1466,7 +1579,7 @@ func (x *Object) String() string {
 func (*Object) ProtoMessage() {}
 
 func (x *Object) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_objects_proto_msgTypes[21]
+	mi := &file_klite_v1_objects_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1479,7 +1592,7 @@ func (x *Object) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Object.ProtoReflect.Descriptor instead.
 func (*Object) Descriptor() ([]byte, []int) {
-	return file_klite_v1_objects_proto_rawDescGZIP(), []int{21}
+	return file_klite_v1_objects_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *Object) GetKind() isObject_Kind {
@@ -1534,6 +1647,15 @@ func (x *Object) GetInstance() *Instance {
 	return nil
 }
 
+func (x *Object) GetVipAllocation() *VIPAllocation {
+	if x != nil {
+		if x, ok := x.Kind.(*Object_VipAllocation); ok {
+			return x.VipAllocation
+		}
+	}
+	return nil
+}
+
 type isObject_Kind interface {
 	isObject_Kind()
 }
@@ -1558,6 +1680,10 @@ type Object_Instance struct {
 	Instance *Instance `protobuf:"bytes,5,opt,name=instance,proto3,oneof"`
 }
 
+type Object_VipAllocation struct {
+	VipAllocation *VIPAllocation `protobuf:"bytes,6,opt,name=vip_allocation,json=vipAllocation,proto3,oneof"`
+}
+
 func (*Object_Workload) isObject_Kind() {}
 
 func (*Object_Service) isObject_Kind() {}
@@ -1567,6 +1693,8 @@ func (*Object_Node) isObject_Kind() {}
 func (*Object_NetworkPolicy) isObject_Kind() {}
 
 func (*Object_Instance) isObject_Kind() {}
+
+func (*Object_VipAllocation) isObject_Kind() {}
 
 var File_klite_v1_objects_proto protoreflect.FileDescriptor
 
@@ -1668,13 +1796,21 @@ const file_klite_v1_objects_proto_rawDesc = "" +
 	"\bInstance\x12\"\n" +
 	"\x04meta\x18\x01 \x01(\v2\x0e.klite.v1.MetaR\x04meta\x12*\n" +
 	"\x04spec\x18\x02 \x01(\v2\x16.klite.v1.InstanceSpecR\x04spec\x120\n" +
-	"\x06status\x18\x03 \x01(\v2\x18.klite.v1.InstanceStatusR\x06status\"\x8b\x02\n" +
+	"\x06status\x18\x03 \x01(\v2\x18.klite.v1.InstanceStatusR\x06status\"S\n" +
+	"\x11VIPAllocationSpec\x12\x18\n" +
+	"\aservice\x18\x01 \x01(\tR\aservice\x12\x12\n" +
+	"\x04node\x18\x02 \x01(\tR\x04node\x12\x10\n" +
+	"\x03vip\x18\x03 \x01(\tR\x03vip\"d\n" +
+	"\rVIPAllocation\x12\"\n" +
+	"\x04meta\x18\x01 \x01(\v2\x0e.klite.v1.MetaR\x04meta\x12/\n" +
+	"\x04spec\x18\x02 \x01(\v2\x1b.klite.v1.VIPAllocationSpecR\x04spec\"\xcd\x02\n" +
 	"\x06Object\x120\n" +
 	"\bworkload\x18\x01 \x01(\v2\x12.klite.v1.WorkloadH\x00R\bworkload\x12-\n" +
 	"\aservice\x18\x02 \x01(\v2\x11.klite.v1.ServiceH\x00R\aservice\x12$\n" +
 	"\x04node\x18\x03 \x01(\v2\x0e.klite.v1.NodeH\x00R\x04node\x12@\n" +
 	"\x0enetwork_policy\x18\x04 \x01(\v2\x17.klite.v1.NetworkPolicyH\x00R\rnetworkPolicy\x120\n" +
-	"\binstance\x18\x05 \x01(\v2\x12.klite.v1.InstanceH\x00R\binstanceB\x06\n" +
+	"\binstance\x18\x05 \x01(\v2\x12.klite.v1.InstanceH\x00R\binstance\x12@\n" +
+	"\x0evip_allocation\x18\x06 \x01(\v2\x17.klite.v1.VIPAllocationH\x00R\rvipAllocationB\x06\n" +
 	"\x04kind*p\n" +
 	"\tNodePhase\x12\x1a\n" +
 	"\x16NODE_PHASE_UNSPECIFIED\x10\x00\x12\x14\n" +
@@ -1707,7 +1843,7 @@ func file_klite_v1_objects_proto_rawDescGZIP() []byte {
 }
 
 var file_klite_v1_objects_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_klite_v1_objects_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_klite_v1_objects_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_klite_v1_objects_proto_goTypes = []any{
 	(NodePhase)(0),            // 0: klite.v1.NodePhase
 	(PolicyAction)(0),         // 1: klite.v1.PolicyAction
@@ -1733,50 +1869,55 @@ var file_klite_v1_objects_proto_goTypes = []any{
 	(*InstanceSpec)(nil),      // 21: klite.v1.InstanceSpec
 	(*InstanceStatus)(nil),    // 22: klite.v1.InstanceStatus
 	(*Instance)(nil),          // 23: klite.v1.Instance
-	(*Object)(nil),            // 24: klite.v1.Object
-	nil,                       // 25: klite.v1.Template.LabelsEntry
-	nil,                       // 26: klite.v1.ServiceSpec.SelectorEntry
-	(*Meta)(nil),              // 27: klite.v1.Meta
+	(*VIPAllocationSpec)(nil), // 24: klite.v1.VIPAllocationSpec
+	(*VIPAllocation)(nil),     // 25: klite.v1.VIPAllocation
+	(*Object)(nil),            // 26: klite.v1.Object
+	nil,                       // 27: klite.v1.Template.LabelsEntry
+	nil,                       // 28: klite.v1.ServiceSpec.SelectorEntry
+	(*Meta)(nil),              // 29: klite.v1.Meta
 }
 var file_klite_v1_objects_proto_depIdxs = []int32{
 	4,  // 0: klite.v1.Container.env:type_name -> klite.v1.EnvVar
 	5,  // 1: klite.v1.Container.ports:type_name -> klite.v1.Port
 	6,  // 2: klite.v1.Container.resources:type_name -> klite.v1.Resources
 	7,  // 3: klite.v1.Container.readiness_probe:type_name -> klite.v1.ReadinessProbe
-	25, // 4: klite.v1.Template.labels:type_name -> klite.v1.Template.LabelsEntry
+	27, // 4: klite.v1.Template.labels:type_name -> klite.v1.Template.LabelsEntry
 	3,  // 5: klite.v1.Template.containers:type_name -> klite.v1.Container
 	8,  // 6: klite.v1.WorkloadSpec.template:type_name -> klite.v1.Template
 	9,  // 7: klite.v1.WorkloadSpec.drain:type_name -> klite.v1.DrainSpec
-	27, // 8: klite.v1.Workload.meta:type_name -> klite.v1.Meta
+	29, // 8: klite.v1.Workload.meta:type_name -> klite.v1.Meta
 	10, // 9: klite.v1.Workload.spec:type_name -> klite.v1.WorkloadSpec
 	11, // 10: klite.v1.Workload.status:type_name -> klite.v1.WorkloadStatus
-	26, // 11: klite.v1.ServiceSpec.selector:type_name -> klite.v1.ServiceSpec.SelectorEntry
-	27, // 12: klite.v1.Service.meta:type_name -> klite.v1.Meta
+	28, // 11: klite.v1.ServiceSpec.selector:type_name -> klite.v1.ServiceSpec.SelectorEntry
+	29, // 12: klite.v1.Service.meta:type_name -> klite.v1.Meta
 	13, // 13: klite.v1.Service.spec:type_name -> klite.v1.ServiceSpec
 	0,  // 14: klite.v1.NodeStatus.phase:type_name -> klite.v1.NodePhase
-	27, // 15: klite.v1.Node.meta:type_name -> klite.v1.Meta
+	29, // 15: klite.v1.Node.meta:type_name -> klite.v1.Meta
 	15, // 16: klite.v1.Node.spec:type_name -> klite.v1.NodeSpec
 	16, // 17: klite.v1.Node.status:type_name -> klite.v1.NodeStatus
 	1,  // 18: klite.v1.NetworkPolicySpec.action:type_name -> klite.v1.PolicyAction
 	18, // 19: klite.v1.NetworkPolicySpec.rules:type_name -> klite.v1.PolicyRule
-	27, // 20: klite.v1.NetworkPolicy.meta:type_name -> klite.v1.Meta
+	29, // 20: klite.v1.NetworkPolicy.meta:type_name -> klite.v1.Meta
 	19, // 21: klite.v1.NetworkPolicy.spec:type_name -> klite.v1.NetworkPolicySpec
 	3,  // 22: klite.v1.InstanceSpec.container:type_name -> klite.v1.Container
 	9,  // 23: klite.v1.InstanceSpec.drain:type_name -> klite.v1.DrainSpec
 	2,  // 24: klite.v1.InstanceStatus.phase:type_name -> klite.v1.InstancePhase
-	27, // 25: klite.v1.Instance.meta:type_name -> klite.v1.Meta
+	29, // 25: klite.v1.Instance.meta:type_name -> klite.v1.Meta
 	21, // 26: klite.v1.Instance.spec:type_name -> klite.v1.InstanceSpec
 	22, // 27: klite.v1.Instance.status:type_name -> klite.v1.InstanceStatus
-	12, // 28: klite.v1.Object.workload:type_name -> klite.v1.Workload
-	14, // 29: klite.v1.Object.service:type_name -> klite.v1.Service
-	17, // 30: klite.v1.Object.node:type_name -> klite.v1.Node
-	20, // 31: klite.v1.Object.network_policy:type_name -> klite.v1.NetworkPolicy
-	23, // 32: klite.v1.Object.instance:type_name -> klite.v1.Instance
-	33, // [33:33] is the sub-list for method output_type
-	33, // [33:33] is the sub-list for method input_type
-	33, // [33:33] is the sub-list for extension type_name
-	33, // [33:33] is the sub-list for extension extendee
-	0,  // [0:33] is the sub-list for field type_name
+	29, // 28: klite.v1.VIPAllocation.meta:type_name -> klite.v1.Meta
+	24, // 29: klite.v1.VIPAllocation.spec:type_name -> klite.v1.VIPAllocationSpec
+	12, // 30: klite.v1.Object.workload:type_name -> klite.v1.Workload
+	14, // 31: klite.v1.Object.service:type_name -> klite.v1.Service
+	17, // 32: klite.v1.Object.node:type_name -> klite.v1.Node
+	20, // 33: klite.v1.Object.network_policy:type_name -> klite.v1.NetworkPolicy
+	23, // 34: klite.v1.Object.instance:type_name -> klite.v1.Instance
+	25, // 35: klite.v1.Object.vip_allocation:type_name -> klite.v1.VIPAllocation
+	36, // [36:36] is the sub-list for method output_type
+	36, // [36:36] is the sub-list for method input_type
+	36, // [36:36] is the sub-list for extension type_name
+	36, // [36:36] is the sub-list for extension extendee
+	0,  // [0:36] is the sub-list for field type_name
 }
 
 func init() { file_klite_v1_objects_proto_init() }
@@ -1785,12 +1926,13 @@ func file_klite_v1_objects_proto_init() {
 		return
 	}
 	file_klite_v1_meta_proto_init()
-	file_klite_v1_objects_proto_msgTypes[21].OneofWrappers = []any{
+	file_klite_v1_objects_proto_msgTypes[23].OneofWrappers = []any{
 		(*Object_Workload)(nil),
 		(*Object_Service)(nil),
 		(*Object_Node)(nil),
 		(*Object_NetworkPolicy)(nil),
 		(*Object_Instance)(nil),
+		(*Object_VipAllocation)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1798,7 +1940,7 @@ func file_klite_v1_objects_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_klite_v1_objects_proto_rawDesc), len(file_klite_v1_objects_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   24,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

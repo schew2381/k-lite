@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -57,8 +58,8 @@ func (s *Cluster) Apply(ctx context.Context, req *klitev1.ApplyRequest) (*klitev
 func (s *Cluster) applyOne(ctx context.Context, o *klitev1.Object) *klitev1.ApplyResult {
 	kind := object.KindOf(o)
 	res := &klitev1.ApplyResult{Kind: kind, Name: object.MetaOf(o).GetName()}
-	if kind == object.KindInstance {
-		res.Error = "instances are server-materialized and read-only"
+	if kind == object.KindInstance || kind == object.KindVIPAllocation {
+		res.Error = strings.ToLower(object.Plural(kind)) + " are server-materialized and read-only"
 		return res
 	}
 	sanitize(o)

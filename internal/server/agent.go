@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/schew2381/k-lite/internal/controller"
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
 	"github.com/schew2381/k-lite/internal/object"
 	"github.com/schew2381/k-lite/internal/store"
@@ -22,10 +23,9 @@ import (
 // at 10.44.0.<10+index>, below the VIP range at 10.44.64.0/18 and the dynamic
 // container range at 10.44.128.0/17.
 const (
-	netSubnet    = "10.44.0.0/16"
-	netVIPRange  = "10.44.64.0/18"
-	infraIPBase  = 10
-	snapshotWait = time.Second
+	netSubnet   = "10.44.0.0/16"
+	netVIPRange = "10.44.64.0/18"
+	infraIPBase = 10
 )
 
 // Agent serves AgentService, covering node registration, desired-state
@@ -35,6 +35,7 @@ type Agent struct {
 	store        store.Store
 	clusterToken string
 	hub          *CommandHub
+	net          *controller.Endpoints
 
 	// indexMu serializes node-index assignment on this server, which is
 	// enough while one klited handles registration. Multiple servers need
@@ -44,9 +45,11 @@ type Agent struct {
 
 // NewAgent returns the AgentService backed by the store. Agents must present
 // clusterToken at Register. hub carries their command streams and is shared
-// with the Cluster service, whose Logs RPC feeds off it.
-func NewAgent(st store.Store, clusterToken string, hub *CommandHub) *Agent {
-	return &Agent{store: st, clusterToken: clusterToken, hub: hub}
+// with the Cluster service, whose Logs RPC feeds off it. net computes the
+// per-node snapshots WatchDesired streams; nil is allowed in tests that never
+// call WatchDesired.
+func NewAgent(st store.Store, clusterToken string, hub *CommandHub, net *controller.Endpoints) *Agent {
+	return &Agent{store: st, clusterToken: clusterToken, hub: hub, net: net}
 }
 
 // Register admits a node that presents the cluster token and already exists
@@ -123,97 +126,33 @@ func netBootstrap(idx int32) *klitev1.NetBootstrap {
 	}
 }
 
-// WatchDesired streams full per-node snapshots, one on connect and then a
-// fresh one whenever a store event touches the node's instances, the
-// snapshot-then-update shape from swarmkit's dispatcher. A dead or compacted
-// etcd watch triggers re-list-and-send, never a stream exit. NetDesired stays
-// empty until M4.
+// WatchDesired streams full per-node snapshots off the endpoints engine, one
+// on connect and then a fresh one whenever the node's content changes, the
+// snapshot-then-update shape from swarmkit's dispatcher. The engine absorbs
+// store hiccups, so the only exit is a dead client stream.
 func (a *Agent) WatchDesired(req *klitev1.WatchDesiredRequest, stream grpc.ServerStreamingServer[klitev1.DesiredState]) error {
 	node := req.GetNode()
 	if node == "" {
 		return status.Error(codes.InvalidArgument, "node name is required")
 	}
 	ctx := stream.Context()
-	var events <-chan store.Event
-	for ctx.Err() == nil {
-		rev, err := a.sendSnapshot(ctx, stream, node)
-		if err != nil {
-			return err
-		}
-		if events == nil {
-			if events, err = a.store.Watch(ctx, []string{object.KindInstance}, rev+1); err != nil {
-				slog.Warn("instance watch failed, retrying", "node", node, "err", err)
-				sleep(ctx, snapshotWait)
-				continue
-			}
-		}
-		if !waitTouch(ctx, events, node) {
-			// The watch died or was compacted away. Drop it and resync.
-			events = nil
-			sleep(ctx, snapshotWait)
-		}
-	}
-	return ctx.Err()
-}
-
-// sendSnapshot lists the node's instances and pushes them as one DesiredState.
-// etcd hiccups retry in place, and only a dead client stream propagates out.
-func (a *Agent) sendSnapshot(ctx context.Context, stream grpc.ServerStreamingServer[klitev1.DesiredState], node string) (int64, error) {
+	kicks, cancel := a.net.Subscribe()
+	defer cancel()
+	lastSent := int64(-1)
 	for {
-		objs, rev, err := a.store.List(ctx, object.KindInstance)
-		if err != nil {
-			if ctx.Err() != nil {
-				return 0, ctx.Err()
+		if snap, ok := a.net.Snapshot(node); ok && snap.Revision != lastSent {
+			ds := &klitev1.DesiredState{Revision: snap.Revision, Instances: snap.Instances, Net: snap.Net}
+			if err := stream.Send(ds); err != nil {
+				return err
 			}
-			slog.Warn("list instances for snapshot failed", "node", node, "err", err)
-			if !sleep(ctx, snapshotWait) {
-				return 0, ctx.Err()
-			}
-			continue
+			lastSent = snap.Revision
 		}
-		var instances []*klitev1.Instance
-		for _, o := range objs {
-			if inst := o.GetInstance(); inst.GetSpec().GetNode() == node {
-				instances = append(instances, inst)
-			}
-		}
-		if err := stream.Send(&klitev1.DesiredState{Revision: rev, Instances: instances}); err != nil {
-			return 0, err
-		}
-		return rev, nil
-	}
-}
-
-// waitTouch blocks until an event touches the node's instances (true) or the
-// watch dies (false).
-func waitTouch(ctx context.Context, events <-chan store.Event, node string) bool {
-	for {
 		select {
 		case <-ctx.Done():
-			return false
-		case ev, ok := <-events:
-			if !ok || ev.Err != nil {
-				return false
-			}
-			if touchesNode(&ev, node) {
-				return true
-			}
+			return ctx.Err()
+		case <-kicks:
 		}
 	}
-}
-
-// touchesNode reports whether an instance event concerns the node. A delete
-// whose prior value was compacted away carries no spec, so it counts for
-// every node: a redundant snapshot beats a missed removal.
-func touchesNode(ev *store.Event, node string) bool {
-	inst := ev.Object.GetInstance()
-	if inst == nil {
-		return false
-	}
-	if inst.GetSpec().GetNode() == node {
-		return true
-	}
-	return inst.GetSpec().GetNode() == "" && ev.Type == klitev1.EventType_EVENT_TYPE_DELETED
 }
 
 // ReportStatus writes the agent's instance statuses and stamps the node's
@@ -221,6 +160,9 @@ func touchesNode(ev *store.Event, node string) bool {
 func (a *Agent) ReportStatus(ctx context.Context, req *klitev1.ReportStatusRequest) (*klitev1.ReportStatusResponse, error) {
 	if req.GetNode() == "" {
 		return nil, status.Error(codes.InvalidArgument, "node name is required")
+	}
+	if kn := req.GetKliteNet(); kn != nil && !kn.GetHealthy() {
+		slog.Warn("klite-net unhealthy", "node", req.GetNode(), "adminPort", kn.GetAdminPort())
 	}
 	// A failed instance write never fails the heartbeat: the instance may
 	// simply be gone, and the next snapshot stands the agent down.
@@ -292,13 +234,4 @@ func (a *Agent) stampNode(ctx context.Context, name string) error {
 		return nil
 	}
 	return fmt.Errorf("node %s heartbeat: %w", name, store.ErrConflict)
-}
-
-func sleep(ctx context.Context, d time.Duration) bool {
-	select {
-	case <-ctx.Done():
-		return false
-	case <-time.After(d):
-		return true
-	}
 }

@@ -108,7 +108,7 @@ func (a *Agent) startInstance(ctx context.Context, inst *klitev1.Instance, st *i
 	if err := a.rt.EnsureImage(ctx, inst.GetSpec().GetContainer().GetImage()); err != nil {
 		return a.failInstance(name, st, err)
 	}
-	id, err := a.rt.RunInstance(ctx, inst, a.node)
+	id, err := a.rt.RunInstance(ctx, inst, a.node, a.dnsIP())
 	if err != nil {
 		return a.failInstance(name, st, err)
 	}
@@ -116,8 +116,7 @@ func (a *Agent) startInstance(ctx context.Context, inst *klitev1.Instance, st *i
 		st.restarts++
 		st.awaitingRestart = false
 	}
-	// Running doubles as ready until M4 adds readiness probes.
-	st.phase = klitev1.InstancePhase_INSTANCE_PHASE_RUNNING
+	st.phase = a.runningPhase(inst)
 	st.containerID = id
 	st.message = ""
 	st.ip, _ = a.rt.InspectIP(ctx, id)
@@ -188,14 +187,37 @@ func (a *Agent) replaceInstance(ctx context.Context, inst *klitev1.Instance, ri 
 // previous agent life.
 func (a *Agent) markRunning(inst *klitev1.Instance, ri *runtime.RunningInstance, st *instState) {
 	st.awaitingRestart = false
-	// Running doubles as ready until M4 adds readiness probes.
-	st.phase = klitev1.InstancePhase_INSTANCE_PHASE_RUNNING
+	st.phase = a.runningPhase(inst)
 	st.containerID = ri.ContainerID
 	if ri.IP != "" {
 		st.ip = ri.IP
 	}
 	st.message = ""
 	a.putState(inst.GetMeta().GetName(), st)
+}
+
+// runningPhase decides what "the container runs" means for this instance:
+// READY outright without a readiness probe, otherwise READY only once
+// klite-net's TCP probe agrees (ADR 0008).
+func (a *Agent) runningPhase(inst *klitev1.Instance) klitev1.InstancePhase {
+	if inst.GetSpec().GetContainer().GetReadinessProbe().GetTcpPort() <= 0 {
+		return klitev1.InstancePhase_INSTANCE_PHASE_READY
+	}
+	a.mu.Lock()
+	ready := a.probeReady[inst.GetMeta().GetName()]
+	a.mu.Unlock()
+	if ready {
+		return klitev1.InstancePhase_INSTANCE_PHASE_READY
+	}
+	return klitev1.InstancePhase_INSTANCE_PHASE_RUNNING
+}
+
+// dnsIP is the node's klite-net address, every workload container's one
+// resolver.
+func (a *Agent) dnsIP() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.net.GetKliteNetIp()
 }
 
 // removeOrphan stops and removes a container whose instance is no longer

@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,6 +25,7 @@ import (
 	"github.com/schew2381/k-lite/internal/leader"
 	"github.com/schew2381/k-lite/internal/server"
 	"github.com/schew2381/k-lite/internal/store"
+	"github.com/schew2381/k-lite/internal/xds"
 )
 
 const defaultEtcd = "127.0.0.1:2379,127.0.0.1:2381,127.0.0.1:2383"
@@ -65,13 +67,27 @@ func run(listen string, etcdEndpoints []string, clusterToken string) error {
 		grpc.KeepaliveParams(keepalive.ServerParameters{Time: 20 * time.Second, Timeout: 10 * time.Second}),
 	)
 	st := store.NewEtcd(cli)
+	// Every replica runs the endpoints engine and an xDS server: whichever
+	// klited an Envoy dials must be able to answer it (ADR 0007).
+	xdsCache := xds.NewCache()
+	xdsCache.RegisterADS(ctx, grpcSrv)
+	engine := controller.NewEndpoints(st, func(node string, revision int64, net *klitev1.NetDesired) {
+		if err := xdsCache.SetNodeSnapshot(ctx, node, strconv.FormatInt(revision, 10), net); err != nil {
+			slog.Warn("xds snapshot rejected", "node", node, "err", err)
+		}
+	})
 	// Both services share the hub: agents park command streams through
 	// AgentService, and ClusterService.Logs relays over them.
 	hub := server.NewCommandHub()
 	klitev1.RegisterClusterServiceServer(grpcSrv, server.NewCluster(st, hub))
-	klitev1.RegisterAgentServiceServer(grpcSrv, server.NewAgent(st, clusterToken, hub))
+	klitev1.RegisterAgentServiceServer(grpcSrv, server.NewAgent(st, clusterToken, hub, engine))
 
 	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		engine.Run(ctx)
+	}()
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

@@ -27,6 +27,7 @@ func Root() *cobra.Command {
 		newDeleteCmd(&server),
 		newScaleCmd(&server),
 		newLogsCmd(&server),
+		newPolicyCmd(&server),
 	)
 	return root
 }

@@ -167,6 +167,19 @@ message Instance {
   InstanceStatus status = 3;
 }
 
+// ---- VIPAllocation (server-materialized, one per (Service, Node), ADR 0006) ----
+
+message VIPAllocationSpec {
+  string service = 1;
+  string node = 2;
+  string vip = 3; // from 10.44.64.0/18, fixed for the pair's lifetime
+}
+
+message VIPAllocation {
+  Meta meta = 1; // name is "<service>.<node>"
+  VIPAllocationSpec spec = 2;
+}
+
 // ---- Generic envelope for Apply/List/Watch ----
 
 message Object {
@@ -176,5 +189,6 @@ message Object {
     Node node = 3;
     NetworkPolicy network_policy = 4;
     Instance instance = 5;
+    VIPAllocation vip_allocation = 6;
   }
 }

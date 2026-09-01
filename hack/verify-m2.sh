@@ -46,7 +46,7 @@ start_agent() {
 
 klited_ready()   { "$KLITE" get workloads >/dev/null 2>&1; }
 nodes_ready()    { [[ "$("$KLITE" get nodes | awk '$2=="Ready"' | wc -l | tr -d ' ')" == 3 ]]; }
-running_b()      { "$KLITE" get instances | awk '$2=="b" && $4=="Running"'; }
+running_b()      { "$KLITE" get instances | awk '$2=="b" && ($4=="Running" || $4=="Ready")'; }
 five_running()   { [[ "$(running_b | wc -l | tr -d ' ')" == 5 ]]; }
 two_running()    { [[ "$("$KLITE" get instances | awk '$2=="b"' | wc -l | tr -d ' ')" == 2 ]]; }
 node3_notready() { "$KLITE" get nodes | awk '$1=="node-3" && $2=="NotReady"' | grep -q node-3; }
@@ -55,7 +55,7 @@ node3_empty()    { [[ "$(docker ps -aq --filter label=io.klite.role=workload --f
 two_containers() { [[ "$(docker ps -q --filter label=io.klite.workload=b | wc -l | tr -d ' ')" == 2 ]]; }
 rescheduled()    { five_running && [[ "$(running_b | awk '$3=="node-3"' | wc -l | tr -d ' ')" == 0 ]]; }
 restarted_once() {
-  "$KLITE" get instances | awk -v n="$VICTIM_INSTANCE" '$1==n && $4=="Running" && $5=="1"' | grep -q "$VICTIM_INSTANCE"
+  "$KLITE" get instances | awk -v n="$VICTIM_INSTANCE" '$1==n && ($4=="Running" || $4=="Ready") && $5=="1"' | grep -q "$VICTIM_INSTANCE"
 }
 
 # --- fresh cluster state ---

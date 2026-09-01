@@ -15,10 +15,11 @@ const (
 	KindNode          = "Node"
 	KindNetworkPolicy = "NetworkPolicy"
 	KindInstance      = "Instance"
+	KindVIPAllocation = "VIPAllocation"
 )
 
 // Kinds lists every canonical kind.
-var Kinds = []string{KindWorkload, KindService, KindNode, KindNetworkPolicy, KindInstance}
+var Kinds = []string{KindWorkload, KindService, KindNode, KindNetworkPolicy, KindInstance, KindVIPAllocation}
 
 var plurals = map[string]string{
 	KindWorkload:      "workloads",
@@ -26,6 +27,7 @@ var plurals = map[string]string{
 	KindNode:          "nodes",
 	KindNetworkPolicy: "networkpolicies",
 	KindInstance:      "instances",
+	KindVIPAllocation: "vipallocations",
 }
 
 var aliases = func() map[string]string {
@@ -63,6 +65,8 @@ func New(kind string) (*klitev1.Object, error) {
 		return &klitev1.Object{Kind: &klitev1.Object_NetworkPolicy{NetworkPolicy: &klitev1.NetworkPolicy{}}}, nil
 	case KindInstance:
 		return &klitev1.Object{Kind: &klitev1.Object_Instance{Instance: &klitev1.Instance{}}}, nil
+	case KindVIPAllocation:
+		return &klitev1.Object{Kind: &klitev1.Object_VipAllocation{VipAllocation: &klitev1.VIPAllocation{}}}, nil
 	}
 	return nil, fmt.Errorf("unknown kind %q", kind)
 }
@@ -80,6 +84,8 @@ func KindOf(o *klitev1.Object) string {
 		return KindNetworkPolicy
 	case *klitev1.Object_Instance:
 		return KindInstance
+	case *klitev1.Object_VipAllocation:
+		return KindVIPAllocation
 	}
 	return ""
 }
@@ -112,6 +118,11 @@ func MetaOf(o *klitev1.Object) *klitev1.Meta {
 			k.Instance.Meta = &klitev1.Meta{}
 		}
 		return k.Instance.Meta
+	case *klitev1.Object_VipAllocation:
+		if k.VipAllocation.Meta == nil {
+			k.VipAllocation.Meta = &klitev1.Meta{}
+		}
+		return k.VipAllocation.Meta
 	}
 	return &klitev1.Meta{}
 }

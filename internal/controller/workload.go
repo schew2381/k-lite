@@ -150,8 +150,8 @@ func (c *workloadController) deleteInstance(ctx context.Context, inst *klitev1.I
 	return nil
 }
 
-// updateStatus writes observed counts. Running counts as ready until M4 wires
-// readiness probes.
+// updateStatus writes observed counts. Ready means the agent reported READY,
+// which the probe path gates (ADR 0008); Running alone no longer counts.
 func (c *workloadController) updateStatus(ctx context.Context, obj *klitev1.Object, hash string, instances []*klitev1.Instance) error {
 	w := obj.GetWorkload()
 	var ready int32
@@ -159,10 +159,8 @@ func (c *workloadController) updateStatus(ctx context.Context, obj *klitev1.Obje
 		if inst.GetSpec().GetTemplateHash() != hash {
 			continue
 		}
-		switch inst.GetStatus().GetPhase() {
-		case klitev1.InstancePhase_INSTANCE_PHASE_RUNNING, klitev1.InstancePhase_INSTANCE_PHASE_READY:
+		if inst.GetStatus().GetPhase() == klitev1.InstancePhase_INSTANCE_PHASE_READY {
 			ready++
-		default:
 		}
 	}
 	next := &klitev1.WorkloadStatus{

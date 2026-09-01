@@ -148,6 +148,8 @@ func message(o *klitev1.Object) proto.Message {
 		return k.NetworkPolicy
 	case *klitev1.Object_Instance:
 		return k.Instance
+	case *klitev1.Object_VipAllocation:
+		return k.VipAllocation
 	}
 	return nil
 }

@@ -42,7 +42,7 @@ start_agent() {
 
 klited_ready() { "$KLITE" get workloads >/dev/null 2>&1; }
 nodes_ready()  { [[ "$("$KLITE" get nodes | awk '$2=="Ready"' | wc -l | tr -d ' ')" == 2 ]]; }
-a_running()    { "$KLITE" get instances | awk '$2=="a" && $4=="Running"' | grep -q a; }
+a_running()    { "$KLITE" get instances | awk '$2=="a" && ($4=="Running" || $4=="Ready")' | grep -q a; }
 tail3_ok() {
   "$KLITE" logs "$INST" --tail 3 >/tmp/klite-m3-tail.log 2>&1 || return 1
   [[ "$(wc -l </tmp/klite-m3-tail.log | tr -d ' ')" == 3 ]] && grep -q "b =>" /tmp/klite-m3-tail.log
@@ -123,7 +123,7 @@ wait_for 5 cons_gone \
 # --- describe ---
 "$KLITE" describe instance "$INST" >/tmp/klite-m3-desc-inst.log 2>&1 || die "describe instance runs"
 grep -Eq '^Node: +node-[12]$' /tmp/klite-m3-desc-inst.log \
-  && grep -Eq '^Phase: +Running$' /tmp/klite-m3-desc-inst.log \
+  && grep -Eq '^Phase: +(Running|Ready)$' /tmp/klite-m3-desc-inst.log \
   && grep -Eq '^IP: +10\.44\.' /tmp/klite-m3-desc-inst.log \
   && pass "describe instance shows node, phase, IP" \
   || die "describe instance shows node, phase, IP"

@@ -158,17 +158,21 @@ func (d *Docker) EnsureImage(ctx context.Context, image string) error {
 
 // RunInstance creates and starts the instance's container on klite0 with a
 // dynamic IP. Restart policy is "no": the agent owns restarts (ADR 0011).
-func (d *Docker) RunInstance(ctx context.Context, inst *klitev1.Instance, node string) (string, error) {
+func (d *Docker) RunInstance(ctx context.Context, inst *klitev1.Instance, node, dnsIP string) (string, error) {
 	name := ContainerName(node, inst.GetMeta().GetName())
-	opts, err := createOptions(inst, node, name)
+	opts, err := createOptions(inst, node, name, dnsIP)
 	if err != nil {
 		return "", err
 	}
+	return d.createAndStart(ctx, name, opts)
+}
+
+// createAndStart runs one container, replacing a stale name-holder. The
+// reconciler adopts matching survivors before ever calling this, so whatever
+// holds the name is a leftover from a previous life.
+func (d *Docker) createAndStart(ctx context.Context, name string, opts client.ContainerCreateOptions) (string, error) {
 	created, err := d.cli.ContainerCreate(ctx, opts)
 	if cerrdefs.IsConflict(err) {
-		// A previous agent life left a container holding the name. The
-		// reconciler adopts matching survivors before calling RunInstance,
-		// so whatever sits here is stale: replace it.
 		if _, rerr := d.cli.ContainerRemove(ctx, name, client.ContainerRemoveOptions{Force: true}); rerr != nil {
 			return "", fmt.Errorf("remove stale container %s: %w", name, rerr)
 		}
@@ -183,7 +187,7 @@ func (d *Docker) RunInstance(ctx context.Context, inst *klitev1.Instance, node s
 	return created.ID, nil
 }
 
-func createOptions(inst *klitev1.Instance, node, name string) (client.ContainerCreateOptions, error) {
+func createOptions(inst *klitev1.Instance, node, name, dnsIP string) (client.ContainerCreateOptions, error) {
 	spec := inst.GetSpec()
 	c := spec.GetContainer()
 	ports, err := portSet(c.GetPorts())
@@ -191,6 +195,10 @@ func createOptions(inst *klitev1.Instance, node, name string) (client.ContainerC
 		return client.ContainerCreateOptions{}, err
 	}
 	res, err := resources(c.GetResources())
+	if err != nil {
+		return client.ContainerCreateOptions{}, err
+	}
+	dnsAddrs, dnsSearch, dnsOptions, err := dnsConfig(dnsIP)
 	if err != nil {
 		return client.ContainerCreateOptions{}, err
 	}
@@ -214,13 +222,29 @@ func createOptions(inst *klitev1.Instance, node, name string) (client.ContainerC
 		HostConfig: &container.HostConfig{
 			RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled},
 			Resources:     res,
+			DNS:           dnsAddrs,
+			DNSSearch:     dnsSearch,
+			DNSOptions:    dnsOptions,
 		},
 		// No IPAMConfig means a dynamic address from klite0's ip-range.
-		// DNS options arrive in M4 with the infra pod (ADR 0008).
 		NetworkingConfig: &network.NetworkingConfig{
 			EndpointsConfig: map[string]*network.EndpointSettings{networkName: {}},
 		},
 	}, nil
+}
+
+// dnsConfig points the container's resolver at the node's klite-net, alone.
+// ndots:1 is load-bearing: Docker writes ndots:0 when DNS is overridden, and
+// musl then skips the search domain, killing bare names (ADR 0008).
+func dnsConfig(dnsIP string) ([]netip.Addr, []string, []string, error) {
+	if dnsIP == "" {
+		return nil, nil, nil, nil
+	}
+	addr, err := netip.ParseAddr(dnsIP)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("dns ip %q: %w", dnsIP, err)
+	}
+	return []netip.Addr{addr}, []string{"svc.klite"}, []string{"ndots:1"}, nil
 }
 
 func envList(vars []*klitev1.EnvVar) []string {

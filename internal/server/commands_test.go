@@ -207,7 +207,7 @@ func TestPushCommandOutputRoutesToWaiter(t *testing.T) {
 	t.Parallel()
 	h := NewCommandHub()
 	w := h.addWaiter("c1")
-	a := NewAgent(nil, "tok", h)
+	a := NewAgent(nil, "tok", h, nil)
 	stream := &fakePushServer{msgs: []*klitev1.CommandOutput{
 		output("c1", "hello"),
 		{CommandId: "c1", Eof: true},
@@ -229,7 +229,7 @@ func TestPushCommandOutputSynthesizesEOFOnBrokenStream(t *testing.T) {
 	t.Parallel()
 	h := NewCommandHub()
 	w := h.addWaiter("c1")
-	a := NewAgent(nil, "tok", h)
+	a := NewAgent(nil, "tok", h, nil)
 	stream := &fakePushServer{
 		msgs: []*klitev1.CommandOutput{output("c1", "hello")},
 		err:  errors.New("agent vanished"),
@@ -251,7 +251,7 @@ func TestPushCommandOutputSynthesizesEOFOnBrokenStream(t *testing.T) {
 func TestPushCommandOutputRejectsUnknownCommand(t *testing.T) {
 	t.Parallel()
 	h := NewCommandHub()
-	a := NewAgent(nil, "tok", h)
+	a := NewAgent(nil, "tok", h, nil)
 	stream := &fakePushServer{msgs: []*klitev1.CommandOutput{output("ghost", "x")}}
 
 	if err := a.PushCommandOutput(stream); err == nil {

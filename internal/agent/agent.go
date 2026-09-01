@@ -29,16 +29,23 @@ type Config struct {
 	Token   string
 	Runtime runtime.Runtime
 	Client  klitev1.AgentServiceClient
+	// ServerAddr is the klited address this agent dialed; its port tells
+	// the in-container Envoy where the xDS server lives (infrapod.go).
+	ServerAddr string
+	// StateDir overrides ~/.klite/agent as the root for per-node files.
+	StateDir string
 }
 
 // Agent is the per-node loop. All mutable state sits behind mu. The reconcile
 // loop is the only writer of states, and the report loop reads them.
 type Agent struct {
-	node   string
-	token  string
-	rt     runtime.Runtime
-	client klitev1.AgentServiceClient
-	now    func() time.Time
+	node       string
+	token      string
+	rt         runtime.Runtime
+	client     klitev1.AgentServiceClient
+	serverAddr string
+	stateDir   string
+	now        func() time.Time
 
 	mu           sync.Mutex
 	desired      map[string]*klitev1.Instance // by instance name
@@ -46,29 +53,38 @@ type Agent struct {
 	lastRev      int64
 	states       map[string]*instState         // by instance name
 	grace        map[string]int32              // instance name -> last known stop grace, for orphans
-	net          *klitev1.NetBootstrap         // saved at Register, unused until M4 builds the infra pod
+	net          *klitev1.NetBootstrap         // saved at Register, drives the infra pod (ADR 0008)
+	desiredNet   *klitev1.NetDesired           // latest snapshot's net config
+	appliedNet   *klitev1.NetDesired           // last config klite-net acked
+	probeReady   map[string]bool               // instance name -> latest probe verdict
+	netHealthy   bool                          // klite-net DNS answering
 	commands     map[string]context.CancelFunc // running server commands by id (commands.go)
 
 	cmdWG sync.WaitGroup // one entry per running command handler
 
 	kickReconcile chan struct{}
 	kickReport    chan struct{}
+	kickNet       chan struct{}
 }
 
 // New returns an Agent ready to Run.
-func New(cfg Config) *Agent {
+func New(cfg *Config) *Agent {
 	return &Agent{
 		node:          cfg.Node,
 		token:         cfg.Token,
 		rt:            cfg.Runtime,
 		client:        cfg.Client,
+		serverAddr:    cfg.ServerAddr,
+		stateDir:      cfg.StateDir,
 		now:           time.Now,
 		desired:       map[string]*klitev1.Instance{},
 		states:        map[string]*instState{},
 		grace:         map[string]int32{},
+		probeReady:    map[string]bool{},
 		commands:      map[string]context.CancelFunc{},
 		kickReconcile: make(chan struct{}, 1),
 		kickReport:    make(chan struct{}, 1),
+		kickNet:       make(chan struct{}, 1),
 	}
 }
 
@@ -83,7 +99,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		return err
 	}
 	var wg sync.WaitGroup
-	for _, loop := range []func(context.Context){a.watchLoop, a.eventLoop, a.reconcileLoop, a.reportLoop, a.commandLoop} {
+	for _, loop := range []func(context.Context){a.watchLoop, a.eventLoop, a.reconcileLoop, a.reportLoop, a.commandLoop, a.netLoop} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -180,9 +196,12 @@ func (a *Agent) applySnapshot(ds *klitev1.DesiredState) {
 	a.desired = desired
 	a.haveSnapshot = true
 	a.lastRev = ds.GetRevision()
+	a.desiredNet = ds.GetNet()
 	a.mu.Unlock()
-	slog.Info("desired state applied", "revision", ds.GetRevision(), "instances", len(desired))
+	slog.Info("desired state applied", "revision", ds.GetRevision(), "instances", len(desired),
+		"services", len(ds.GetNet().GetServices()))
 	kick(a.kickReconcile)
+	kick(a.kickNet)
 }
 
 // eventLoop turns Docker start/die events into reconcile kicks, resyncing
@@ -250,7 +269,7 @@ func (a *Agent) reportLoop(ctx context.Context) {
 }
 
 func (a *Agent) report(ctx context.Context) {
-	req := &klitev1.ReportStatusRequest{Node: a.node, Instances: a.statusUpdates()}
+	req := &klitev1.ReportStatusRequest{Node: a.node, Instances: a.statusUpdates(), KliteNet: a.kliteNetStatus()}
 	rctx, cancel := context.WithTimeout(ctx, reportTimeout)
 	defer cancel()
 	if _, err := a.client.ReportStatus(rctx, req); err != nil && ctx.Err() == nil {

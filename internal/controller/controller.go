@@ -30,6 +30,7 @@ func RunAll(ctx context.Context, st store.Store) {
 		{"workload", []string{object.KindWorkload, object.KindInstance}, (&workloadController{st: st}).reconcile},
 		{"scheduler", []string{object.KindInstance, object.KindNode, object.KindWorkload}, (&scheduler{st: st}).reconcile},
 		{"node", []string{object.KindNode, object.KindInstance}, (&nodeController{st: st, now: time.Now}).reconcile},
+		{"vip", []string{object.KindService, object.KindNode, object.KindVIPAllocation}, (&vipController{st: st}).reconcile},
 	}
 	var wg sync.WaitGroup
 	for _, l := range loops {

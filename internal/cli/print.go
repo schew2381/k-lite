@@ -58,6 +58,14 @@ func printTable(w io.Writer, kind string, objs []*klitev1.Object) error {
 				phase(p.GetSpec().GetAction().String(), "POLICY_ACTION_"),
 				formatRules(p.GetSpec().GetRules()))
 		}
+	case object.KindVIPAllocation:
+		fmt.Fprintln(tw, "NAME\tSERVICE\tNODE\tVIP")
+		for _, o := range objs {
+			v := o.GetVipAllocation()
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+				v.GetMeta().GetName(),
+				v.GetSpec().GetService(), v.GetSpec().GetNode(), v.GetSpec().GetVip())
+		}
 	case object.KindInstance:
 		fmt.Fprintln(tw, "NAME\tWORKLOAD\tNODE\tPHASE\tRESTARTS\tIP\tAGE")
 		for _, o := range objs {

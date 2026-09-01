@@ -20,8 +20,11 @@ const (
 	LabelInstance     = "io.klite.instance"
 	LabelInstanceUID  = "io.klite.instance-uid"
 	LabelTemplateHash = "io.klite.template-hash"
+	LabelConfigHash   = "io.klite.config-hash"
 
 	RoleWorkload = "workload"
+	RoleNet      = "net"
+	RoleEnvoy    = "envoy"
 )
 
 // StateRunning is Docker's state string for a live container. Anything else
@@ -54,6 +57,41 @@ type Event struct {
 	ExitCode     int
 }
 
+// InfraContainer describes one infra-pod container (ADR 0008). Every
+// netns-scoped option (static IP, capabilities, extra hosts, published
+// ports) belongs on the netns donor; a container joining another's namespace
+// carries none of them.
+type InfraContainer struct {
+	Name       string
+	Image      string
+	Cmd        []string
+	Labels     map[string]string // must include LabelConfigHash for drift checks
+	StaticIP   string            // klite0 address; mutually exclusive with JoinNetns
+	JoinNetns  string            // container name whose netns to join
+	CapAdd     []string
+	ExtraHosts []string
+	Binds      []string
+	// Ports maps "port/proto" to a "host:port" bind on the host.
+	Ports map[string]string
+}
+
+// InfraStatus is what drift detection needs to know about a named container.
+type InfraStatus struct {
+	ID         string
+	Running    bool
+	ConfigHash string
+	StartedAt  time.Time
+}
+
+// InfraInfo identifies one infra container and its klite0 address, for
+// spotting stale donors squatting an address a node was assigned.
+type InfraInfo struct {
+	ID   string
+	Name string
+	Node string
+	IP   string
+}
+
 // Runtime is everything the agent needs from a container engine.
 type Runtime interface {
 	// EnsureNetwork creates klite0 or validates an existing one. A klite0
@@ -62,8 +100,18 @@ type Runtime interface {
 	// EnsureImage pulls image unless it's already local.
 	EnsureImage(ctx context.Context, image string) error
 	// RunInstance creates and starts the instance's container on the node,
-	// returning the container ID.
-	RunInstance(ctx context.Context, inst *klitev1.Instance, node string) (string, error)
+	// returning the container ID. A non-empty dnsIP wires the container's
+	// resolver to that node's klite-net (ADR 0008).
+	RunInstance(ctx context.Context, inst *klitev1.Instance, node, dnsIP string) (string, error)
+	// RunInfra creates and starts an infra-pod container, replacing any
+	// container already holding the name.
+	RunInfra(ctx context.Context, spec *InfraContainer) (string, error)
+	// InspectInfra reports a named container's state, or nil when no such
+	// container exists.
+	InspectInfra(ctx context.Context, name string) (*InfraStatus, error)
+	// ListInfra lists infra containers carrying the given role label,
+	// running or not.
+	ListInfra(ctx context.Context, role string) ([]InfraInfo, error)
 	// StopInstance sends SIGTERM and escalates to SIGKILL after gracePeriod.
 	StopInstance(ctx context.Context, id string, gracePeriod time.Duration) error
 	// RemoveInstance force-removes a container. Removing one that's already

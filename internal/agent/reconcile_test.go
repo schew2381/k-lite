@@ -36,7 +36,19 @@ func (f *fakeRuntime) EnsureNetwork(context.Context) error { return nil }
 
 func (f *fakeRuntime) EnsureImage(context.Context, string) error { return nil }
 
-func (f *fakeRuntime) RunInstance(_ context.Context, inst *klitev1.Instance, _ string) (string, error) {
+func (f *fakeRuntime) RunInfra(context.Context, *runtime.InfraContainer) (string, error) {
+	return "", nil
+}
+
+func (f *fakeRuntime) InspectInfra(context.Context, string) (*runtime.InfraStatus, error) {
+	return nil, nil
+}
+
+func (f *fakeRuntime) ListInfra(context.Context, string) ([]runtime.InfraInfo, error) {
+	return nil, nil
+}
+
+func (f *fakeRuntime) RunInstance(_ context.Context, inst *klitev1.Instance, _, _ string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.runErr != nil {
@@ -136,13 +148,18 @@ func (f *fakeRuntime) addContainer(ri *runtime.RunningInstance) {
 	f.containers[cp.ContainerID] = &cp
 }
 
+// desiredInstance carries a readiness probe, so Running stays Running until a
+// probe verdict lands; probeless instances get their own tests.
 func desiredInstance(name, uid, hash string) *klitev1.Instance {
 	return &klitev1.Instance{
 		Meta: &klitev1.Meta{Name: name, Uid: uid},
 		Spec: &klitev1.InstanceSpec{
-			Workload:     "b",
-			Node:         "node-1",
-			Container:    &klitev1.Container{Name: "web", Image: "img:1"},
+			Workload: "b",
+			Node:     "node-1",
+			Container: &klitev1.Container{
+				Name: "web", Image: "img:1",
+				ReadinessProbe: &klitev1.ReadinessProbe{TcpPort: 80},
+			},
 			TemplateHash: hash,
 			Drain:        &klitev1.DrainSpec{TerminationGraceSeconds: 3},
 		},
@@ -151,7 +168,7 @@ func desiredInstance(name, uid, hash string) *klitev1.Instance {
 
 func testAgent(t *testing.T, rt runtime.Runtime, instances ...*klitev1.Instance) *Agent {
 	t.Helper()
-	a := New(Config{Node: "node-1", Token: "dev-token", Runtime: rt})
+	a := New(&Config{Node: "node-1", Token: "dev-token", Runtime: rt})
 	a.applySnapshot(&klitev1.DesiredState{Revision: 1, Instances: instances})
 	return a
 }

@@ -72,7 +72,7 @@ func (c *fakeAgentClient) pushCount() int {
 func commandAgent(t *testing.T, rt *fakeRuntime) (*Agent, *fakeAgentClient) {
 	t.Helper()
 	fc := &fakeAgentClient{}
-	a := New(Config{Node: "node-1", Token: "dev-token", Runtime: rt, Client: fc})
+	a := New(&Config{Node: "node-1", Token: "dev-token", Runtime: rt, Client: fc})
 	a.mu.Lock()
 	a.states["a-xx"] = &instState{uid: "uid-1", containerID: "ctr-1"}
 	a.mu.Unlock()

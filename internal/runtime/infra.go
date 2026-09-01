@@ -1,0 +1,143 @@
+package runtime
+
+import (
+	"context"
+	"fmt"
+	"net/netip"
+	"strings"
+	"time"
+
+	cerrdefs "github.com/containerd/errdefs"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
+)
+
+// RunInfra creates and starts one infra-pod container from spec, replacing
+// whatever holds the name.
+func (d *Docker) RunInfra(ctx context.Context, spec *InfraContainer) (string, error) {
+	opts, err := infraCreateOptions(spec)
+	if err != nil {
+		return "", err
+	}
+	return d.createAndStart(ctx, spec.Name, opts)
+}
+
+func infraCreateOptions(spec *InfraContainer) (client.ContainerCreateOptions, error) {
+	exposed, bindings, err := portBindings(spec.Ports)
+	if err != nil {
+		return client.ContainerCreateOptions{}, err
+	}
+	host := &container.HostConfig{
+		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled},
+		CapAdd:        spec.CapAdd,
+		ExtraHosts:    spec.ExtraHosts,
+		Binds:         spec.Binds,
+		PortBindings:  bindings,
+	}
+	networking := &network.NetworkingConfig{}
+	switch {
+	case spec.JoinNetns != "":
+		host.NetworkMode = container.NetworkMode("container:" + spec.JoinNetns)
+		networking = nil
+	case spec.StaticIP != "":
+		ip, err := netip.ParseAddr(spec.StaticIP)
+		if err != nil {
+			return client.ContainerCreateOptions{}, fmt.Errorf("static ip %q: %w", spec.StaticIP, err)
+		}
+		networking.EndpointsConfig = map[string]*network.EndpointSettings{
+			networkName: {IPAMConfig: &network.EndpointIPAMConfig{IPv4Address: ip}},
+		}
+	default:
+		networking.EndpointsConfig = map[string]*network.EndpointSettings{networkName: {}}
+	}
+	return client.ContainerCreateOptions{
+		Name: spec.Name,
+		Config: &container.Config{
+			Image:        spec.Image,
+			Cmd:          spec.Cmd,
+			Labels:       spec.Labels,
+			ExposedPorts: exposed,
+		},
+		HostConfig:       host,
+		NetworkingConfig: networking,
+	}, nil
+}
+
+func portBindings(ports map[string]string) (network.PortSet, network.PortMap, error) {
+	if len(ports) == 0 {
+		return nil, nil, nil
+	}
+	exposed := make(network.PortSet, len(ports))
+	bindings := make(network.PortMap, len(ports))
+	for portProto, hostAddr := range ports {
+		port, err := network.ParsePort(portProto)
+		if err != nil {
+			return nil, nil, fmt.Errorf("port %q: %w", portProto, err)
+		}
+		hostIP, hostPort, err := splitHostBind(hostAddr)
+		if err != nil {
+			return nil, nil, err
+		}
+		exposed[port] = struct{}{}
+		bindings[port] = []network.PortBinding{{HostIP: hostIP, HostPort: hostPort}}
+	}
+	return exposed, bindings, nil
+}
+
+func splitHostBind(addr string) (netip.Addr, string, error) {
+	ap, err := netip.ParseAddrPort(addr)
+	if err != nil {
+		return netip.Addr{}, "", fmt.Errorf("host bind %q: %w", addr, err)
+	}
+	return ap.Addr(), fmt.Sprintf("%d", ap.Port()), nil
+}
+
+// ListInfra lists infra containers carrying the given role label.
+func (d *Docker) ListInfra(ctx context.Context, role string) ([]InfraInfo, error) {
+	list, err := d.cli.ContainerList(ctx, client.ContainerListOptions{
+		All:     true,
+		Filters: make(client.Filters).Add("label", LabelRole+"="+role),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list %s containers: %w", role, err)
+	}
+	out := make([]InfraInfo, 0, len(list.Items))
+	for _, c := range list.Items {
+		name := ""
+		if len(c.Names) > 0 {
+			name = strings.TrimPrefix(c.Names[0], "/")
+		}
+		out = append(out, InfraInfo{
+			ID:   c.ID,
+			Name: name,
+			Node: c.Labels[LabelNode],
+			IP:   summaryIP(&c),
+		})
+	}
+	return out, nil
+}
+
+// InspectInfra reports a named container's state, or nil when the name is
+// free.
+func (d *Docker) InspectInfra(ctx context.Context, name string) (*InfraStatus, error) {
+	insp, err := d.cli.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
+	if cerrdefs.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("inspect container %s: %w", name, err)
+	}
+	c := insp.Container
+	st := &InfraStatus{ID: c.ID}
+	if c.Config != nil {
+		st.ConfigHash = c.Config.Labels[LabelConfigHash]
+	}
+	if c.State != nil {
+		st.Running = c.State.Running
+		if t, err := time.Parse(time.RFC3339Nano, c.State.StartedAt); err == nil {
+			st.StartedAt = t
+		}
+	}
+	return st, nil
+}

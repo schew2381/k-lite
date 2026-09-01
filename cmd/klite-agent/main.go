@@ -66,11 +66,12 @@ func run(node, server, token, dockerHost string) error {
 	defer conn.Close()
 
 	slog.Info("klite-agent starting", "node", node, "server", server)
-	a := agent.New(agent.Config{
-		Node:    node,
-		Token:   token,
-		Runtime: rt,
-		Client:  klitev1.NewAgentServiceClient(conn),
+	a := agent.New(&agent.Config{
+		Node:       node,
+		Token:      token,
+		Runtime:    rt,
+		Client:     klitev1.NewAgentServiceClient(conn),
+		ServerAddr: server,
 	})
 	return a.Run(ctx)
 }
