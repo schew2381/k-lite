@@ -13,3 +13,4 @@ Deleting a Node doesn't remove its record. The server stamps a `klite.io/pending
 - `klite delete node <n>` returns before the record disappears — the leader finishes the choreography.
 - Re-apply-cancels-delete is defensible (declaring the node again means you want it) but surprising, hence this record.
 - If the flag ever needs to survive label rewrites, promote it to NodeStatus and supersede this.
+- M8 added `klite uncordon`, which clears a cordon unless this label is present — a pending delete stays a delete.

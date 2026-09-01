@@ -1,5 +1,5 @@
 ---
-status: superseded by ADR-0024
+status: superseded by 0024-cross-machine-published-ports-mtls (not the UI session's 0024)
 ---
 
 # Cross-host traffic is designed for, not built
