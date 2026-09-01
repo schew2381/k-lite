@@ -9,12 +9,17 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
 )
 
 const (
 	probeInterval = 2 * time.Second
 	probeTimeout  = time.Second
+	// probeParallelism caps concurrent dials per sweep so an oversized
+	// target list degrades into a slower sweep, not a goroutine flood.
+	probeParallelism = 64
 )
 
 type dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -69,26 +74,32 @@ func (p *prober) run(ctx context.Context) error {
 	}
 }
 
-// sweep probes every current target concurrently and replaces the retained
-// state, dropping instances the config no longer lists.
+// sweep probes every current target concurrently (capped) and replaces the
+// retained state, dropping instances the config no longer lists.
 func (p *prober) sweep(ctx context.Context) {
 	targets := p.cfg.Load().targets
 	results := make([]*klitev1.ProbeState, len(targets))
-	var wg sync.WaitGroup
+	var g errgroup.Group
+	g.SetLimit(probeParallelism)
 	for i, t := range targets {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		g.Go(func() error {
 			results[i] = &klitev1.ProbeState{
 				Instance: t.instance,
 				Ip:       t.ip,
 				Port:     t.port,
 				Ready:    p.probe(ctx, t.addr),
 			}
-		}()
+			return nil
+		})
 	}
-	wg.Wait()
+	_ = g.Wait() // probes never return errors, only ready=false
 
+	// A cancelled sweep saw its dials aborted, not its targets down. Keep
+	// the last real results, or a Probes call racing shutdown sees
+	// everything unready.
+	if ctx.Err() != nil {
+		return
+	}
 	next := make(map[string]*klitev1.ProbeState, len(results))
 	for _, r := range results {
 		next[r.GetInstance()] = r

@@ -1,6 +1,7 @@
 package netd
 
 import (
+	"context"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -160,6 +161,105 @@ func checkSOA(t *testing.T, rr dns.RR) {
 	}
 	if soa.Refresh != 7200 || soa.Retry != 1800 || soa.Expire != 86400 {
 		t.Errorf("SOA timers = %d %d %d", soa.Refresh, soa.Retry, soa.Expire)
+	}
+}
+
+// A panicking zone handler must yield SERVFAIL, not a dead resolver. The
+// panic is injected via an extra mux route so the recovery wrapper is
+// exercised exactly as a real handler bug would hit it.
+func TestServeDNSRecoversPanic(t *testing.T) {
+	s := testDNSServer(t, "127.0.0.1:1")
+	s.mux.HandleFunc("boom.test.", func(dns.ResponseWriter, *dns.Msg) {
+		panic("handler bug")
+	})
+	m := ask(s, udpRemote(), "boom.test.", dns.TypeA, dns.ClassINET)
+	if m == nil {
+		t.Fatal("no reply written after handler panic")
+	}
+	if m.Rcode != dns.RcodeServerFailure {
+		t.Fatalf("rcode = %s, want SERVFAIL", dns.RcodeToString[m.Rcode])
+	}
+}
+
+// NOTIFY passes miekg's default accept func, so serveDNS has to turn it away
+// itself rather than answering it like a query.
+func TestServeDNSRejectsNonQueryOpcode(t *testing.T) {
+	s := testDNSServer(t, "127.0.0.1:1")
+	r := new(dns.Msg)
+	r.SetQuestion("b.svc.klite.", dns.TypeA)
+	r.Opcode = dns.OpcodeNotify
+	w := &fakeWriter{remote: udpRemote()}
+	s.serveDNS(w, r)
+	if w.msg == nil {
+		t.Fatal("no reply written")
+	}
+	if w.msg.Rcode != dns.RcodeNotImplemented {
+		t.Fatalf("rcode = %s, want NOTIMP", dns.RcodeToString[w.msg.Rcode])
+	}
+	if len(w.msg.Answer) != 0 {
+		t.Fatalf("NOTIFY got answers: %v", w.msg.Answer)
+	}
+}
+
+// run must flip ready once both listeners are up and return nil when asked
+// to stop; a stop-path shutdown error is noise, not a failure.
+func TestDNSRunLifecycle(t *testing.T) {
+	s := testDNSServer(t, "127.0.0.1:1")
+	s.listen = "127.0.0.1:0"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- s.run(ctx) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for !s.ready() {
+		if time.Now().After(deadline) {
+			t.Fatal("listeners never came up")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("run returned %v after cancel", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not return after cancel")
+	}
+}
+
+// A listener that cannot bind must surface as an error, not hang the daemon.
+func TestDNSRunListenFailure(t *testing.T) {
+	s := testDNSServer(t, "127.0.0.1:1")
+	s.listen = "256.256.256.256:0"
+	if err := s.run(context.Background()); err == nil {
+		t.Fatal("run with an unbindable address returned nil")
+	}
+}
+
+func TestClientBufSize(t *testing.T) {
+	tests := []struct {
+		name string
+		opt  uint16 // 0: no EDNS0
+		want int
+	}{
+		{name: "no edns0 means 512", want: dns.MinMsgSize},
+		{name: "edns0 above 512 honored", opt: 1232, want: 1232},
+		{name: "edns0 at 512 stays 512", opt: 512, want: dns.MinMsgSize},
+		{name: "edns0 below 512 clamped up", opt: 200, want: dns.MinMsgSize},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := new(dns.Msg)
+			r.SetQuestion("example.com.", dns.TypeA)
+			if tt.opt != 0 {
+				r.SetEdns0(tt.opt, false)
+			}
+			if got := clientBufSize(r); got != tt.want {
+				t.Errorf("clientBufSize = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
 

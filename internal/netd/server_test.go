@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -84,6 +85,13 @@ func TestApplyConfigSwapAtomicity(t *testing.T) {
 			if got := srv.serial.Load(); got != 200 {
 				t.Fatalf("serial counter = %d, want 200 after 200 applies", got)
 			}
+			// Pushes are serialized, so the stored config must be the
+			// one that drew the final serial. An older racing push
+			// sticking around would mean stale DNS the agent believes
+			// it replaced.
+			if got := srv.cfg.Load().serial; got != 200 {
+				t.Fatalf("stored config serial = %d, want 200 (stale push won the race)", got)
+			}
 			return
 		default:
 		}
@@ -119,6 +127,73 @@ func TestApplyConfigRejectsBadVIPs(t *testing.T) {
 	// The rejected pushes must not have replaced the good config.
 	if got := srv.cfg.Load().vips["b"].String(); got != "10.44.64.9" {
 		t.Fatalf("config after rejects = %s, want 10.44.64.9", got)
+	}
+}
+
+func TestParseConfigServiceNames(t *testing.T) {
+	svc := func(names ...string) *klitev1.NetDesired {
+		net := &klitev1.NetDesired{}
+		for i, n := range names {
+			net.Services = append(net.Services, &klitev1.ServiceVIP{
+				Service: n, Vip: fmt.Sprintf("10.44.64.%d", i+1), Port: 80,
+			})
+		}
+		return net
+	}
+	tests := []struct {
+		name    string
+		net     *klitev1.NetDesired
+		wantErr bool
+	}{
+		{name: "plain label", net: svc("b")},
+		{name: "dashes inside", net: svc("api-v2")},
+		{name: "uppercase folds", net: svc("MixedCase")},
+		{name: "63 chars fits", net: svc(strings.Repeat("a", 63))},
+		{name: "64 chars rejected", net: svc(strings.Repeat("a", 64)), wantErr: true},
+		{name: "dot never resolves", net: svc("a.b"), wantErr: true},
+		{name: "space never resolves", net: svc("a b"), wantErr: true},
+		{name: "leading dash rejected", net: svc("-a"), wantErr: true},
+		{name: "trailing dash rejected", net: svc("a-"), wantErr: true},
+		{name: "duplicate rejected", net: svc("b", "b"), wantErr: true},
+		{name: "case-folded duplicate rejected", net: svc("b", "B"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseConfig(tt.net, 1)
+			if gotErr := err != nil; gotErr != tt.wantErr {
+				t.Fatalf("parseConfig err = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// The agent clears a departed node by pushing an empty (or nil) NetDesired.
+// Both shapes must apply cleanly and wipe the previous state.
+func TestApplyConfigEmptyClearsState(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		net  *klitev1.NetDesired
+	}{
+		{name: "empty message", net: &klitev1.NetDesired{}},
+		{name: "nil message", net: nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := testServer(nil)
+			if _, err := srv.ApplyConfig(context.Background(), &klitev1.ApplyConfigRequest{Net: desired(9)}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := srv.ApplyConfig(context.Background(), &klitev1.ApplyConfigRequest{Net: tt.net}); err != nil {
+				t.Fatalf("empty push rejected: %v", err)
+			}
+			cfg := srv.cfg.Load()
+			if len(cfg.vips) != 0 || len(cfg.targets) != 0 {
+				t.Fatalf("state not cleared: %d vips, %d targets", len(cfg.vips), len(cfg.targets))
+			}
+			m := ask(srv.dns, udpRemote(), "b.svc.klite.", dns.TypeA, dns.ClassINET)
+			if m.Rcode != dns.RcodeNameError {
+				t.Fatalf("rcode after clear = %s, want NXDOMAIN", dns.RcodeToString[m.Rcode])
+			}
+		})
 	}
 }
 

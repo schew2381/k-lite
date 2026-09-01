@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/netip"
+	"sync"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
@@ -29,6 +30,7 @@ type Server struct {
 	klitev1.UnimplementedKliteNetServiceServer
 
 	iface     string
+	applyMu   sync.Mutex // serializes ApplyConfig pushes
 	cfg       atomic.Pointer[netConfig]
 	serial    atomic.Uint32
 	vipsBound atomic.Int32
@@ -70,7 +72,13 @@ func (s *Server) Run(ctx context.Context) error {
 // ApplyConfig swaps in the pushed full state and reconciles VIPs and probes
 // against it. A VIP bind failure is not an RPC error, it shows up as
 // vips_bound in Health.
+//
+// Pushes are serialized: the agent retries a timed-out ApplyConfig while the
+// first may still be running, and without the lock the older config could be
+// stored last and stick.
 func (s *Server) ApplyConfig(_ context.Context, req *klitev1.ApplyConfigRequest) (*klitev1.ApplyConfigResponse, error) {
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
 	cfg, err := parseConfig(req.GetNet(), s.serial.Add(1))
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "net config: %v", err)

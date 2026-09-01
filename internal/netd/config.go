@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -16,6 +17,12 @@ import (
 // vipPool is the klited-allocated VIP range. Reconciliation never touches
 // addresses outside it, which keeps the container's primary IP safe.
 var vipPool = netip.MustParsePrefix("10.44.64.0/18")
+
+// serviceLabel is the DNS-label grammar klited enforces on Service names.
+// Anything outside it (a dot, a space, 64+ characters) would build a vips
+// key no wire-format query can ever match, so the push gets rejected loudly
+// instead of resolving to silent NXDOMAINs.
+var serviceLabel = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 type probeTarget struct {
 	instance string
@@ -43,6 +50,13 @@ func parseConfig(desired *klitev1.NetDesired, serial uint32) (*netConfig, error)
 		if svc.GetService() == "" {
 			return nil, fmt.Errorf("service with empty name (vip %q)", svc.GetVip())
 		}
+		name := strings.ToLower(svc.GetService())
+		if !serviceLabel.MatchString(name) {
+			return nil, fmt.Errorf("service %q is not a DNS label", svc.GetService())
+		}
+		if _, dup := cfg.vips[name]; dup {
+			return nil, fmt.Errorf("service %q listed twice", name)
+		}
 		vip, err := netip.ParseAddr(svc.GetVip())
 		if err != nil {
 			return nil, fmt.Errorf("service %s: vip: %w", svc.GetService(), err)
@@ -50,7 +64,7 @@ func parseConfig(desired *klitev1.NetDesired, serial uint32) (*netConfig, error)
 		if !vip.Is4() || !vipPool.Contains(vip) {
 			return nil, fmt.Errorf("service %s: vip %s outside pool %s", svc.GetService(), vip, vipPool)
 		}
-		cfg.vips[strings.ToLower(svc.GetService())] = vip
+		cfg.vips[name] = vip
 	}
 	seen := map[netip.Addr]bool{}
 	for _, vip := range cfg.vips {

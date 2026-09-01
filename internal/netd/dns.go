@@ -78,6 +78,12 @@ func (s *dnsServer) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 			reply(w, new(dns.Msg).SetRcode(r, dns.RcodeServerFailure))
 		}
 	}()
+	// miekg's accept func lets NOTIFY through alongside QUERY. Neither the
+	// zone handler nor the forwarder has any business answering one.
+	if r.Opcode != dns.OpcodeQuery {
+		reply(w, new(dns.Msg).SetRcode(r, dns.RcodeNotImplemented))
+		return
+	}
 	s.mux.ServeDNS(w, r)
 }
 
