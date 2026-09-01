@@ -294,27 +294,15 @@ wait_for 20 all_nodes_ready && pass "3 nodes Ready" || die "3 nodes Ready"
 
 # ============================================================
 STEP=2-baseline
-"$KLITE" --server "$BOTH" apply -f - >/dev/null <<'EOF' || die "apply workload m7-web"
-apiVersion: klite/v1
-kind: Workload
-metadata:
-  name: m7-web
-  labels:
-    app: m7-web
-spec:
-  replicas: 4
-  template:
-    labels:
-      app: m7-web
-    containers:
-      - name: web
-        image: traefik/whoami:v1.10
-        env:
-          - name: WHOAMI_NAME
-            value: m7
-        ports:
-          - containerPort: 80
-EOF
+# m7_web_yaml <WHOAMI_NAME value>: the workload spec. Tree builds add M5's
+# fast drain knobs (4s, outside the template hash) so step 8's rollout fits
+# its budget; the pinned pre-M5 ref predates the drain fields.
+m7_web_yaml() {
+  printf 'apiVersion: klite/v1\nkind: Workload\nmetadata:\n  name: m7-web\n  labels:\n    app: m7-web\nspec:\n'
+  [ "$TREE_BUILD" = 1 ] && printf '  drain:\n    drainTimeoutSeconds: 4\n    terminationGraceSeconds: 4\n'
+  printf '  replicas: 4\n  template:\n    labels:\n      app: m7-web\n    containers:\n      - name: web\n        image: traefik/whoami:v1.10\n        env:\n          - name: WHOAMI_NAME\n            value: %s\n        ports:\n          - containerPort: 80\n' "$1"
+}
+m7_web_yaml m7 | "$KLITE" --server "$BOTH" apply -f - >/dev/null || die "apply workload m7-web"
 wait_for 90 converged_running 4 \
   && pass "m7-web at 4/4 Running, containers match instances" \
   || die "m7-web at 4/4 Running, containers match instances"
@@ -534,27 +522,7 @@ if [ "$TREE_BUILD" = 1 ]; then
   }
   OLD_HASH="$(wl_hashes)"
   [ "$(printf '%s\n' "$OLD_HASH" | grep -c .)" = 1 ] || die "expected one template hash before the rollout"
-  "$KLITE" --server "$BOTH" apply -f - >/dev/null <<'EOF' || die "apply m7-web v2 template"
-apiVersion: klite/v1
-kind: Workload
-metadata:
-  name: m7-web
-  labels:
-    app: m7-web
-spec:
-  replicas: 4
-  template:
-    labels:
-      app: m7-web
-    containers:
-      - name: web
-        image: traefik/whoami:v1.10
-        env:
-          - name: WHOAMI_NAME
-            value: m7-v2
-        ports:
-          - containerPort: 80
-EOF
+  m7_web_yaml m7-v2 | "$KLITE" --server "$BOTH" apply -f - >/dev/null || die "apply m7-web v2 template"
   sleep 2 # old and new template hashes both live now
 
   if [ "$(leader_state "$LOG_A")" = leading ]; then
@@ -589,9 +557,13 @@ EOF
     [ $(( $(date +%s) - T0 )) -ge 120 ] && { VIOL="timeout: rollout did not finish under the new leader"; break; }
     sleep 0.5
   done
-  [ -n "$DONE" ] \
-    && pass "new leader resumed the rollout: 4/4 on one new hash in $(( $(date +%s) - T0 ))s, count stayed in [3,5]" \
-    || die "rollout-resume invariant: $VIOL"
+  if [ -z "$DONE" ]; then
+    echo "--- rollout state at failure ---"
+    "$KLITE" --server "$BOTH" get instances 2>/dev/null | awk -v wl="$WL" 'NR==1 || $2==wl'
+    echo "hashes: $(wl_hashes | tr '\n' ' ') (old: $OLD_HASH)"
+    die "rollout-resume invariant: $VIOL"
+  fi
+  pass "new leader resumed the rollout: 4/4 on one new hash in $(( $(date +%s) - T0 ))s, count stayed in [3,5]"
 else
   echo "SKIP [$STEP]: rollout-resume-under-leader-kill — $M7_REF predates M5 rollouts (run with M7_TREE=1)"
 fi
