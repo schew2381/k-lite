@@ -635,36 +635,29 @@ spec:
 <section id="ui">
   <div class="wrap">
     <p class="eyebrow"><b>12</b>the live UI</p>
-    <h2>The board is one more watcher</h2>
-    <p class="lede">
-      Browsers don't speak gRPC, so a small facade translates. Objects ride the same watch everything
-      else uses, and calls ride a second feed built from Envoy's counters.
-    </p>
+    <h2>How the board gets updated</h2>
+    <ul class="plain" style="margin-bottom:16px">
+      <li>browsers don't speak gRPC, so a small facade sits in front of klited and translates to REST + server-sent events</li>
+      <li>the board loads everything once, then holds a watch stream open — every object change streams in and React redraws</li>
+      <li>live traffic is a second stream: the facade reads each node's Envoy call counters once a second and streams the deltas, which the board draws as flying dots</li>
+      <li>mock mode swaps the backend for an in-browser simulator behind the same interface</li>
+    </ul>
 
     <div class="boardbox">
       <svg id="board-ui" role="img" aria-label="The UI pipeline: etcd watch events flow through klited's Watch RPC into the facade's Server-Sent Events, and the browser folds them into a snapshot React renders. A second SSE feed streams Envoy counter deltas for live traffic dots."></svg>
     </div>
 
-    <div class="chips">
-      <span class="chip">bootstrap: <b>list, then watch</b> — reconnect resets</span>
-      <span class="chip">deletes carry the last body (<b>PrevKV</b>)</span>
-      <span class="chip">traffic = <b>counter deltas</b>, polled 1s</span>
-      <span class="chip">mock mode: an <b>in-browser simulator</b>, same client seam</span>
-    </div>
-
   </div>
+</section>
+
+<!-- ============ 13 · THE CLI ============ -->  </div>
 </section>
 
 <!-- ============ 13 · THE CLI ============ -->
 <section id="cli">
   <div class="wrap">
     <p class="eyebrow"><b>13</b>the CLI</p>
-    <h2>Eleven commands drive everything</h2>
-    <p class="lede">
-      <code>klite</code> dials any replica over TLS with the admin token and fails over across a server
-      list. Tables by default, <code>-o json|yaml</code> for machines.
-    </p>
-
+    <h2>How to use in terminal</h2>
     <table class="k8s" id="clitable">
       <thead><tr><th>command</th><th>what it does</th></tr></thead>
       <tbody>
@@ -679,32 +672,6 @@ spec:
         <tr><td>klite policy check a c</td><td class="twist">the data plane's own evaluator answers, nonzero exit on denied</td></tr>
         <tr><td>klite node token</td><td class="twist">mint the CA-pinning join credential</td></tr>
         <tr><td>klite node add &lt;name&gt;</td><td class="twist">declare the Node and print the paste-ready join blocks</td></tr>
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<!-- ============ 14 · VS KUBERNETES ============ -->
-<section id="k8s">
-  <div class="wrap">
-    <p class="eyebrow"><b>14</b>the decoder ring</p>
-    <h2>Where Kubernetes hides a mechanism, k-lite names it</h2>
-
-    <table class="k8s">
-      <thead><tr><th>k-lite</th><th>kubernetes</th><th>the twist</th></tr></thead>
-      <tbody>
-        <tr><td>klited</td><td>apiserver + controllers + scheduler + istiod</td><td class="twist">one stateless binary — controllers gate on a lease, API and xDS serve everywhere</td></tr>
-        <tr><td>etcd ×3</td><td>etcd</td><td class="twist">the one piece imported whole</td></tr>
-        <tr><td>klite-agent</td><td>kubelet</td><td class="twist">also builds the per-node infra pod</td></tr>
-        <tr><td>infra pod</td><td>pause + CoreDNS + kube-proxy, squinting</td><td class="twist">per node, not per pod — two containers, one netns</td></tr>
-        <tr><td>VIP</td><td>ClusterIP</td><td class="twist">per (Service, Node) — one bridge can't host one IP twice</td></tr>
-        <tr><td>Envoy per node</td><td>kube-proxy + an Istio sidecar's brain</td><td class="twist">balancing, drains, and policy in one proxy — no iptables to debug</td></tr>
-        <tr><td>Workload / Instance</td><td>Deployment / Pod</td><td class="twist">no ReplicaSet layer — rollouts track a template hash, one retirement in flight</td></tr>
-        <tr><td>NetworkPolicy</td><td>NetworkPolicy in name, Istio AuthorizationPolicy in spirit</td><td class="twist">enforced in Envoy RBAC at the caller</td></tr>
-        <tr><td>ingress port</td><td>NodePort</td><td class="twist">per endpoint, mTLS-required, allocation-driven</td></tr>
-        <tr><td>VIPAllocation · IngressAllocation</td><td>invisible allocator internals</td><td class="twist">first-class kinds — <code>klite get</code> makes the allocator debuggable</td></tr>
-        <tr><td>join token</td><td>kubeadm bootstrap token</td><td class="twist">k3s-shaped: pins the CA hash, CSR keeps keys local</td></tr>
-        <tr><td>drain</td><td>kubectl drain + PDBs</td><td class="twist">surge-first by default — verify gates assert zero failed requests</td></tr>
       </tbody>
     </table>
   </div>
@@ -1162,7 +1129,7 @@ function makeScene(svgId, vw, vh){
     ["top","title"],["rounds","agents + iteration"],["xdsintro","xDS"],["yaml","the YAML"],
     ["loop","converge"],["discovery","discovery"],["node","a node joins"],["identity","identity"],
     ["wan","machines"],["reach","reachability"],["overlay","the open internet"],["ui","the UI"],
-    ["cli","the CLI"],["k8s","vs k8s"],
+    ["cli","the CLI"],
   ];
   const rail = document.createElement("nav");
   rail.className = "toc";
