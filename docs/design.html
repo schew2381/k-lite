@@ -280,61 +280,54 @@ footer .mono{font-family:var(--mono);font-size:12px}
     <p class="eyebrow"><b>02</b>the process</p>
     <h2>How I used agents and iterative design</h2>
 
-    <h3 class="sub">1 · Research open-source tools with agents, generate reports</h3>
-    <p>
-      Before any data-plane code, agents surveyed the proxy landscape and wrote the reports in
-      <code>research/</code> — ADR 0007 is the distillation.
-    </p>
-    <div class="decs">
-      <div class="dec"><span class="opt">nginx</span><span class="why">reload-based config — wrong for per-second endpoint churn</span><span class="tag">ADR 0007</span></div>
-      <div class="dec"><span class="opt">Traefik / Caddy</span><span class="why">dynamic routing, but listeners are static exactly where per-VIP listeners must appear at runtime</span><span class="tag">ADR 0007</span></div>
-      <div class="dec"><span class="opt">Consul</span><span class="why">solves discovery and policy at the price of a second raft-and-gossip system bigger than k-lite</span><span class="tag">ADR 0007</span></div>
-      <div class="dec"><span class="opt">Istio / Linkerd</span><span class="why">effectively require Kubernetes underneath</span><span class="tag">research/</span></div>
-      <div class="dec"><span class="opt">Cilium</span><span class="why">an eBPF data plane living in the Linux kernel — no story on a macOS-hosted cluster</span><span class="tag">research/</span></div>
-      <div class="dec"><span class="opt">Envoy</span><span class="why">drains, balancing, and hitless config over an open protocol (xDS)</span><span class="tag">ADR 0007</span></div>
-    </div>
-    <p>
-      The agent's first call from that research: build a <b>custom Go L4 proxy</b>, keep Envoy as the
-      documented swap.
-    </p>
-
-    <h3 class="sub">2 · Audit the agent's decisions</h3>
-    <p>Agent recommendations are drafts. Every big one got audited, and most flipped.</p>
-    <div class="decs">
-      <div class="dec no"><span class="opt">custom Go L4 proxy</span><span class="why">a few hundred lines we'd own — meaning a few hundred lines of connection-handling bugs</span><span class="tag">first call</span></div>
-      <div class="dec yes"><span class="opt">Envoy, speaking real xDS</span><span class="why">learning the xDS gRPC protocol tipped it — an easy-to-use open standard, and the code left to write is exactly the control plane</span><span class="tag">ADR 0007</span></div>
-      <div class="dec no"><span class="opt">bbolt embedded in one server</span><span class="why">cheap to run, impossible to replicate</span><span class="tag">first call</span></div>
-      <div class="dec yes"><span class="opt">etcd ×3, stateless klited</span><span class="why">the audit raised the bar to a battle-tested store that mirrors k8s — HA became a goal and bbolt died</span><span class="tag">ADR 0005</span></div>
-      <div class="dec no"><span class="opt">same-Wi-Fi peers, defer the internet</span><span class="why">real enough to demo, but the open internet stayed unproven</span><span class="tag">first call</span></div>
-      <div class="dec yes"><span class="opt">a Tailscale tailnet as the mesh VPN</span><span class="why">the audit pushed the agent to research and land the full working model, not defer it</span><span class="tag">ADR 0043</span></div>
-      <div class="dec no"><span class="opt">the agent's first UI design</span><span class="why">functional and forgettable — taste is the one thing agents don't default to</span><span class="tag">first call</span></div>
-      <div class="dec yes"><span class="opt">a live board with opinions</span><span class="why">pulled from real-world references — turbopuffer's pages, raft and paxos visualizations</span><span class="tag">review</span></div>
-    </div>
-    <p>The internet story got the deepest audit loop, and the records show it:</p>
+    <h3 class="sub">1 · Researching open-source tools using agents + generating reports</h3>
     <ul class="plain">
-      <li>ADR 0016 deferred cross-machine traffic but demanded the research up front — <code>research/overlay-wan.md</code> recorded the order (published ports first, a WireGuard mesh second) and named NAT rendezvous as the wall.</li>
-      <li>Published ports landed first (ADR 0034) and proved the wall real: a NATed node joins, heartbeats, and looks healthy while traffic aimed at it blackholes.</li>
-      <li>The audited answer is an overlay (ADR 0043): every machine dials out, hole-punching with DERP relay fallback hands each a stable 100.64/10 address, and k-lite changes zero lines — the tailnet address is simply what nodes advertise and what klited serves.</li>
-      <li>The tailnet carries packets, never trust: k-lite's own CA still signs everything, so it's our mTLS inside their WireGuard.</li>
+      <li><b>nginx</b> — reload-based config, wrong for per-second endpoint churn</li>
+      <li><b>Linkerd</b> — effectively requires Kubernetes underneath</li>
+      <li><b>Envoy</b> — drains, balancing, hitless config over an open protocol (xDS)</li>
+      <li><b>Cilium</b> — eBPF in the Linux kernel, no story on a macOS-hosted cluster</li>
+      <li><b>Istio</b> — same: needs Kubernetes under it</li>
+      <li><b>Traefik / Caddy / Consul</b> (rest of ADR 0007) — static listeners where per-VIP listeners must appear at runtime · a second raft-and-gossip system bigger than k-lite</li>
+    </ul>
+    <p>Agent chose: <b>custom L4 proxy, with Envoy as the documented swap</b>.</p>
+
+    <h3 class="sub">2 · Auditing agent decisions</h3>
+    <p><b>custom L4 proxy → choosing Envoy</b></p>
+    <ul class="plain">
+      <li>learning about the xDS gRPC protocols pushed toward it</li>
+      <li>easy-to-use open standard</li>
+    </ul>
+    <p><b>choosing bbolt originally → using etcd</b></p>
+    <ul class="plain">
+      <li>want a robust, battle-tested system that mirrors k8s</li>
+    </ul>
+    <p><b>peer-to-peer internet communication over Wi-Fi to mimic the real thing → Tailscale as the mesh VPN</b></p>
+    <ul class="plain">
+      <li>deferred the harder implementation until later</li>
+      <li>pushed the agent to actually research and complete a full working model (slide 11)</li>
+    </ul>
+    <p><b>bad design for UI</b></p>
+    <ul class="plain">
+      <li>more subjective, but good taste in the live UI</li>
+      <li>pull from real-world examples like turbopuffer + raft/paxos visualizations</li>
     </ul>
 
     <h3 class="sub">3 · Design and research as much as possible up front</h3>
     <ul class="plain">
-      <li>A day of design before code beat weeks of rework — the ADRs and <code>research/</code> existed before <code>internal/</code>.</li>
-      <li>Real systems set the shapes: Envoy and Istio for the data plane, Kubernetes for the object model, k3s for the join flow.</li>
-      <li><code>/grill-with-docs</code> made the agent question its own plan relentlessly and write the decision record as it went — reversals included.</li>
+      <li>always better to have a good design up front, even if it requires lots of time</li>
+      <li>pull from real-world systems like Istio / Envoy / k8s</li>
+      <li>found <code>/grill-with-docs</code> to push the agent to question and iterate + document design choices</li>
     </ul>
 
-    <h3 class="sub">4 · Parallel subagents for speed and thoroughness</h3>
+    <h3 class="sub">4 · Parallel subagents for speed + thoroughness</h3>
     <ul class="plain">
-      <li>Claude Code ran the build as three main sessions — infra, the live UI, and this page — each fanning out its own subagents.</li>
-      <li>Cross-session messages carried bug reports with diagnoses, byte-matched fixtures, and ADR numbering between them.</li>
-      <li>Adversarial subagents reviewed everything twice: technical accuracy against the code, writing against a style guide.</li>
+      <li>Claude Code CLI is great for this</li>
+      <li>manage workflows, cross-session communication (3 main sessions for infra + UI + HTML, with subagents for each)</li>
     </ul>
   </div>
 </section>
 
-<!-- ============ 03 · WHAT xDS IS ============ --><!-- ============ 03 · WHAT xDS IS ============ -->
+<!-- ============ 03 · WHAT xDS IS ============ --><!-- ============ 03 · WHAT xDS IS ============ --><!-- ============ 03 · WHAT xDS IS ============ -->
 <section id="xdsintro">
   <div class="wrap">
     <p class="eyebrow"><b>03</b>xDS in one breath</p>
@@ -614,10 +607,55 @@ curl -sfL https://…/join.sh | \
   </div>
 </section>
 
+<!-- ============ 11 · THE OPEN INTERNET ============ -->
+<section id="overlay">
+  <div class="wrap">
+    <p class="eyebrow"><b>11</b>the open internet</p>
+    <h2>Internet clusters ride an overlay, not port maps</h2>
+    <p class="lede">
+      Control made the dial-out bet — one inbound address in the whole system. The data plane
+      reintroduced inbound, and across the open internet "every node dialable" fails per network:
+      a router rule per node, and carrier-grade NAT offers no inbound at all.
+    </p>
+
+    <div class="decs">
+      <div class="dec no"><span class="opt">port forwarding + dynamic DNS</span><span class="why">a rule and a stable address per network, nothing behind CGNAT — kept as the raw path for all-static-IP setups</span><span class="tag">rejected as default</span></div>
+      <div class="dec no"><span class="opt">self-hosted headscale</span><span class="why">drops the account, but the coordinator needs exactly the public endpoint whose absence motivates this</span><span class="tag">rejected as default</span></div>
+      <div class="dec no"><span class="opt">single-hub WireGuard</span><span class="why">no account, one udp/51820 forward total — spoke traffic hairpins through the hub, keys move by hand</span><span class="tag">recorded variant</span></div>
+      <div class="dec no"><span class="opt">IPv6 end to end</span><span class="why">no NAT, no traversal — and no cluster has run it; an unexercised raw path</span><span class="tag">recorded</span></div>
+      <div class="dec no"><span class="opt">native reverse tunnels</span><span class="why">klited is already everyone's dial target — but that's a relay in the data path, the thing ADR 0034 refused</span><span class="tag">future</span></div>
+      <div class="dec yes"><span class="opt">a Tailscale tailnet</span><span class="why">both ends dial out, DERP relays carry what hole-punching can't, and k-lite changes zero lines — the tailnet IP is simply what nodes advertise and what klited serves. k3s ships the same integration shape, marked experimental</span><span class="tag">ADR 0043</span></div>
+    </div>
+
+    <div class="split">
+      <div>
+        <ul class="plain">
+          <li>The tailnet sits in the <b>coordination path, never the trust path</b> — the cluster CA still signs everything, so cross-node traffic is our mTLS inside their WireGuard. Encrypted twice, deliberately: an overlay misconfiguration can't downgrade the cluster's own authentication.</li>
+          <li><b>Install order matters once</b>: tailscale first, then restart klited — the serving cert walks interface addresses at boot, and skipping the restart is the documented x509-mismatch loop.</li>
+          <li><b>join.sh treats 100.64.0.0/10 three ways</b> on purpose: detection refuses it, explicit values pass, and <code>KLITE_VPN=tailscale</code> derives one deliberately.</li>
+          <li><b>Disable key expiry</b> for cluster machines — an expired tailnet node key (180-day default) looks exactly like a dead network.</li>
+          <li><b>Mixed clusters inherit a rule</b>: every node advertises its tailnet IP, the Mac's local agents included. Tailscale keeps same-LAN peers on the direct local path, which is what makes the rule universal.</li>
+        </ul>
+      </div>
+      <div>
+        <p class="filetag">joining across the internet — printed by klite node add</p>
+        <div class="codepane">curl -sfL https://…/join.sh | \
+  KLITE_URL=<span class="g">100.69.43.39:7443</span> \
+  KLITE_TOKEN='K10…' KLITE_NODE=laptop-1 \
+  KLITE_VPN=<span class="y">tailscale</span> \
+  KLITE_TS_AUTHKEY='tskey-auth-…' KLITE_YES=1 sh -
+<span class="c"># installs tailscale (consented), joins the</span>
+<span class="c"># tailnet, advertises tailscale ip -4, and</span>
+<span class="c"># proceeds as any other join</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ============ 12 · THE UI ============ -->
 <section id="ui">
   <div class="wrap">
-    <p class="eyebrow"><b>11</b>the live UI</p>
+    <p class="eyebrow"><b>12</b>the live UI</p>
     <h2>The board is one more watcher</h2>
     <p class="lede">
       Browsers don't speak gRPC, so a small facade translates. Objects ride the same watch everything
@@ -641,7 +679,7 @@ curl -sfL https://…/join.sh | \
 <!-- ============ 13 · THE CLI ============ -->
 <section id="cli">
   <div class="wrap">
-    <p class="eyebrow"><b>12</b>the CLI</p>
+    <p class="eyebrow"><b>13</b>the CLI</p>
     <h2>Eleven commands drive everything</h2>
     <p class="lede">
       <code>klite</code> dials any replica over TLS with the admin token and fails over across a server
@@ -670,7 +708,7 @@ curl -sfL https://…/join.sh | \
 <!-- ============ 14 · VS KUBERNETES ============ -->
 <section id="k8s">
   <div class="wrap">
-    <p class="eyebrow"><b>13</b>the decoder ring</p>
+    <p class="eyebrow"><b>14</b>the decoder ring</p>
     <h2>Where Kubernetes hides a mechanism, k-lite names it</h2>
 
     <table class="k8s">
@@ -1060,7 +1098,7 @@ function makeScene(svgId, vw, vh){
   const NAMES = [
     ["top","title"],["rounds","agents + iteration"],["xdsintro","xDS"],["yaml","the YAML"],
     ["loop","converge"],["discovery","discovery"],["node","a node joins"],["identity","identity"],
-    ["wan","machines"],["reach","reachability"],["ui","the UI"],
+    ["wan","machines"],["reach","reachability"],["overlay","the open internet"],["ui","the UI"],
     ["cli","the CLI"],["k8s","vs k8s"],
   ];
   const rail = document.createElement("nav");
