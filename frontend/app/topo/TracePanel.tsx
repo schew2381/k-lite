@@ -77,7 +77,8 @@ export function TracePanel({ reduced, flow }: { reduced: boolean; flow: FlowMode
         <span className="eyebrow">{flow === 'live' ? 'latest call' : 'request trace'}</span>
         {active && (
           <span className="font-mono text-[10px] text-muted-foreground">
-            {active.trace.event.fromInstance} → {active.trace.event.toService}
+            {active.trace.event.fromInstance || active.trace.event.viaNode} →{' '}
+            {active.trace.event.toService}
           </span>
         )}
       </div>

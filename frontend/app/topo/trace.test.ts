@@ -70,6 +70,16 @@ describe('buildTrace locality', () => {
     expect(trace.steps.some((st) => st.at === 'targetInfra')).toBe(false)
   })
 
+  it('starts at kdns when the caller instance is unknown (live feed events)', () => {
+    const c = new Cluster(seedObjects())
+    settle(c, 6000)
+    const e = { ...eventFor(c, false), fromInstance: '', fromService: '' }
+    const trace = buildTrace(e, snapshotFromCluster(c))
+    expect(trace.steps[0].at).toBe('kdns')
+    expect(trace.steps.some((s) => s.at === 'caller')).toBe(false)
+    expect(trace.steps.at(-1)?.at).toBe('target')
+  })
+
   it('tells the internet story for a remote pick: mTLS leg, DNAT hop, raw hand-off', () => {
     const c = new Cluster(seedObjects())
     settle(c, 5000)

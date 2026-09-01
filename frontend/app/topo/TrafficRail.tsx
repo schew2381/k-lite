@@ -21,11 +21,12 @@ export function TrafficRail() {
                 {e.verdict === 'allowed' ? '✓' : '✕'}
               </span>
               <span className="truncate">
-                {e.fromInstance} → {e.toService}
+                {e.fromInstance || e.viaNode} → {e.toService}
                 {e.verdict === 'allowed' ? (
                   <span className="text-muted-foreground">
                     {' '}
-                    {e.toInstance} · {e.latencyMs}ms
+                    {e.toInstance}
+                    {e.latencyMs !== undefined && ` · ${e.latencyMs}ms`}
                   </span>
                 ) : e.reason === 'no-endpoints' ? (
                   <span className="text-muted-foreground"> no endpoints</span>

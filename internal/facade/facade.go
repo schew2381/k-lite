@@ -44,6 +44,9 @@ type Server struct {
 
 	// spawn arms the one-click join route; nil answers 501.
 	spawn *agentSpawner
+
+	// traffic polls Envoy admins while /api/traffic has subscribers.
+	traffic *trafficFeed
 }
 
 // New builds a facade over an already-dialed ClusterService client. The
@@ -56,6 +59,7 @@ func New(client klitev1.ClusterServiceClient, endpoints []string, uiDir string, 
 		uiDir:     uiDir,
 		dev:       dev,
 		dialOne:   dialOneWith(creds),
+		traffic:   newTrafficFeed(client),
 	}
 }
 
@@ -72,6 +76,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/nodes/{name}/uncordon", s.handleUncordon)
 	mux.HandleFunc("POST /api/nodes/{name}/join", s.handleJoin)
 	mux.HandleFunc("GET /api/nodetoken", s.handleNodeToken)
+	mux.HandleFunc("GET /api/traffic", s.handleTraffic)
 	mux.HandleFunc("GET /api/{kind}", s.handleList)
 	mux.HandleFunc("DELETE /api/{kind}/{name}", s.handleDelete)
 	mux.HandleFunc("/", s.handleStatic)

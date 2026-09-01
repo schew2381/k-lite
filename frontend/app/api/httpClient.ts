@@ -43,12 +43,16 @@
 //                                      making the dialog's "this machine"
 //                                      path one click (ADR 0040)
 //
-// Not served yet: GET /api/traffic (ADR 0024's feed). watchTraffic degrades
-// to the rail's waiting state.
+// GET    /api/traffic                  SSE, one JSON delta per data line:
+//                                      {unixMs,node,service,address,port,
+//                                      count}, Envoy counter deltas from
+//                                      each node's admin (ADR 0041)
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { clusterStore } from '@/store/store'
 import type { KliteClient, Unsubscribe } from './client'
 import { decodeObject, KIND_PATH } from './decode'
+import { enrichTrafficDelta, type TrafficDelta } from './liveTraffic'
 import type {
   ApplyResult,
   Kind,
@@ -56,6 +60,7 @@ import type {
   LogLine,
   PolicyVerdict,
   Topology,
+  TrafficEvent,
   WatchEvent,
 } from './types'
 
@@ -227,11 +232,31 @@ export class HttpClient implements KliteClient {
     }
   }
 
-  watchTraffic(): Unsubscribe {
-    // ADR 0024 records GET /api/traffic, but nothing serves it yet. The rail
-    // keeps its waiting message until the feed exists.
-    console.warn('traffic feed not implemented yet (ADR 0024)')
-    return () => {}
+  // The feed sends Envoy counter deltas once a second (ADR 0041). Each delta
+  // becomes TrafficEvents against the current snapshot, spread across the
+  // second so a poll's worth of calls doesn't land as one synchronized pulse.
+  watchTraffic(onEvent: (e: TrafficEvent) => void): Unsubscribe {
+    const source = new EventSource(`${this.baseUrl}/api/traffic`)
+    const timers = new Set<ReturnType<typeof setTimeout>>()
+    source.onmessage = (msg) => {
+      let delta: TrafficDelta
+      try {
+        delta = JSON.parse(msg.data) as TrafficDelta
+      } catch {
+        return
+      }
+      for (const event of enrichTrafficDelta(delta, clusterStore.getSnapshot())) {
+        const timer = setTimeout(() => {
+          timers.delete(timer)
+          onEvent(event)
+        }, Math.random() * 900)
+        timers.add(timer)
+      }
+    }
+    return () => {
+      source.close()
+      for (const timer of timers) clearTimeout(timer)
+    }
   }
 
   // Logs arrive as chunked text/plain, one runtime log line per line.

@@ -125,7 +125,7 @@ function phasesOf(trace: Trace, flow: FlowMode): Phase[] {
           kind: 'travel',
           fromId: prevAnchor,
           toId: anchorId,
-          label: `${trace.event.fromService}→${trace.event.toService}`,
+          label: `${trace.event.fromService || trace.event.viaNode}→${trace.event.toService}`,
         })
       }
       phases.push({
@@ -351,7 +351,7 @@ export function TrafficDotLayer({
       const phases = phasesOf(trace, flow)
       const dot = makeDot(color)
       const route = makeLabel(color, flow === 'live' ? 13.5 : 17)
-      route.textContent = `${e.fromService}→${e.toService}`
+      route.textContent = `${e.fromService || e.viaNode}→${e.toService}`
       let step: SVGTextElement | null = null
       if (flow === 'traced') {
         step = makeLabel(color, 13.5)

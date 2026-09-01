@@ -18,37 +18,58 @@ export function buildTrace(e: TrafficEvent, s: Snapshot): Trace {
   const vip = vipFor(s, e.toService, e.viaNode) ?? '10.44.64.?'
   const port = svc?.spec.port ?? 8080
   const callerIp = s.instances[e.fromInstance]?.status.instanceIp ?? '10.44.128.?'
+  const rbacWho = e.fromService ? `${callerIp} = ${e.fromService}` : `a caller on ${e.viaNode}`
+  const caller = e.fromService || 'the caller'
+  const took = e.latencyMs !== undefined ? ` (${e.latencyMs}ms)` : ''
   const targetNode = e.toInstance ? (s.instances[e.toInstance]?.spec.node ?? '?') : undefined
 
-  const steps: TraceStep[] = [
-    {
-      at: 'caller',
-      short: `resolve ${e.toService}`,
-      detail: `${e.fromInstance} asks for ${e.toService}. Its resolver expands it to ${e.toService}.svc.klite.`,
-      tone: 'info',
-    },
-    {
-      at: 'kdns',
-      motion: 'travel',
-      short: `→ ${e.viaNode} kdns`,
-      detail: `The query goes to its one upstream: ${e.viaNode}'s kdns.`,
-      tone: 'info',
-    },
-    {
-      at: 'caller',
-      motion: 'travel',
-      short: `${vip} · TTL 5s`,
-      detail: `The answer rides back: ${vip} (TTL 5s), ${e.viaNode}'s VIP for ${e.toService}. Nothing has dialed yet.`,
-      tone: 'info',
-    },
-    {
-      at: 'lds',
-      motion: 'travel',
-      short: `dial ${vip}:${port}`,
-      detail: `${e.fromInstance} itself dials ${vip}:${port} — the VIP is Envoy's listener address, so nothing intercepts or rewrites the connection.`,
-      tone: 'info',
-    },
-  ]
+  // A live-feed event knows the caller's node but not its instance (one
+  // Envoy fronts them all), so its story starts at kdns instead of a chip.
+  const steps: TraceStep[] = e.fromInstance
+    ? [
+        {
+          at: 'caller',
+          short: `resolve ${e.toService}`,
+          detail: `${e.fromInstance} asks for ${e.toService}. Its resolver expands it to ${e.toService}.svc.klite.`,
+          tone: 'info',
+        },
+        {
+          at: 'kdns',
+          motion: 'travel',
+          short: `→ ${e.viaNode} kdns`,
+          detail: `The query goes to its one upstream: ${e.viaNode}'s kdns.`,
+          tone: 'info',
+        },
+        {
+          at: 'caller',
+          motion: 'travel',
+          short: `${vip} · TTL 5s`,
+          detail: `The answer rides back: ${vip} (TTL 5s), ${e.viaNode}'s VIP for ${e.toService}. Nothing has dialed yet.`,
+          tone: 'info',
+        },
+        {
+          at: 'lds',
+          motion: 'travel',
+          short: `dial ${vip}:${port}`,
+          detail: `${e.fromInstance} itself dials ${vip}:${port} — the VIP is Envoy's listener address, so nothing intercepts or rewrites the connection.`,
+          tone: 'info',
+        },
+      ]
+    : [
+        {
+          at: 'kdns',
+          short: `resolve ${e.toService}`,
+          detail: `An instance on ${e.viaNode} asks kdns for ${e.toService} and gets ${vip} back.`,
+          tone: 'info',
+        },
+        {
+          at: 'lds',
+          motion: 'travel',
+          short: `dial ${vip}:${port}`,
+          detail: `The caller dials ${vip}:${port}, Envoy's listener address for ${e.toService}.`,
+          tone: 'info',
+        },
+      ]
 
   const remote = targetNode !== undefined && targetNode !== e.viaNode
 
@@ -56,7 +77,7 @@ export function buildTrace(e: TrafficEvent, s: Snapshot): Trace {
     steps.push({
       at: 'rbac',
       short: `RBAC ✕ ${e.matchedRule?.policy ?? 'denied'}`,
-      detail: `RBAC (${callerIp} = ${e.fromService}): ${e.matchedRule?.policy ?? 'a policy'} denies ${e.fromService} → ${e.toService}. Connection reset.`,
+      detail: `RBAC (${rbacWho}): ${e.matchedRule?.policy ?? 'a policy'} denies ${caller} → ${e.toService}. Connection reset.`,
       tone: 'deny',
     })
     return { event: e, steps, targetNode }
@@ -68,8 +89,8 @@ export function buildTrace(e: TrafficEvent, s: Snapshot): Trace {
     ...(remote && { pace: 'short' as const }),
     short: e.matchedRule ? `RBAC ✓ ${e.matchedRule.policy}` : 'RBAC ✓ allow',
     detail: e.matchedRule
-      ? `RBAC (${callerIp} = ${e.fromService}): ${e.matchedRule.policy} allows ${e.fromService} → ${e.toService}.`
-      : `RBAC (${callerIp} = ${e.fromService}): no DENY matches and no ALLOW targets ${e.toService}, so the call passes.`,
+      ? `RBAC (${rbacWho}): ${e.matchedRule.policy} allows ${caller} → ${e.toService}.`
+      : `RBAC (${rbacWho}): no DENY matches and no ALLOW targets ${e.toService}, so the call passes.`,
     tone: 'allow',
   })
 
@@ -94,7 +115,7 @@ export function buildTrace(e: TrafficEvent, s: Snapshot): Trace {
       at: 'target',
       motion: 'travel',
       short: `→ ${e.toInstance}`,
-      detail: `Envoy relays the bytes to ${e.toInstance}${targetNode ? ` on ${targetNode}` : ''} (${e.latencyMs}ms).`,
+      detail: `Envoy relays the bytes to ${e.toInstance}${targetNode ? ` on ${targetNode}` : ''}${took}.`,
       tone: 'allow',
     })
     return { event: e, steps, targetNode }
@@ -130,7 +151,7 @@ export function buildTrace(e: TrafficEvent, s: Snapshot): Trace {
     at: 'target',
     motion: 'travel',
     short: `→ ${e.toInstance}`,
-    detail: `${targetNode}'s Envoy hands the bytes to ${e.toInstance} (${e.latencyMs}ms), since the owning node dials its instances raw.`,
+    detail: `${targetNode}'s Envoy hands the bytes to ${e.toInstance}${took}, since the owning node dials its instances raw.`,
     tone: 'allow',
   })
   return { event: e, steps, targetNode }
