@@ -169,6 +169,45 @@ func TestDeleteAndNotFound(t *testing.T) {
 	}
 }
 
+// DeleteIfRevision against real etcd. The txn on ModRevision must refuse a
+// stale delete with ErrConflict and remove the object at its current
+// revision. A missing key is ErrNotFound, and the Put sentinels are
+// rejected outright.
+func TestDeleteIfRevision(t *testing.T) {
+	s := newStore(t)
+	name := testName(t)
+	mustCreate(t, s, testWorkload(name, 1))
+	_, rev, err := s.Get(context.Background(), "workloads", name)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	moved, err := s.Put(context.Background(), testWorkload(name, 2), rev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteIfRevision(context.Background(), "workloads", name, rev); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("stale delete err = %v, want ErrConflict", err)
+	}
+	if _, _, err := s.Get(context.Background(), "workloads", name); err != nil {
+		t.Fatalf("the object must survive a stale delete: %v", err)
+	}
+
+	if err := s.DeleteIfRevision(context.Background(), "workloads", name, moved); err != nil {
+		t.Fatalf("current-revision delete err = %v", err)
+	}
+	if err := s.DeleteIfRevision(context.Background(), "workloads", name, moved); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("delete of a gone object err = %v, want ErrNotFound", err)
+	}
+
+	for _, bad := range []int64{store.RevCreate, store.RevAny} {
+		err := s.DeleteIfRevision(context.Background(), "workloads", name, bad)
+		if err == nil || errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrConflict) {
+			t.Errorf("DeleteIfRevision(%d) err = %v, want a plain rejection", bad, err)
+		}
+	}
+}
+
 func TestList(t *testing.T) {
 	s := newStore(t)
 	names := map[string]bool{testName(t): true, testName(t): true}

@@ -205,6 +205,35 @@ func (s *Etcd) Delete(ctx context.Context, kind, name string) error {
 	return nil
 }
 
+// DeleteIfRevision deletes in one txn guarded on the mod revision, the same
+// compare Put's CAS arm rides. The else-branch read splits the two failure
+// meanings, ErrConflict for a key that exists at another revision and
+// ErrNotFound for an absent one.
+func (s *Etcd) DeleteIfRevision(ctx context.Context, kind, name string, expectedRev int64) error {
+	k, err := key(kind, name)
+	if err != nil {
+		return err
+	}
+	if expectedRev <= 0 {
+		return fmt.Errorf("delete %s: expectedRev must be positive, got %d", k, expectedRev)
+	}
+	resp, err := s.cli.Txn(ctx).
+		If(clientv3.Compare(clientv3.ModRevision(k), "=", expectedRev)).
+		Then(clientv3.OpDelete(k)).
+		Else(clientv3.OpGet(k, clientv3.WithCountOnly())).
+		Commit()
+	if err != nil {
+		return fmt.Errorf("delete %s: %w", k, err)
+	}
+	if resp.Succeeded {
+		return nil
+	}
+	if resp.Responses[0].GetResponseRange().GetCount() == 0 {
+		return fmt.Errorf("%s %q: %w", kind, name, ErrNotFound)
+	}
+	return fmt.Errorf("%s %q at revision %d: %w", kind, name, expectedRev, ErrConflict)
+}
+
 // Watch streams changes for the given kinds (empty means all), starting at
 // fromRev inclusive, or at the next write when fromRev is 0. Resuming from a
 // List revision redelivers the write at that revision. The channel closes

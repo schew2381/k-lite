@@ -37,5 +37,13 @@ type Store interface {
 	List(ctx context.Context, kind string) ([]*klitev1.Object, int64, error)
 	Put(ctx context.Context, obj *klitev1.Object, expectedRev int64) (int64, error)
 	Delete(ctx context.Context, kind, name string) error
+	// DeleteIfRevision is Delete pinned to the object a read observed: it
+	// removes the name only while the mod revision still equals expectedRev,
+	// which must be positive (the Put sentinels make no sense on a delete).
+	// ErrConflict means the object moved since that read, ErrNotFound that
+	// it's already gone. A level-based caller treats both as convergence and
+	// re-observes, so a delete decided on a stale view can't take out an
+	// object that has since been rewritten or recreated under the same name.
+	DeleteIfRevision(ctx context.Context, kind, name string, expectedRev int64) error
 	Watch(ctx context.Context, kinds []string, fromRev int64) (<-chan Event, error)
 }

@@ -174,6 +174,31 @@ func (m *Memory) Delete(_ context.Context, kind, name string) error {
 	return nil
 }
 
+func (m *Memory) DeleteIfRevision(_ context.Context, kind, name string, expectedRev int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	b, err := m.bucket(kind)
+	if err != nil {
+		return err
+	}
+	if err := checkName(name); err != nil {
+		return err
+	}
+	if expectedRev <= 0 {
+		return fmt.Errorf("delete %s %q: expectedRev must be positive, got %d", kind, name, expectedRev)
+	}
+	e, ok := b[name]
+	if !ok {
+		return fmt.Errorf("%s %q: %w", kind, name, store.ErrNotFound)
+	}
+	if e.rev != expectedRev {
+		return fmt.Errorf("%s %q at revision %d: %w", kind, name, expectedRev, store.ErrConflict)
+	}
+	delete(b, name)
+	m.rev++
+	return nil
+}
+
 // Watch satisfies the interface for loops that poll anyway: it delivers
 // nothing and closes when ctx ends.
 func (m *Memory) Watch(ctx context.Context, _ []string, _ int64) (<-chan store.Event, error) {

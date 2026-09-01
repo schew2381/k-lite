@@ -125,6 +125,47 @@ func TestDeleteSemantics(t *testing.T) {
 	}
 }
 
+// DeleteIfRevision must remove exactly the object the caller read. A write
+// in between turns the delete into ErrConflict and absence into ErrNotFound,
+// while the Put sentinels are rejected rather than reinterpreted.
+func TestDeleteIfRevisionSemantics(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	m := storetest.New()
+	rev, err := m.Put(ctx, workload("b"), store.RevCreate)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	moved, err := m.Put(ctx, workload("b"), rev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.DeleteIfRevision(ctx, "Workload", "b", rev); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("stale delete err = %v, want ErrConflict", err)
+	}
+	if _, _, err := m.Get(ctx, "Workload", "b"); err != nil {
+		t.Fatalf("the object must survive a stale delete: %v", err)
+	}
+
+	if err := m.DeleteIfRevision(ctx, "Workload", "b", moved); err != nil {
+		t.Fatalf("current-revision delete err = %v", err)
+	}
+	if err := m.DeleteIfRevision(ctx, "Workload", "b", moved); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("delete of a gone object err = %v, want ErrNotFound", err)
+	}
+
+	for _, bad := range []int64{store.RevCreate, store.RevAny, -7} {
+		err := m.DeleteIfRevision(ctx, "Workload", "b", bad)
+		if err == nil || errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrConflict) {
+			t.Errorf("DeleteIfRevision(%d) err = %v, want a plain rejection", bad, err)
+		}
+	}
+	if err := m.DeleteIfRevision(ctx, "Workload", "a/b", 1); err == nil || errors.Is(err, store.ErrNotFound) {
+		t.Errorf("invalid name err = %v, want the key-rule rejection", err)
+	}
+}
+
 // TestInvalidNamesRejected mirrors the etcd key rules: empty names and names
 // carrying a slash never reach storage.
 func TestInvalidNamesRejected(t *testing.T) {
