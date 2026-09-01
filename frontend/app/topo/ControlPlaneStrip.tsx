@@ -1,6 +1,9 @@
 // This strip sits above the board and shows who holds the lease, what etcd
-// knows, and which streams are open. In mock mode the control plane is the
-// in-browser simulator, and the strip says so.
+// knows, and which streams are open. The mock knows all of it and shows
+// both klited copies. A live cluster reports none of the leadership or stream
+// state yet (that data needs a facade status route), so http mode renders
+// one klited card, derives stream pills from heartbeat age, and invents
+// nothing else.
 
 import { StarIcon } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -40,24 +43,42 @@ const Line = ({ label, children }: { label: string; children: React.ReactNode })
   </div>
 )
 
+// A registered agent reports every ~5s. After twice that plus slack we
+// presume the stream broken, the same arithmetic klited's own NotReady sweep
+// uses.
+const HEARTBEAT_FRESH_MS = 15_000
+
 export function ControlPlaneStrip() {
   const client = useClient()
   const snapshot = useSnapshot()
   const nodes = sortedNodes(snapshot)
+  const mock = client.mode === 'mock'
   const objectCount =
     Object.keys(snapshot.workloads).length +
     Object.keys(snapshot.services).length +
     Object.keys(snapshot.nodes).length +
     Object.keys(snapshot.policies).length +
-    Object.keys(snapshot.instances).length
+    Object.keys(snapshot.instances).length +
+    Object.keys(snapshot.vipAllocations).length
+
+  // In mock, phase is the truth. Against a live cluster, a stream is only as
+  // alive as its last heartbeat, and a declared-but-never-registered node has
+  // no stream at all.
+  const streamOpen = (n: (typeof nodes)[number]): boolean => {
+    if (mock) return n.status?.phase !== 'NotReady'
+    const beat = n.status?.lastHeartbeatUnix
+    return beat !== undefined && Date.now() - beat * 1000 < HEARTBEAT_FRESH_MS
+  }
 
   return (
     <div className="mb-3 flex flex-wrap items-stretch gap-3" data-testid="control-plane">
       <Card
         title={
           <span className="flex items-center gap-1.5">
-            klited ①
-            <StarIcon className="size-4 fill-draining text-draining" aria-label="holds the lease" />
+            {mock ? 'klited ①' : 'klited'}
+            {mock && (
+              <StarIcon className="size-4 fill-draining text-draining" aria-label="holds the lease" />
+            )}
           </span>
         }
         corner={
@@ -66,7 +87,11 @@ export function ControlPlaneStrip() {
           </Badge>
         }
       >
-        <Line label="lease">held: scheduler, rollout, endpoints, nodes awake</Line>
+        <Line label="lease">
+          {mock
+            ? 'held: scheduler, rollout, endpoints, nodes awake'
+            : 'leader-elected: scheduler, rollout, endpoints'}
+        </Line>
         <Line label="streams">
           <span className="flex flex-wrap items-center gap-1.5">
             {nodes.map((n) => (
@@ -75,16 +100,16 @@ export function ControlPlaneStrip() {
                   <span
                     className={cn(
                       'rounded-full border px-2 py-px text-[10px]',
-                      n.status?.phase === 'NotReady'
-                        ? 'border-deny text-deny'
-                        : 'border-traffic text-traffic',
+                      streamOpen(n) ? 'border-traffic text-traffic' : 'border-deny text-deny',
                     )}
                   >
-                    {n.metadata.name} {n.status?.phase === 'NotReady' ? '✕' : '⇅'}
+                    {n.metadata.name} {streamOpen(n) ? '⇅' : '✕'}
                   </span>
                 </TooltipTrigger>
                 <TooltipContent>
-                  {n.metadata.name}: WatchDesired + ReportStatus over mTLS gRPC
+                  {streamOpen(n)
+                    ? `${n.metadata.name}: WatchDesired + ReportStatus over mTLS gRPC`
+                    : `${n.metadata.name}: no agent stream (declared but never registered, or heartbeats stopped)`}
                 </TooltipContent>
               </Tooltip>
             ))}
@@ -94,29 +119,30 @@ export function ControlPlaneStrip() {
           </span>
         </Line>
         <Line label="xDS">
-          snapshots → {nodes.length} envoy{nodes.length === 1 ? '' : 's'} · traffic feed live
+          snapshots → {nodes.length} envoy{nodes.length === 1 ? '' : 's'}
+          {mock && ' · traffic feed live'}
         </Line>
       </Card>
 
-      <Card
-        title="klited ②"
-        corner={
-          <Badge variant="outline" className="font-mono text-[9px]">
-            gRPC · xDS · controllers
-          </Badge>
-        }
-      >
-        <Line label="lease">asleep: takes over if ① dies</Line>
-        <Line label="serving">API and xDS answer here too</Line>
-        {client.mode === 'mock' && (
+      {mock && (
+        <Card
+          title="klited ②"
+          corner={
+            <Badge variant="outline" className="font-mono text-[9px]">
+              gRPC · xDS · controllers
+            </Badge>
+          }
+        >
+          <Line label="lease">asleep: takes over if ① dies</Line>
+          <Line label="serving">API and xDS answer here too</Line>
           <span className="hand text-[11.5px]">
             both klited copies are simulated in this browser for now
           </span>
-        )}
-      </Card>
+        </Card>
+      )}
 
       <Card
-        title="etcd × 3"
+        title={mock ? 'etcd × 3' : 'etcd'}
         corner={
           <Badge variant="outline" className="font-mono text-[9px]">
             kv

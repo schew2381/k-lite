@@ -12,6 +12,7 @@ import { instancesByNode, selectorMatches, sortedNodes, sortedServices } from '@
 import { useSnapshot } from '@/store/store'
 import { AddServiceDialog } from '@/topo/AddServiceDialog'
 import { ControlPlaneStrip } from '@/topo/ControlPlaneStrip'
+import { useFlow } from '@/topo/flow'
 import { InstanceChip } from '@/topo/InstanceChip'
 import { NodeCard } from '@/topo/NodeCard'
 import { PolicyArcs } from '@/topo/PolicyArcs'
@@ -62,6 +63,7 @@ export default function TopologyPage() {
   const snapshot = useSnapshot()
   const reduced = useReducedMotion()
   const board = useBoardWidth()
+  const flow = useFlow()
   const [highlight, setHighlight] = useState<{ from: string; to: string } | null>(null)
 
   const layout = useMemo(() => computeLayout(snapshot, board.width), [snapshot, board.width])
@@ -99,11 +101,7 @@ export default function TopologyPage() {
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
       <div>
-        <div className="mb-3 flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            Instances call services by name. Each call rides through its node's infra pod, where Envoy
-            checks policy and picks a READY endpoint.
-          </p>
+        <div className="mb-3 flex items-center justify-end">
           <span className="flex shrink-0 gap-2">
             <AddServiceDialog />
             <Button size="sm" onClick={addNode} data-testid="add-node">
@@ -169,7 +167,7 @@ export default function TopologyPage() {
                 ) : null
               })}
             </AnimatePresence>
-            <TrafficDotLayer layoutRef={layoutRef} disabled={reduced} />
+            <TrafficDotLayer layoutRef={layoutRef} disabled={reduced} flow={flow} />
           </div>
         </div>
         {reduced && (
@@ -180,7 +178,7 @@ export default function TopologyPage() {
       </div>
 
       <div className="flex min-h-0 flex-col gap-4 xl:sticky xl:top-16 xl:h-[calc(100vh-140px)] xl:overflow-y-auto">
-        <TracePanel reduced={reduced} />
+        <TracePanel reduced={reduced} flow={flow} />
         <PolicyBuilder />
         <PolicySimPanel onHighlight={setHighlight} />
         <div className="min-h-0 flex-1">

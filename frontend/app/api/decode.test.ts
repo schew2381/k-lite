@@ -67,3 +67,27 @@ describe('decodeObject', () => {
     expect(decodeObject('nope')).toBeNull()
   })
 })
+
+describe('protojson zero-value omission', () => {
+  it('fills the holes the app walks unconditionally', () => {
+    const svc = decodeObject({ service: { meta: { name: 'bare' }, spec: {} } })
+    expect(svc?.kind === 'Service' && svc.spec.selector).toEqual({})
+    const pol = decodeObject({
+      networkPolicy: { meta: { name: 'p' }, spec: { action: 'POLICY_ACTION_DENY' } },
+    })
+    expect(pol?.kind === 'NetworkPolicy' && pol.spec.rules).toEqual([])
+    const wl = decodeObject({ workload: { meta: { name: 'w' }, spec: {} } })
+    expect(wl?.kind === 'Workload' && wl.spec.replicas).toBe(0)
+    expect(wl?.kind === 'Workload' && wl.spec.template.labels).toEqual({})
+    const node = decodeObject({
+      node: {
+        meta: { name: 'n' },
+        spec: { maxInstances: 32 },
+        status: { phase: 'NODE_PHASE_READY', lastHeartbeatUnix: '1756000000', nodeIndex: '2' },
+      },
+    })
+    expect(node?.kind === 'Node' && node.status?.instanceCount).toBe(0)
+    expect(node?.kind === 'Node' && node.status?.lastHeartbeatUnix).toBe(1756000000)
+    expect(node?.kind === 'Node' && node.status?.nodeIndex).toBe(2)
+  })
+})

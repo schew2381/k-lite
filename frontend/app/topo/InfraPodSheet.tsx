@@ -6,7 +6,14 @@ import type { NodeObj } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
-import { endpointsOf, identityRows, rbacView, sortedServices, vipFor } from '@/store/selectors'
+import {
+  endpointsOf,
+  identityRows,
+  infraIpOf,
+  rbacView,
+  sortedServices,
+  vipFor,
+} from '@/store/selectors'
 import { useSnapshot } from '@/store/store'
 
 function Section({
@@ -62,8 +69,7 @@ export function InfraPodSheet({
         <SheetHeader>
           <SheetTitle className="font-mono">infra pod — {name}</SheetTitle>
           <SheetDescription>
-            one shared netns · {node.status?.infra?.ip ?? 'starting…'} · klite-net owns it and Envoy
-            joins it
+            one shared netns · {infraIpOf(node) ?? 'starting…'} · klite-net owns it and Envoy joins it
           </SheetDescription>
         </SheetHeader>
 

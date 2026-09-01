@@ -12,12 +12,12 @@ import { useSnapshot } from '@/store/store'
 type ObjectMap = 'nodes' | 'workloads' | 'services' | 'policies' | 'instances' | 'vipAllocations'
 
 const GROUPS: { kind: Kind; prefix: string; map: ObjectMap }[] = [
-  { kind: 'Node', prefix: '/klite/nodes', map: 'nodes' },
-  { kind: 'Workload', prefix: '/klite/workloads', map: 'workloads' },
-  { kind: 'Service', prefix: '/klite/services', map: 'services' },
-  { kind: 'NetworkPolicy', prefix: '/klite/networkpolicies', map: 'policies' },
-  { kind: 'Instance', prefix: '/klite/instances', map: 'instances' },
-  { kind: 'VIPAllocation', prefix: '/klite/vipallocations', map: 'vipAllocations' },
+  { kind: 'Node', prefix: '/klite/v1/nodes', map: 'nodes' },
+  { kind: 'Workload', prefix: '/klite/v1/workloads', map: 'workloads' },
+  { kind: 'Service', prefix: '/klite/v1/services', map: 'services' },
+  { kind: 'NetworkPolicy', prefix: '/klite/v1/networkpolicies', map: 'policies' },
+  { kind: 'Instance', prefix: '/klite/v1/instances', map: 'instances' },
+  { kind: 'VIPAllocation', prefix: '/klite/v1/vipallocations', map: 'vipAllocations' },
 ]
 
 function summarize(obj: KliteObject): string {
@@ -84,7 +84,6 @@ export default function EtcdPage() {
           rev {snapshot.rev}
         </span>
         <span className="font-mono text-xs text-muted-foreground">{total} keys</span>
-        <span className="font-mono text-xs text-muted-foreground">3 members · leases · watches</span>
         <span className="flex items-center gap-1.5 font-mono text-[10px] text-traffic">
           <span className="size-2 animate-pulse rounded-full bg-traffic" /> live
         </span>

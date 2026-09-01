@@ -8,11 +8,18 @@ import type { Rect } from '@/layout/layout'
 import { act } from '@/lib/act'
 import { useClient } from '@/lib/client-context'
 import { cn } from '@/lib/utils'
+import { useSnapshot } from '@/store/store'
 
 export function InstanceChip({ instance, rect }: { instance: Instance; rect: Rect }) {
   const client = useClient()
+  const snapshot = useSnapshot()
   const { phase, restarts, instanceIp } = instance.status
   const killable = phase === 'Running' || phase === 'Ready'
+  // a rollout in flight: this instance still runs the workload's old template
+  const wantHash = snapshot.workloads[instance.spec.workload]?.status?.templateHash
+  const stale = Boolean(
+    wantHash && instance.spec.templateHash && instance.spec.templateHash !== wantHash,
+  )
 
   return (
     <motion.div
@@ -46,15 +53,30 @@ export function InstanceChip({ instance, rect }: { instance: Instance; rect: Rec
                 <XIcon className="text-deny" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Kill this instance. The agent restarts it.</TooltipContent>
+            <TooltipContent>
+              {client.mode === 'mock'
+                ? 'Kill this instance (a simulated crash). The agent restarts it.'
+                : 'Delete this instance. The controller replaces it under a new name.'}
+            </TooltipContent>
           </Tooltip>
         )}
       </div>
       <div className="mt-0.5 flex items-center gap-1.5">
-        <InstancePhaseBadge phase={phase} />
+        {/* the controller's own reason ("rollout", "node-lost", exit codes) rides the badge */}
+        <span title={instance.status.message}>
+          <InstancePhaseBadge phase={phase} />
+        </span>
         {restarts > 0 && (
           <span className="font-mono text-[10px] text-draining" title={`${restarts} restarts`}>
             ↻{restarts}
+          </span>
+        )}
+        {stale && (
+          <span
+            className="font-mono text-[9px] text-muted-foreground"
+            title="runs the previous template, so the rollout replaces it"
+          >
+            old
           </span>
         )}
       </div>

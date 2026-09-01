@@ -80,11 +80,16 @@ export const policySchema = z.object({
     action: z.enum(['ALLOW', 'DENY']),
     rules: z
       .array(
-        z.object({
-          from: z.string().min(1),
-          to: z.string().min(1),
-          except: z.array(z.string()).optional(),
-        }),
+        z
+          .object({
+            from: z.string().min(1),
+            to: z.string().min(1),
+            except: z.array(z.string()).optional(),
+          })
+          // matches the server: carve-outs only make sense against a wildcard
+          .refine((r) => !r.except || r.to === '*', {
+            message: 'except requires to: "*"',
+          }),
       )
       .min(1),
   }),

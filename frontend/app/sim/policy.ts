@@ -8,7 +8,10 @@ function matches(selector: string, name: string): boolean {
   return selector === '*' || selector === name
 }
 
-export function evaluate(policies: NetworkPolicy[], from: string, to: string): Verdict {
+export function evaluate(rawPolicies: NetworkPolicy[], from: string, to: string): Verdict {
+  // Sort by name like the Go evaluator, so matchedRule agrees when several
+  // policies match the same pair.
+  const policies = [...rawPolicies].sort((a, b) => a.metadata.name.localeCompare(b.metadata.name))
   // DENY phase: any matching DENY rule wins outright.
   for (const p of policies) {
     if (p.spec.action !== 'DENY') continue

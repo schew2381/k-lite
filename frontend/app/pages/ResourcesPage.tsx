@@ -10,6 +10,7 @@ import { act } from '@/lib/act'
 import { useClient } from '@/lib/client-context'
 import {
   endpointsOf,
+  infraIpOf,
   instancesByNode,
   sortedInstances,
   sortedNodes,
@@ -197,18 +198,20 @@ export default function ResourcesPage() {
                 <TableCell className="font-mono">
                   {(byNode.get(node.metadata.name) ?? []).length}/{node.spec.maxInstances}
                 </TableCell>
-                <TableCell className="font-mono text-xs">
-                  {node.status?.infra?.ip ?? 'starting…'}
-                </TableCell>
+                <TableCell className="font-mono text-xs">{infraIpOf(node) ?? 'starting…'}</TableCell>
                 <TableCell>
                   <span className="flex gap-1.5">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => act(client.cordon(node.metadata.name, !node.status?.unschedulable))}
-                    >
-                      {node.status?.unschedulable ? 'uncordon' : 'cordon'}
-                    </Button>
+                    {client.can.cordon && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          act(client.cordon(node.metadata.name, !node.status?.unschedulable))
+                        }
+                      >
+                        {node.status?.unschedulable ? 'uncordon' : 'cordon'}
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"

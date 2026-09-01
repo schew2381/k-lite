@@ -5,6 +5,7 @@
 import {
   endpointStateOf,
   type Instance,
+  type NodeObj,
   type Service,
   selectorMatches,
   type Workload,
@@ -142,6 +143,16 @@ export function vipFor(s: Snapshot, service: string, node: string): string | und
     vipCache.set(s, table)
   }
   return table.get(`${service}|${node}`)
+}
+
+// infraIpOf derives the infra pod's donor IP exactly as the server assigns
+// it: 10.44.0.<10 + nodeIndex>, indexes starting at 1
+// (internal/server/agent.go). A node with no index hasn't registered, so
+// there's nothing to show.
+export function infraIpOf(node: NodeObj): string | undefined {
+  if (node.status?.infra?.ip) return node.status.infra.ip
+  const idx = node.status?.nodeIndex
+  return idx ? `10.44.0.${10 + idx}` : undefined
 }
 
 // The compiled RBAC view every node's Envoy enforces: DENY rules first, then

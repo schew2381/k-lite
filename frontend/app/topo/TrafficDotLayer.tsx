@@ -1,24 +1,35 @@
-// The dot layer plays one traced request at a time. The dot carries a
-// two-line label: the route (a→b) stays on top for the whole flight, and a
-// numbered step line below it changes only when a step starts. Most steps
-// hold the dot at an anchor, and steps marked motion:'travel' are told while
-// the dot glides to the next one. The trace panel prints the full sentences
-// in sync. The implementation is one SVG and one requestAnimationFrame loop,
-// with no React render per frame. Anchors come from the layout ref each
-// frame, so a mid-flight layout shift bends the path instead of breaking it.
+// The dot layer has two flows (ADR 0027). Traced flow runs one request at a
+// time at the mock's teaching pace, with long holds, a two-line label (route
+// above, numbered step below), and the trace panel stepping in sync. Live
+// flow, for a real cluster, flies every request over the same full path fast
+// and concurrent with only its route label, and the panel just keeps the
+// latest call.
+// The implementation is one SVG and one requestAnimationFrame loop, with no
+// React render per frame. Anchors come from the layout ref each frame, so a
+// mid-flight layout shift bends the path instead of breaking it.
 
 import { useEffect, useRef } from 'react'
 import type { Layout, Point } from '@/layout/layout'
 import { useClient } from '@/lib/client-context'
 import { clusterStore } from '@/store/store'
 import { traceStore } from '@/store/traceStore'
+import type { FlowMode } from '@/topo/flow'
 import { buildTrace, type Trace, type TraceStep } from '@/topo/trace'
 
-const PAUSE_MS = 4000 // the dot holds at each step long enough to read it
-const STEP_TRAVEL_MS = 2200 // a step told in motion still has to be readable
-const SETTLE_MS = 1400 // arrival dwell: the dot rests where it landed before moving on
-const TRAVEL_MS = 1200 // connector hop between steps that both pause
-const SHORT_HOP_MS = 500 // hop between adjacent sub-boxes inside one infra pod
+// Per-flow pacing in ms. Traced is readable and live is honest about speed.
+interface Pace {
+  pause: number
+  stepTravel: number
+  settle: number
+  travel: number
+  shortHop: number
+}
+const PACE: Record<FlowMode, Pace> = {
+  traced: { pause: 4000, stepTravel: 2200, settle: 1400, travel: 1200, shortHop: 500 },
+  live: { pause: 200, stepTravel: 360, settle: 0, travel: 360, shortHop: 160 },
+}
+
+const LIVE_FLIGHT_CAP = 24 // beyond this, extra calls stay rail-only
 const SVGNS = 'http://www.w3.org/2000/svg'
 
 type Phase =
@@ -43,7 +54,7 @@ interface Flight {
   pulseTarget?: string
   dot: SVGCircleElement
   route: SVGTextElement // "a→b", pinned above the dot for the whole flight
-  step: SVGTextElement // "3. dial 10.44.64.7:8080", swaps only at step starts
+  step: SVGTextElement | null // "3. dial 10.44.64.7:8080", traced flow only
 }
 
 // trapezoidal velocity: ramp to full speed over the first 15% of the flight,
@@ -87,8 +98,9 @@ function anchorIdFor(at: TraceStep['at'], trace: Trace): string {
 
 // Steps become a phase list. A step marked motion:'travel' is itself the travel: the
 // dot glides to the step's anchor wearing the step's label. Any other anchor
-// change gets a plain connector hop before the hold.
-function phasesOf(trace: Trace): Phase[] {
+// change gets a plain connector hop before the hold. Settle dwells are a
+// traced-flow luxury, so the live flow skips them.
+function phasesOf(trace: Trace, flow: FlowMode): Phase[] {
   const phases: Phase[] = []
   let prevAnchor: string | null = null
   trace.steps.forEach((step, i) => {
@@ -120,6 +132,7 @@ function phasesOf(trace: Trace): Phase[] {
     }
     prevAnchor = anchorId
   })
+  if (flow === 'live') return phases
   const paced: Phase[] = []
   phases.forEach((ph, i) => {
     paced.push(ph)
@@ -134,9 +147,11 @@ function phasesOf(trace: Trace): Phase[] {
 export function TrafficDotLayer({
   layoutRef,
   disabled,
+  flow,
 }: {
   layoutRef: React.RefObject<Layout | null>
   disabled: boolean
+  flow: FlowMode
 }) {
   const client = useClient()
   const svgRef = useRef<SVGSVGElement>(null)
@@ -146,7 +161,8 @@ export function TrafficDotLayer({
     const svg = svgRef.current
     if (!svg) return
 
-    let flight: Flight | null = null
+    const pace = PACE[flow]
+    const flights: Flight[] = []
     let raf = 0
 
     const makeDot = (color: string): SVGCircleElement => {
@@ -213,30 +229,25 @@ export function TrafficDotLayer({
       }
       f.dot.remove()
       f.route.remove()
-      f.step.remove()
-      traceStore.finish()
-      flight = null
+      f.step?.remove()
+      if (flow === 'traced') traceStore.finish()
+      const i = flights.indexOf(f)
+      if (i >= 0) flights.splice(i, 1)
     }
 
-    const frame = (now: number) => {
-      const f = flight
-      if (!f) {
-        raf = 0
-        return
-      }
-      const anchors = layoutRef.current?.anchors ?? {}
+    const stepFlight = (f: Flight, now: number, anchors: Record<string, Point>) => {
       const phase = f.phases[f.phase]
-      let dur = phase.kind === 'settle' ? SETTLE_MS : PAUSE_MS
+      let dur = phase.kind === 'settle' ? pace.settle : pace.pause
       if (phase.kind === 'travel') {
-        if (phase.stepIndex !== undefined) dur = STEP_TRAVEL_MS
+        if (phase.stepIndex !== undefined) dur = pace.stepTravel
         else {
           const a = anchors[phase.fromId]
           const b = anchors[phase.toId]
           const dist = a && b ? Math.hypot(b.x - a.x, b.y - a.y) : Infinity
-          dur = dist < 140 ? SHORT_HOP_MS : TRAVEL_MS
+          dur = dist < 140 ? pace.shortHop : pace.travel
         }
       }
-      const k = Math.min(1, (now - f.phaseStart) / dur)
+      const k = dur <= 0 ? 1 : Math.min(1, (now - f.phaseStart) / dur)
 
       let p: Point | undefined
       if (phase.kind !== 'travel') {
@@ -250,20 +261,20 @@ export function TrafficDotLayer({
       if (!p) {
         // an endpoint of this trace left the board, so let it go quietly
         endFlight(f)
-        raf = 0
         return
       }
       f.dot.setAttribute('cx', String(p.x))
       f.dot.setAttribute('cy', String(p.y))
       f.route.setAttribute('x', String(p.x))
       f.route.setAttribute('y', String(p.y - 34))
-      f.step.setAttribute('x', String(p.x))
-      f.step.setAttribute('y', String(p.y - 16))
+      if (f.step) {
+        f.step.setAttribute('x', String(p.x))
+        f.step.setAttribute('y', String(p.y - 16))
+      }
 
       if (k >= 1) {
         if (f.phase >= f.phases.length - 1) {
           endFlight(f)
-          raf = 0
           return
         }
         if (phase.kind === 'travel' && f.pulseTarget && phase.toId === `instance:${f.pulseTarget}`) {
@@ -272,6 +283,7 @@ export function TrafficDotLayer({
         f.phase++
         f.phaseStart = now
         const next = f.phases[f.phase]
+        if (!f.step) return // live flow keeps the route label and nothing else
         // connector hops and settles keep the previous step's text
         if (next.kind === 'pause') {
           f.step.textContent = `${next.stepIndex + 1}. ${next.short}`
@@ -281,12 +293,24 @@ export function TrafficDotLayer({
           traceStore.step(next.stepIndex)
         }
       }
-      raf = requestAnimationFrame(frame)
+    }
+
+    const frame = (now: number) => {
+      if (flights.length === 0) {
+        raf = 0
+        return
+      }
+      const anchors = layoutRef.current?.anchors ?? {}
+      // iterate a copy: endFlight splices the source array
+      for (const f of [...flights]) stepFlight(f, now, anchors)
+      raf = flights.length > 0 ? requestAnimationFrame(frame) : 0
     }
 
     const spawn = (e: Parameters<Parameters<typeof client.watchTraffic>[0]>[0]) => {
-      // one story at a time. The rail still records every call
-      if (flight) return
+      // Traced flies one story at a time, live flies everything up to the
+      // cap, and the rail records every call either way.
+      if (flow === 'traced' && flights.length > 0) return
+      if (flights.length >= LIVE_FLIGHT_CAP) return
       const trace = buildTrace(e, clusterStore.getSnapshot())
       const anchors = layoutRef.current?.anchors ?? {}
       if (!anchors[anchorIdFor('caller', trace)] || !anchors[anchorIdFor('kdns', trace)]) return
@@ -296,13 +320,17 @@ export function TrafficDotLayer({
           : e.reason === 'no-endpoints'
             ? 'var(--ghost)'
             : 'var(--destructive)'
-      const phases = phasesOf(trace)
+      const phases = phasesOf(trace, flow)
       const dot = makeDot(color)
-      const route = makeLabel(color, 17)
+      const route = makeLabel(color, flow === 'live' ? 13.5 : 17)
       route.textContent = `${e.fromService}→${e.toService}`
-      const step = makeLabel(color, 13.5)
-      step.textContent = `1. ${trace.steps[0].short}`
-      flight = {
+      let step: SVGTextElement | null = null
+      if (flow === 'traced') {
+        step = makeLabel(color, 13.5)
+        step.textContent = `1. ${trace.steps[0].short}`
+        traceStore.set({ trace, stepIndex: 0, done: false })
+      }
+      flights.push({
         trace,
         phases,
         phase: 0,
@@ -313,8 +341,7 @@ export function TrafficDotLayer({
         dot,
         route,
         step,
-      }
-      traceStore.set({ trace, stepIndex: 0, done: false })
+      })
       if (!raf) raf = requestAnimationFrame(frame)
     }
 
@@ -322,14 +349,17 @@ export function TrafficDotLayer({
     return () => {
       unsubscribe()
       if (raf) cancelAnimationFrame(raf)
-      if (flight) {
-        flight.dot.remove()
-        flight.route.remove()
-        flight.step.remove()
+      for (const f of flights) {
+        f.dot.remove()
+        f.route.remove()
+        f.step?.remove()
+      }
+      if (flow === 'traced' && flights.length > 0) {
         traceStore.set(null) // a mid-flight unmount must not leave the store busy
       }
+      flights.length = 0
     }
-  }, [client, disabled, layoutRef])
+  }, [client, disabled, layoutRef, flow])
 
   if (disabled) return null
   return <svg ref={svgRef} className="pointer-events-none absolute inset-0 size-full" aria-hidden />

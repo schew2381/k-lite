@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Navigate, NavLink, Route, Routes } from 'react-router-dom'
+import { Navigate, NavLink, Route, Routes, useSearchParams } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -11,6 +11,7 @@ import LogsPage from '@/pages/LogsPage'
 import ResourcesPage from '@/pages/ResourcesPage'
 import TopologyPage from '@/pages/TopologyPage'
 import { useSnapshot } from '@/store/store'
+import { useFlow } from '@/topo/flow'
 
 const TABS = [
   { to: '/', label: 'topology' },
@@ -33,6 +34,37 @@ function Legend() {
         <span className="size-2.5 rounded-full bg-deny" /> policy
       </span>
     </div>
+  )
+}
+
+// Flip between the walkthrough and real-speed traffic (ADR 0027). The URL
+// carries the choice, so a link reproduces what the toggle set.
+function FlowToggle() {
+  const flow = useFlow()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const set = (v: string) => {
+    if (v !== 'live' && v !== 'traced') return
+    const next = new URLSearchParams(searchParams)
+    next.set('flow', v)
+    setSearchParams(next, { replace: true })
+  }
+  return (
+    <ToggleGroup
+      type="single"
+      size="sm"
+      variant="outline"
+      value={flow}
+      onValueChange={set}
+      aria-label="Traffic flow"
+      data-testid="flow-toggle"
+    >
+      <ToggleGroupItem value="traced" aria-label="Traced flow">
+        traced
+      </ToggleGroupItem>
+      <ToggleGroupItem value="live" aria-label="Live flow">
+        live
+      </ToggleGroupItem>
+    </ToggleGroup>
   )
 }
 
@@ -89,7 +121,7 @@ function HealthPill() {
   return (
     <span className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-0.5 font-mono text-[11px] uppercase tracking-wide">
       <span className={cn('size-2 rounded-full', ok && snap.synced ? 'bg-traffic' : 'bg-deny')} />
-      {client.mode}
+      {client.mode === 'http' ? 'live' : 'mock'}
     </span>
   )
 }
@@ -119,6 +151,7 @@ export default function App() {
               ))}
             </nav>
             <Legend />
+            <FlowToggle />
             <SpeedControl />
             <HealthPill />
           </div>

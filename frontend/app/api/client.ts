@@ -17,6 +17,10 @@ export type Unsubscribe = () => void
 export interface KliteClient {
   readonly mode: 'mock' | 'http'
 
+  // can lists what this client actually serves. The facade grows routes
+  // over time, and buttons for missing ones hide instead of throwing.
+  readonly can: { cordon: boolean; drain: boolean }
+
   apply(yamlText: string): Promise<ApplyResult[]>
   list(kind: Kind): Promise<KliteObject[]>
   get(kind: Kind, name: string): Promise<KliteObject | null>
@@ -25,7 +29,7 @@ export interface KliteClient {
   // First-class RPCs from ClusterService (api/proto/klite/v1/cluster.proto)
   scale(workload: string, replicas: number): Promise<void>
   drainNode(node: string): Promise<void> // cordon + surge-out. The node stays
-  cordon(node: string, on: boolean): Promise<void> // no ClusterService RPC yet — mock-real, http throws
+  cordon(node: string, on: boolean): Promise<void> // Uncordon RPC landed server-side, but no facade route serves either direction yet
 
   watch(onEvent: (e: WatchEvent) => void): Unsubscribe
   watchTraffic(onEvent: (e: TrafficEvent) => void): Unsubscribe

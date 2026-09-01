@@ -17,12 +17,17 @@ export class Ipam {
     return `10.44.${64 + Math.floor(n / 254)}.${(n % 254) + 2}`
   }
 
-  infraIp(node: string): string {
+  // indexes start at 1, matching the server's freeNodeIndex
+  indexOf(node: string): number {
     let idx = this.nodeIndex.get(node)
     if (idx === undefined) {
-      idx = this.nodeIndex.size
+      idx = this.nodeIndex.size + 1
       this.nodeIndex.set(node, idx)
     }
-    return `10.44.0.${10 + idx}`
+    return idx
+  }
+
+  infraIp(node: string): string {
+    return `10.44.0.${10 + this.indexOf(node)}`
   }
 }

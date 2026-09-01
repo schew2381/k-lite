@@ -59,6 +59,7 @@ function toApplyResults(wire: WireResults): ApplyResult[] {
 
 export class HttpClient implements KliteClient {
   readonly mode = 'http' as const
+  readonly can = { cordon: false, drain: false }
 
   private baseUrl: string
 
@@ -168,6 +169,9 @@ export class HttpClient implements KliteClient {
       source.addEventListener('ADDED', deliver('ADDED'))
       source.addEventListener('MODIFIED', deliver('MODIFIED'))
       source.addEventListener('DELETED', deliver('DELETED'))
+      // onerror also catches the facade's `event: error` messages (an SSE
+      // event named "error" dispatches as the DOM error event), so a broken
+      // watch and a dropped transport recover the same way
       source.onerror = () => {
         // whatever happened during the outage is gone, so start over
         source?.close()
@@ -227,6 +231,8 @@ export class HttpClient implements KliteClient {
         }
       }
       if (buffer.length > 0) onLine({ ts: Date.now(), line: buffer })
+      // the container stopped or was replaced, so say so instead of freezing
+      onLine({ ts: Date.now(), line: '--- log stream ended ---' })
     })().catch(() => {
       // aborted by unsubscribe, or the instance is gone — the pane just stops
     })

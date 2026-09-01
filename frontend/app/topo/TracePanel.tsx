@@ -1,15 +1,19 @@
-// The trace panel prints the active request's story step by step, in sync
-// with the dot on the board. Under reduced motion there are no dots, so the
-// panel plays the steps on its own timer instead.
+// The trace panel has two jobs (ADR 0027). In traced flow it prints the
+// active request's story step by step, in sync with the dot on the board, or
+// on its own timer under reduced motion where there are no dots. In live
+// flow it holds the latest call's full path without stepping, because live
+// requests finish faster than anyone reads.
 
 import { useEffect } from 'react'
 import { useClient } from '@/lib/client-context'
 import { cn } from '@/lib/utils'
 import { clusterStore } from '@/store/store'
 import { traceStore, useActiveTrace } from '@/store/traceStore'
+import type { FlowMode } from '@/topo/flow'
 import { buildTrace } from '@/topo/trace'
 
 const REDUCED_STEP_MS = 3000
+const LIVE_REFRESH_MS = 1200 // how often the live panel swaps to a newer call
 
 // Reduced-motion drive: no dot layer runs, so traces advance on a timer here.
 function useReducedMotionTraceFeed(enabled: boolean) {
@@ -40,14 +44,37 @@ function useReducedMotionTraceFeed(enabled: boolean) {
   }, [enabled, client])
 }
 
-export function TracePanel({ reduced }: { reduced: boolean }) {
-  useReducedMotionTraceFeed(reduced)
+// Live drive: the panel holds the latest call's whole story, refreshed at
+// reading pace. The dot layer never touches the store in live flow, so this
+// hook owns it.
+function useLatestCallFeed(enabled: boolean) {
+  const client = useClient()
+  useEffect(() => {
+    if (!enabled) return
+    let lastShown = 0
+    const unsubscribe = client.watchTraffic((e) => {
+      const now = performance.now()
+      if (now - lastShown < LIVE_REFRESH_MS) return
+      lastShown = now
+      const trace = buildTrace(e, clusterStore.getSnapshot())
+      traceStore.set({ trace, stepIndex: trace.steps.length - 1, done: true })
+    })
+    return () => {
+      unsubscribe()
+      traceStore.set(null)
+    }
+  }, [enabled, client])
+}
+
+export function TracePanel({ reduced, flow }: { reduced: boolean; flow: FlowMode }) {
+  useReducedMotionTraceFeed(flow === 'traced' && reduced)
+  useLatestCallFeed(flow === 'live')
   const active = useActiveTrace()
 
   return (
     <div className="boardbox flex flex-col gap-2 p-3" data-testid="trace-panel">
       <div className="flex items-baseline justify-between">
-        <span className="eyebrow">request trace</span>
+        <span className="eyebrow">{flow === 'live' ? 'latest call' : 'request trace'}</span>
         {active && (
           <span className="font-mono text-[10px] text-muted-foreground">
             {active.trace.event.fromInstance} → {active.trace.event.toService}
@@ -56,8 +83,9 @@ export function TracePanel({ reduced }: { reduced: boolean }) {
       </div>
       {!active ? (
         <p className="text-xs text-muted-foreground">
-          Waiting for the next call. Each one walks the full path, from the resolver through the kdns
-          round trip and the dial to RBAC and the EDS pick.
+          {flow === 'live'
+            ? 'Waiting for traffic. Calls fly the board at real speed, and this panel keeps the last path taken.'
+            : 'Waiting for the next call. Each one walks the full path: resolve, the kdns round trip, the dial, RBAC, and the EDS pick.'}
         </p>
       ) : (
         <ol className="flex flex-col gap-1.5">

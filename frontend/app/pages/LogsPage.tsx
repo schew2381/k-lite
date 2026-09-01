@@ -20,6 +20,15 @@ import { useSnapshot } from '@/store/store'
 
 const RING_CAP = 500
 
+// The mock stamps sim-seconds and the live stream stamps wall-clock epoch
+// ms. The magnitude says which one arrived.
+function stamp(ts: number): string {
+  if (ts > 1e12) {
+    return new Date(ts).toLocaleTimeString('en-GB', { hour12: false })
+  }
+  return `${(ts / 1000).toFixed(1)}s`
+}
+
 export default function LogsPage() {
   const client = useClient()
   const snapshot = useSnapshot()
@@ -100,9 +109,7 @@ export default function LogsPage() {
         <Empty className="postit-surface mx-auto mt-10 max-w-md p-6">
           <EmptyHeader>
             <EmptyTitle className="hand text-lg">no instance picked</EmptyTitle>
-            <EmptyDescription>
-              Choose one above. The client workload's log narrates its calls, verdicts included.
-            </EmptyDescription>
+            <EmptyDescription>Choose one above to tail what that instance prints.</EmptyDescription>
           </EmptyHeader>
         </Empty>
       ) : (
@@ -113,7 +120,7 @@ export default function LogsPage() {
           {visible.map((l, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: the ring is append-only, so the index is the line identity
             <div key={`${l.ts}-${i}`} className="whitespace-pre-wrap">
-              <span className="text-muted-foreground">{(l.ts / 1000).toFixed(1)}s </span>
+              <span className="text-muted-foreground">{stamp(l.ts)} </span>
               <span className={l.line.includes('FAILED') ? 'text-deny' : undefined}>{l.line}</span>
             </div>
           ))}

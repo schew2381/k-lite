@@ -17,7 +17,7 @@ import type { NodeLayout, Rect } from '@/layout/layout'
 import { act } from '@/lib/act'
 import { useClient } from '@/lib/client-context'
 import { cn } from '@/lib/utils'
-import { endpointsOf, rbacView, sortedServices, vipFor } from '@/store/selectors'
+import { endpointsOf, infraIpOf, rbacView, sortedServices, vipFor } from '@/store/selectors'
 import { useSnapshot } from '@/store/store'
 import { InfraPodSheet } from '@/topo/InfraPodSheet'
 
@@ -71,7 +71,6 @@ export function NodeCard({ node, layout, count }: { node: NodeObj; layout: NodeL
     rules.map((r) => `${r.from}→${r.to}`).join(', ')
   const name = node.metadata.name
   const phase = node.status?.phase ?? 'NotReady'
-  const infra = node.status?.infra
 
   const cordoned = node.status?.unschedulable ?? false
   const cordon = (on: boolean) =>
@@ -124,12 +123,13 @@ export function NodeCard({ node, layout, count }: { node: NodeObj; layout: NodeL
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuGroup>
-                {cordoned ? (
-                  <DropdownMenuItem onClick={() => cordon(false)}>Uncordon</DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem onClick={() => cordon(true)}>Cordon</DropdownMenuItem>
-                )}
-                <DropdownMenuItem onClick={drain}>Drain</DropdownMenuItem>
+                {client.can.cordon &&
+                  (cordoned ? (
+                    <DropdownMenuItem onClick={() => cordon(false)}>Uncordon</DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuItem onClick={() => cordon(true)}>Cordon</DropdownMenuItem>
+                  ))}
+                {client.can.drain && <DropdownMenuItem onClick={drain}>Drain</DropdownMenuItem>}
                 <DropdownMenuItem variant="destructive" onClick={drainAndRemove}>
                   Drain &amp; remove
                 </DropdownMenuItem>
@@ -177,7 +177,7 @@ export function NodeCard({ node, layout, count }: { node: NodeObj; layout: NodeL
           <span className="font-mono text-[11px] font-semibold text-ctrl">
             infra pod{' '}
             <span className="font-normal text-muted-foreground">
-              one shared netns · {infra?.ip ?? 'starting…'}
+              one shared netns · {infraIpOf(node) ?? 'starting…'}
             </span>
           </span>
           <span className="font-mono text-[10px] text-ctrl">inspect</span>

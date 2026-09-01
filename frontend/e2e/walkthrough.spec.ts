@@ -27,11 +27,13 @@ test('cluster boots: three nodes, five Ready instances, a traced call flowing', 
 test('the etcd browser lists live keys and expands them to YAML', async ({ page }) => {
   await page.goto('/#/etcd')
   await expect(page.getByTestId('etcd-rev')).toBeVisible()
-  const bRow = page.getByTestId('etcd-row').filter({ hasText: '/klite/workloads/b' })
+  const bRow = page.getByTestId('etcd-row').filter({ hasText: '/klite/v1/workloads/b' })
   await expect(bRow).toHaveCount(1)
   await bRow.click()
   await expect(bRow).toContainText('replicas: 2')
-  await expect(page.getByTestId('etcd-row').filter({ hasText: '/klite/instances/b-1' })).toHaveCount(1)
+  await expect(page.getByTestId('etcd-row').filter({ hasText: '/klite/v1/instances/b-1' })).toHaveCount(
+    1,
+  )
 })
 
 test('the infra pod inspector shows what the control plane programmed', async ({ page }) => {
@@ -141,4 +143,17 @@ test('a service created from the dialog schedules and gets kdns records everywhe
   for (const node of ['node-1', 'node-2', 'node-3']) {
     await expect(page.getByTestId(`infra-${node}`)).toContainText('d.svc.klite')
   }
+})
+
+test('live flow: flights run fast and untraced, the panel keeps the latest call', async ({ page }) => {
+  await page.goto('/')
+  await fourX(page)
+  await page.getByTestId('flow-toggle').getByRole('radio', { name: 'Live flow' }).click()
+  await expect(page.locator('.traffic-dot').first()).toBeVisible({ timeout: 60_000 })
+  // no step-by-step walkthrough in live flow
+  expect(await page.getByTestId('trace-step-active').count()).toBe(0)
+  // the whole lifecycle finishes in seconds, not the traced half-minute
+  await expect(page.locator('.traffic-dot')).toHaveCount(0, { timeout: 15_000 })
+  await expect(page.getByTestId('trace-panel')).toContainText('latest call')
+  await expect(page.getByTestId('trace-panel').locator('ol li').first()).toBeVisible()
 })

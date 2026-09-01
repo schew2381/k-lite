@@ -304,6 +304,7 @@ export class Cluster {
       ...node.status,
       phase: 'Ready',
       instanceCount: this.instancesOn(name).length,
+      nodeIndex: this.ipam.indexOf(name),
       infra: { ip: this.ipam.infraIp(name), ready: true },
     }
     this.emit('MODIFIED', node)

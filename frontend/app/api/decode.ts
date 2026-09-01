@@ -52,6 +52,32 @@ function toMeta(raw: Record<string, unknown>): ObjectMeta {
   }
 }
 
+// protojson omits empty maps, lists, and zero numbers, so a legal server
+// object can arrive without fields the app dereferences. This fills every
+// path the UI walks unconditionally.
+function fillDefaults(kind: Kind, spec: Record<string, unknown>, status?: Record<string, unknown>) {
+  if (kind === 'Workload') {
+    spec.replicas ??= 0
+    const template = (spec.template ??= {}) as Record<string, unknown>
+    template.labels ??= {}
+    template.containers ??= []
+  }
+  if (kind === 'Service') spec.selector ??= {}
+  if (kind === 'NetworkPolicy') spec.rules ??= []
+  if (kind === 'Instance' && status) {
+    status.restarts ??= 0
+  }
+  if (kind === 'Node' && status) {
+    status.instanceCount ??= 0
+    status.unschedulable ??= false
+    // int64 crosses protojson as a string
+    if (status.lastHeartbeatUnix !== undefined) {
+      status.lastHeartbeatUnix = Number(status.lastHeartbeatUnix)
+    }
+    if (status.nodeIndex !== undefined) status.nodeIndex = Number(status.nodeIndex)
+  }
+}
+
 interface RawObject {
   kind?: string
   metadata?: Record<string, unknown>
@@ -90,6 +116,7 @@ export function decodeObject(raw: unknown): KliteObject | null {
     ...(status !== undefined && { status }),
   } as unknown as KliteObject
 
+  fillDefaults(kind, spec, status)
   // enum-name fields the protojson dialect carries, harmless on the other
   if (status?.phase !== undefined) status.phase = displayEnum(status.phase)
   if (kind === 'NetworkPolicy' && typeof spec.action === 'string') {
