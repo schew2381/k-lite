@@ -1,4 +1,4 @@
-import { Navigate, NavLink, Route, Routes } from 'react-router-dom'
+import { Navigate, NavLink, Route, Routes, useSearchParams } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -39,9 +39,17 @@ function Legend() {
 // loser is torn down entirely (no simulation behind live).
 function ModeToggle() {
   const { client, setMode } = useClientHandle()
+  const [searchParams, setSearchParams] = useSearchParams()
   const live = client.mode === 'http'
+  const pick = (v: string) => {
+    setMode(v === 'live' ? 'http' : 'mock')
+    // the URL carries the source, so a shared link opens in the same mode
+    const next = new URLSearchParams(searchParams)
+    next.set('mode', v === 'live' ? 'live' : 'mock')
+    setSearchParams(next, { replace: true })
+  }
   return (
-    <Tabs value={live ? 'live' : 'mock'} onValueChange={(v) => setMode(v === 'live' ? 'http' : 'mock')}>
+    <Tabs value={live ? 'live' : 'mock'} onValueChange={pick}>
       <TabsList aria-label="Data source" data-testid="mode-toggle" className="rounded-full font-mono">
         <TabsTrigger
           value="mock"
