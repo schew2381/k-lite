@@ -27,8 +27,8 @@
 //                                       "matchedPolicy":...,"reason":...}
 // GET    /api/topology                 → the composed graph (Topology type)
 //
-// Not served yet: scale and drain routes (the RPCs exist, and scale rides
-// apply below until a route lands), cordon (no RPC at all), and GET /api/traffic
+// Not served yet: scale, drain, and uncordon routes (the RPCs all exist, and
+// scale rides apply below until a route lands), plus GET /api/traffic
 // (ADR 0024's feed). watchTraffic degrades to the rail's waiting state.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -131,7 +131,7 @@ export class HttpClient implements KliteClient {
   }
 
   async cordon(): Promise<void> {
-    throw new Error('cordon has no ClusterService RPC yet — drain instead')
+    throw new Error('no cordon route on the facade yet — drain instead')
   }
 
   // list-then-watch: the Watch RPC sends changes only, so the bootstrap lists
