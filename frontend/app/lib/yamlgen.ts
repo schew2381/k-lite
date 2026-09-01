@@ -29,6 +29,7 @@ export function newNodeYaml(name: string): string {
 export function chattyContainer(name: string, targets: string[]) {
   const script = [
     `echo "$(hostname) is ${name}" > /www/index.html`,
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion inside a shell script, not a JS template
     '(httpd -f -vv -p 80 -h /www 2>&1 | while read l; do case "$l" in *"response:200"*) i="${l#*\\[}"; i="${i#::ffff:}"; i="${i%%]*}"; echo "receive ($i) ok";; *"response:"*) i="${l#*\\[}"; i="${i#::ffff:}"; i="${i%%]*}"; echo "receive ($i) ${l##*response:}";; esac; done &)',
     // the sleep rides the do-line: a '; ' join would otherwise render 'do;',
     // which busybox ash rejects. sleep runs backgrounded under wait, since a
