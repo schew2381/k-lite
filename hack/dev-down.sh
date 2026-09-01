@@ -7,7 +7,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 KLITE_NODE_PREFIX="${KLITE_NODE_PREFIX:-node}"
-KLITE_NODE_COUNT="${KLITE_NODE_COUNT:-3}"
+KLITE_NODE_COUNT="${KLITE_NODE_COUNT:-4}"
 DEV_DIR="${KLITE_DEV_DIR:-$HOME/.klite/dev}"
 ALL=0
 [[ "${1:-}" == "--all" ]] && ALL=1

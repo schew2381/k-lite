@@ -3,7 +3,9 @@
 # Overrides (defaults in parens): KLITED_PORT (7443), ETCD_NAME_PREFIX (etcd),
 # ETCD_PORT_BASE (2379), ETCD_NET (klite-etcd), KLITE_NODE_PREFIX (node),
 # KLITE_NODE_COUNT (4), KLITE_CLUSTER_TOKEN (dev-token), KLITE_DEV_DIR (~/.klite/dev),
-# KLITE_DEV_SKIP_BUILD (unset; set to 1 to reuse existing bin/ binaries).
+# KLITE_DEV_SKIP_BUILD (unset; set to 1 to reuse existing bin/ binaries),
+# KLITE_LAN (unset; set to 0 to force the loopback-only playground even with
+# a LAN address present).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 command -v go >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:$PATH"
@@ -17,6 +19,28 @@ KLITE_NODE_COUNT="${KLITE_NODE_COUNT:-4}"
 KLITE_CLUSTER_TOKEN="${KLITE_CLUSTER_TOKEN:-dev-token}"
 DEV_DIR="${KLITE_DEV_DIR:-$HOME/.klite/dev}"
 SKIP_BUILD="${KLITE_DEV_SKIP_BUILD:-}"
+KLITE_LAN="${KLITE_LAN:-}"
+LAN_NET_IMAGE=ghcr.io/schew2381/klite-net:v0.1.0
+
+# LAN mode: with a Wi-Fi address on en0, klited listens on 0.0.0.0 so a
+# laptop on the same network can join the live playground. The exposure is
+# deliberate. The listener speaks nothing but the cluster's TLS, and M8's
+# deny-by-default auth gate turns away anyone without the admin token or a
+# node identity. Local agents advertise the Mac's LAN address (instead of
+# host.docker.internal) so laptop -> local-node traffic rides the same
+# published ingress ports. The donor image comes from ghcr so remote
+# joiners can pull it. No en0 address, or KLITE_LAN=0, keeps everything on
+# loopback.
+MAC_IP=""
+[[ "$KLITE_LAN" == 0 ]] || MAC_IP="$(ipconfig getifaddr en0 2>/dev/null || true)"
+LISTEN_HOST="127.0.0.1"
+KLITED_LAN_FLAGS="" # tokens carry no spaces, so unquoted expansion is safe
+AGENT_LAN_FLAGS=""
+if [[ -n "$MAC_IP" ]]; then
+  LISTEN_HOST="0.0.0.0"
+  KLITED_LAN_FLAGS="--net-image $LAN_NET_IMAGE"
+  AGENT_LAN_FLAGS="--advertise-address $MAC_IP"
+fi
 
 BIN=bin
 KLITE="$BIN/klite"
@@ -70,8 +94,16 @@ else
     [[ -x "$BIN/$b" ]] || die "missing $BIN/$b (unset KLITE_DEV_SKIP_BUILD to build)"
   done
 fi
-docker image inspect klite-net:dev >/dev/null 2>&1 \
-  || echo "note: klite-net:dev image missing, so per-node net/envoy infra is skipped (run make net-image to enable it)"
+if [[ -n "$MAC_IP" ]]; then
+  say "LAN mode: klited on 0.0.0.0:$KLITED_PORT, nodes advertise $MAC_IP (KLITE_LAN=0 for loopback only)"
+  docker image inspect "$LAN_NET_IMAGE" >/dev/null 2>&1 \
+    || docker pull "$LAN_NET_IMAGE" >/dev/null 2>&1 \
+    || die "cannot pull $LAN_NET_IMAGE for LAN mode (KLITE_LAN=0 falls back to loopback)"
+else
+  say "no en0 address (or KLITE_LAN=0): loopback playground, joins from this machine only"
+  docker image inspect klite-net:dev >/dev/null 2>&1 \
+    || echo "note: klite-net:dev image missing, so per-node net/envoy infra is skipped (run make net-image to enable it)"
+fi
 
 mkdir -p "$DEV_DIR"
 
@@ -82,9 +114,9 @@ hack/etcd-up.sh
 # --- klited ---
 KLITED_LOG="$DEV_DIR/klited-$KLITED_PORT.log"
 KLITED_PIDFILE="$DEV_DIR/klited-$KLITED_PORT.pid"
-say "starting klited on 127.0.0.1:$KLITED_PORT (log: $KLITED_LOG)"
-"$BIN/klited" --listen "127.0.0.1:$KLITED_PORT" --etcd "$ETCD_ENDPOINTS" \
-  --cluster-token "$KLITE_CLUSTER_TOKEN" >"$KLITED_LOG" 2>&1 &
+say "starting klited on $LISTEN_HOST:$KLITED_PORT (log: $KLITED_LOG)"
+"$BIN/klited" --listen "$LISTEN_HOST:$KLITED_PORT" --etcd "$ETCD_ENDPOINTS" \
+  --cluster-token "$KLITE_CLUSTER_TOKEN" $KLITED_LAN_FLAGS >"$KLITED_LOG" 2>&1 &
 echo $! >"$KLITED_PIDFILE"
 disown $! 2>/dev/null || true
 wait_for 15 klited_ready || die "klited not answering on $KLITED_PORT (see $KLITED_LOG)"
@@ -104,7 +136,7 @@ done
 for n in "${NODES[@]}"; do
   say "starting agent for $n (log: $DEV_DIR/agent-$n.log)"
   "$BIN/klite-agent" --node "$n" --server "127.0.0.1:$KLITED_PORT" \
-    --token "$TOKEN" >"$DEV_DIR/agent-$n.log" 2>&1 &
+    --token "$TOKEN" $AGENT_LAN_FLAGS >"$DEV_DIR/agent-$n.log" 2>&1 &
   echo $! >"$DEV_DIR/agent-$n.pid"
   disown $! 2>/dev/null || true
 done
@@ -114,7 +146,12 @@ say "all $KLITE_NODE_COUNT nodes Ready"
 # playground wants every declared node schedulable.
 for n in "${NODES[@]}"; do "$KLITE" uncordon "$n" >/dev/null 2>&1 || true; done
 
-# --- example apps ---
+# --- seed policies, then apps ---
+# The policies land before any instance exists, so the baseline the apps
+# wake into is the seeded one: only a reaches d, and c cannot call b.
+say "applying examples/seed/policies (only-a-reaches-d, deny-c-to-b)"
+"$KLITE" apply -f examples/seed/policies >/dev/null
+
 say "applying examples/seed/apps"
 "$KLITE" apply -f examples/seed/apps >/dev/null
 wait_for 90 instances_running || die "instances not all Running (try: $KLITE get instances; logs in $DEV_DIR)"
@@ -142,9 +179,17 @@ echo "  $KLITE logs -f $A_INST     # a's chatter: '-> b ok' on 2.5% rolls"
 echo "  $KLITE describe instance $A_INST"
 echo "  $KLITE describe workload b"
 echo "  $KLITE scale workload b --replicas 5"
-echo "  $KLITE apply -f examples/demo-policies/allow-only-a-to-b.yaml"
-echo "  $KLITE delete -f examples/demo-policies/allow-only-a-to-b.yaml"
+echo "  $KLITE get networkpolicies       # the two seed policies"
+echo "  $KLITE policy check b d          # denied at rest: only a reaches d"
+echo "  $KLITE apply -f examples/demo-policies/deny-a-to-c.yaml"
+echo "  $KLITE delete -f examples/demo-policies/deny-a-to-c.yaml"
 echo "  docker ps --filter label=io.klite.role=workload"
 echo "  tail -f $KLITED_LOG"
+if [[ -n "$MAC_IP" ]]; then
+  echo
+  echo "join a laptop on this Wi-Fi:"
+  echo "  $KLITE node add laptop-1 --url $MAC_IP:$KLITED_PORT   # prints the paste-ready join block"
+  echo "  (macOS may ask to allow incoming connections for klited: allow it)"
+fi
 echo
 echo "tear down: hack/dev-down.sh (add --all to stop etcd and remove klite0)"

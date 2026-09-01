@@ -7,11 +7,11 @@
 #   wipe        fresh store, fresh CA, fresh identities
 #   boot        etcd trio plus two stateless klited replicas
 #   join        four nodes trade a token for an mTLS identity
-#   apps        a, b, c, d go Ready: each serves its hostname and chats
+#   apps        seed policies first, then a, b, c, d go Ready and chat
 #   discovery   a finds b by name through kdns and the VIP
 #   scale       d grows 1 -> 2 live, landing the resting shape
 #   rollout     every b replaced, probe loop provably clean
-#   policy      deny a -> c on both planes (chatter included), restore
+#   policy      deny a -> c layered on the seeded baseline, then restored
 #   drain       a node empties surge-first, stream on screen
 #   leader kill SIGKILL mid-scale, the survivor converges it
 #   security    TLS 1.3 chain, ingress allocations, plaintext dies
@@ -44,6 +44,38 @@ INGRESS_BASE=20000
 INGRESS_PER_NODE=32
 BEAT="${KLITE_DEMO_BEAT:-2}"
 STEP=preflight
+
+# LAN mode: with a Wi-Fi address on en0, both klited replicas listen on
+# 0.0.0.0 so a laptop on the same network can join mid-demo. The exposure
+# is deliberate. The listeners speak nothing but the cluster's TLS, and
+# M8's deny-by-default auth gate turns away anyone without the admin token
+# or a node identity. Local agents advertise the Mac's LAN address so
+# laptop -> local-node traffic rides the published ingress ports. The
+# donor image comes from ghcr so remote joiners can pull it. No en0
+# address, or KLITE_LAN=0, keeps everything on loopback.
+LAN_NET_IMAGE=ghcr.io/schew2381/klite-net:v0.1.0
+MAC_IP=""
+[[ "${KLITE_LAN:-}" == 0 ]] || MAC_IP="$(ipconfig getifaddr en0 2>/dev/null || true)"
+LISTEN_HOST="127.0.0.1"
+KLITED_LAN_FLAGS="" # tokens carry no spaces, so unquoted expansion is safe
+AGENT_LAN_FLAGS=""
+if [[ -n "$MAC_IP" ]]; then
+  LISTEN_HOST="0.0.0.0"
+  KLITED_LAN_FLAGS="--net-image $LAN_NET_IMAGE"
+  AGENT_LAN_FLAGS="--advertise-address $MAC_IP"
+fi
+
+# Reachability at rest, under the two seed policies (examples/seed/policies):
+# only-a-reaches-d flips d to allowlist mode and deny-c-to-b closes one more
+# pair, so of the twelve source->target pairs three are denied by design.
+#
+#            to a   to b   to c   to d
+#   from a    -     ok     ok     ok
+#   from b   ok      -     ok     DENIED
+#   from c   ok    DENIED   -     DENIED
+#   from d   ok     ok     ok      -
+allowed_of() { case "$1" in a) echo "bcd" ;; b) echo "ac" ;; c) echo "a" ;; d) echo "abc" ;; esac; }
+denied_of()  { case "$1" in b) echo "d" ;; c) echo "b d" ;; esac; }
 
 pass() { echo "PASS [$STEP]: $1"; }
 info() { echo "INFO [$STEP]: $1"; }
@@ -168,6 +200,14 @@ docker image inspect busybox:1.36 >/dev/null 2>&1 || docker pull busybox:1.36 >/
   || die "image busybox:1.36 missing and the pull failed (run: make bootstrap)"
 pass "colima up, docker answering, base images present"
 
+if [[ -n "$MAC_IP" ]]; then
+  docker image inspect "$LAN_NET_IMAGE" >/dev/null 2>&1 || docker pull "$LAN_NET_IMAGE" >/dev/null 2>&1 \
+    || die "cannot pull $LAN_NET_IMAGE for LAN mode (KLITE_LAN=0 falls back to loopback)"
+  pass "LAN mode: klited will listen on 0.0.0.0, nodes advertise $MAC_IP, donors run $LAN_NET_IMAGE"
+else
+  info "no en0 address (or KLITE_LAN=0): loopback demo, joins from this machine only"
+fi
+
 command -v bun >/dev/null 2>&1 || die "bun missing for the web board (run: make bootstrap)"
 if [[ ! -d frontend/node_modules ]]; then
   info "installing frontend dependencies (first run)"
@@ -221,14 +261,14 @@ STEP=control-plane
 
 hack/etcd-up.sh >/dev/null 2>&1 && pass "3-member etcd healthy on 127.0.0.1:2379/2381/2383" || die "etcd trio up"
 
-"$BIN/klited" --listen "$EP_A" >"$LOG_A" 2>&1 &
+"$BIN/klited" --listen "$LISTEN_HOST:7443" $KLITED_LAN_FLAGS >"$LOG_A" 2>&1 &
 echo $! >"$DEV_DIR/klited-7443.pid"
 disown
 wait_for 15 klited_a_ready || die "klited A not serving on $EP_A (see $LOG_A)"
 a_leads() { [[ "$(leader_state "$LOG_A")" == leading ]]; }
 wait_for 10 a_leads && pass "klited A serving on $EP_A and leading the controllers" || die "klited A leading"
 
-"$BIN/klited" --listen "$EP_B" >"$LOG_B" 2>&1 &
+"$BIN/klited" --listen "$LISTEN_HOST:7445" $KLITED_LAN_FLAGS >"$LOG_B" 2>&1 &
 echo $! >"$DEV_DIR/klited-7445.pid"
 disown
 wait_for 15 klited_b_ready || die "klited B not serving on $EP_B (see $LOG_B)"
@@ -256,7 +296,8 @@ done
 pass "declared node-1..4 (membership is YAML first, ADR 0018)"
 
 for n in "${NODES[@]}"; do
-  "$BIN/klite-agent" --node "$n" --server "$KLITE_SERVER" --token "$TOKEN" >"$DEV_DIR/agent-$n.log" 2>&1 &
+  "$BIN/klite-agent" --node "$n" --server "$KLITE_SERVER" --token "$TOKEN" $AGENT_LAN_FLAGS \
+    >"$DEV_DIR/agent-$n.log" 2>&1 &
   echo $! >"$DEV_DIR/agent-$n.pid"
   disown
 done
@@ -279,8 +320,15 @@ wait_for 90 infra_up && pass "infra pods running on every node (klite-net + Envo
 pause
 
 # ============================================================
-banner "4. DECLARE THE APPS: a, b, c, d each serve their name and chat"
+banner "4. SEED POLICIES, THEN THE APPS: a, b, c, d serve their names and chat"
 STEP=apps
+
+# The seed's two policies land before any instance exists, so the baseline
+# the apps wake into is the seeded one (see the matrix up top).
+show "$KLITE" apply -f examples/seed/policies/only-a-reaches-d.yaml
+show "$KLITE" apply -f examples/seed/policies/deny-c-to-b.yaml
+info "the first ALLOW targeting d flips d to allowlist mode: one policy is the whole 'only a reaches d'"
+pause
 
 # Demo pace lives in the YAML, never in code (ADR 0010): 4s drain knobs go
 # in outside the template so the hash and the choreography stay untouched.
@@ -345,8 +393,7 @@ pause
 banner "6. SCALE d LIVE: 1 -> 2"
 STEP=scale
 
-# This lands the cluster on its resting shape (a=1, b=2, c=3, d=2), which
-# every later beat returns to and the board shows at the end.
+# This lands the cluster on its resting shape (a=1, b=2, c=3, d=2).
 ROLL_B_F0="$(fails_in "$PROBE_B")"; ROLL_C_F0="$(fails_in "$PROBE_C")"; ROLL_D_F0="$(fails_in "$PROBE_D")"
 ROLL_B_L0="$(lines_in "$PROBE_B")"; ROLL_C_L0="$(lines_in "$PROBE_C")"; ROLL_D_L0="$(lines_in "$PROBE_D")"
 show "$KLITE" scale workload d --replicas 2
@@ -384,10 +431,25 @@ FAILS=$(( $(fails_in "$PROBE_B") - ROLL_B_F0 + $(fails_in "$PROBE_C") - ROLL_C_F
 pause
 
 # ============================================================
-banner "8. POLICY: deny a -> c live, both planes agree, then restore"
+banner "8. POLICY: layer deny a -> c over the seeded baseline, then restore"
 STEP=policy
 
-info "right now a reaches b, c, and d (the last probe against each):"
+# The seeds have been live since before the first container, so this beat
+# starts by showing the resting matrix, then layers one more policy on it.
+OUT="$("$KLITE" policy check a d 2>&1)"
+grep -q 'allowed' <<<"$OUT" && grep -q 'only-a-reaches-d' <<<"$OUT" \
+  && pass "at rest, a -> d is the seed ALLOW at work: $OUT" \
+  || die "policy check a d should allow by only-a-reaches-d, got: $OUT"
+OUT="$("$KLITE" policy check b d 2>&1)"
+grep -q 'denied' <<<"$OUT" && grep -q 'allowlist' <<<"$OUT" \
+  && pass "at rest, b -> d is denied (d is allowlist-mode): $OUT" \
+  || die "policy check b d should deny in allowlist mode, got: $OUT"
+OUT="$("$KLITE" policy check c b 2>&1)"
+grep -q 'denied' <<<"$OUT" && grep -q 'deny-c-to-b' <<<"$OUT" \
+  && pass "at rest, c -> b is denied by the seed DENY: $OUT" \
+  || die "policy check c b should deny by deny-c-to-b, got: $OUT"
+
+info "and a still reaches b, c, and d (the last probe against each):"
 show tail -n 1 "$PROBE_B" "$PROBE_C" "$PROBE_D"
 CHAT_MARK="$(date +%s)"
 show "$KLITE" apply -f examples/demo-policies/deny-a-to-c.yaml
@@ -417,6 +479,10 @@ pause
 show "$KLITE" delete networkpolicy deny-a-to-c
 c_back() { [[ "$(tail -n 2 "$PROBE_C" 2>/dev/null | grep -c ' is c')" == 2 ]]; }
 wait_for 30 c_back && pass "policy deleted, a -> c flows again" || die "traffic restored after the delete"
+OUT="$("$KLITE" policy check b d 2>&1)"
+grep -q 'denied' <<<"$OUT" \
+  && pass "the restore only peeled the layer: the seeded baseline still holds ($OUT)" \
+  || die "b -> d should still be denied after the restore, got: $OUT"
 pause
 
 # ============================================================
@@ -491,7 +557,7 @@ sleep 3
   && pass "ZERO failed requests across drain + leader kill + both scales (the data plane never blinked)" \
   || die "failed or stalled probes across the chaos window ($(chaos_fails) FAILED)"
 
-"$BIN/klited" --listen "127.0.0.1:$LEAD_PORT" >"$DEV_DIR/klited-$LEAD_PORT.log" 2>&1 &
+"$BIN/klited" --listen "$LISTEN_HOST:$LEAD_PORT" $KLITED_LAN_FLAGS >"$DEV_DIR/klited-$LEAD_PORT.log" 2>&1 &
 echo $! >"$LEAD_PIDFILE"
 disown
 [[ "$LEAD_PORT" == 7443 ]] && LOG_A="$DEV_DIR/klited-7443.log" || LOG_B="$DEV_DIR/klited-7445.log"
@@ -532,18 +598,42 @@ banner "12. FINALE: the apps' own chatter, then the live board"
 STEP=finale
 
 # The probes made the gates provable. The chatter keeps the board alive
-# after this script ends. Minutes into the run, every app must have rolled
-# its way into at least one completed call.
+# after this script ends, and it must obey the seeded matrix up top.
+# Minutes into the run, every app has completed a call inside its allowed
+# row, no denied pair has ever completed one, and the denied rolls show
+# up as FAILED lines rather than silence.
+wl_logs() { # this stack's instances only: workload labels repeat across clusters
+  local n
+  for n in "${NODES[@]}"; do
+    docker ps --filter "label=io.klite.workload=$1" --filter "label=io.klite.node=$n" \
+      --format '{{.Names}}' | xargs -I{} docker logs {} 2>/dev/null
+  done
+}
 chatty_flowing() {
   local wl
   for wl in a b c d; do
-    docker ps --filter "label=io.klite.workload=$wl" --format '{{.Names}}' \
-      | xargs -I{} docker logs {} 2>/dev/null | grep -q '^-> [abcd] ok$' || return 1
+    wl_logs "$wl" | grep -Eq "^-> [$(allowed_of "$wl")] ok$" || return 1
   done
 }
 wait_for 180 chatty_flowing \
-  && pass "every app chats on its own: a, b, c, and d each completed a random call" \
-  || die "an app has not completed a single chatty call"
+  && pass "every app chats within its allowed row: a, b, c, and d each completed a call" \
+  || die "an app has not completed a single allowed chatty call"
+LEAKS=""
+for wl in b c; do
+  for t in $(denied_of "$wl"); do
+    n="$(wl_logs "$wl" | grep -c "^-> $t ok$")"
+    [[ "$n" == 0 ]] || LEAKS="$LEAKS $wl->$t:$n"
+  done
+done
+[[ -z "$LEAKS" ]] \
+  && pass "no denied pair ever completed a call (b->d, c->b, c->d all at zero)" \
+  || die "policy leak in the chatter:$LEAKS"
+DENIED_TRIES="$(for wl in b c; do
+  for t in $(denied_of "$wl"); do wl_logs "$wl" | grep -c "^-> $t FAILED$"; done
+done | awk '{s+=$1} END {print s+0}')"
+[[ "$DENIED_TRIES" -ge 1 ]] \
+  && pass "and the seeds visibly bite: $DENIED_TRIES denied roll(s) logged FAILED" \
+  || die "no chatty roll toward a denied pair has FAILED yet, and this far in that means the deny isn't enforcing"
 info "a's chatter so far:"
 echo
 echo "  \$ docker logs $(a_ctr) | grep '^->' | tail -4"
@@ -577,7 +667,7 @@ pass "opened the board in live mode"
 banner "THE CLUSTER IS YOURS"
 echo "
   board       http://localhost:5173/#/?mode=live   (the MOCK|LIVE toggle in the header swaps the data source)
-  processes   2x klited (7443/7445), 3 agents, facade (7080), vite (5173) — pidfiles in $DEV_DIR
+  processes   2x klited (7443/7445), 4 agents, facade (7080), vite (5173) — pidfiles in $DEV_DIR
   logs        $DEV_DIR/*.log
 
   poke at it:
@@ -585,6 +675,7 @@ echo "
     $KLITE get instances --watch
     $KLITE logs -f $A_INST                              # a's chatter: '-> b ok'
     $KLITE scale workload b --replicas 3
+    $KLITE policy check b d                              # denied at rest: only a reaches d
     $KLITE apply -f examples/demo-policies/deny-a-to-c.yaml   # watch the board turn
     $KLITE delete networkpolicy deny-a-to-c
     $KLITE drain $DRAIN_NODE && $KLITE uncordon $DRAIN_NODE
@@ -594,4 +685,10 @@ echo "
   tear down (everything, frontend included):
     make down
 "
+if [[ -n "$MAC_IP" ]]; then
+  echo "  join a laptop on this Wi-Fi:"
+  echo "    $KLITE node add laptop-1 --url $MAC_IP:7443   # prints the paste-ready join block"
+  echo "    (macOS may ask to allow incoming connections for klited: allow it)"
+  echo
+fi
 echo "demo: all beats passed"
