@@ -60,7 +60,8 @@ function toMeta(raw: Record<string, unknown>): ObjectMeta {
 function fillDefaults(kind: Kind, spec: Record<string, unknown>, status?: Record<string, unknown>) {
   if (kind === 'Workload') {
     spec.replicas ??= 0
-    const template = (spec.template ??= {}) as Record<string, unknown>
+    spec.template ??= {}
+    const template = spec.template as Record<string, unknown>
     template.labels ??= {}
     template.containers ??= []
   }

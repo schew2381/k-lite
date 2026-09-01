@@ -34,7 +34,10 @@ export function useDwelledPhase<T>(actual: T, dwellMs = DWELL_MS): T {
       }, wait)
     }
     pump()
-  }, [actual])
+    // dwellMs rides along for correctness if a caller ever varies it: the
+    // tail guard above makes the extra run a no-op, and the next pump reads
+    // the fresh value.
+  }, [actual, dwellMs])
 
   useEffect(
     () => () => {
