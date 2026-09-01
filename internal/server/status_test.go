@@ -57,7 +57,7 @@ func TestStampNodePreservesDraining(t *testing.T) {
 	seedNode(t, st, "node-2", klitev1.NodePhase_NODE_PHASE_DRAINING)
 	a := NewAgent(&AgentConfig{Store: st, ClusterToken: "tok", Hub: NewCommandHub()})
 
-	if err := a.stampNode(ctx, "node-2"); err != nil {
+	if err := a.stampNode(ctx, "node-2", ""); err != nil {
 		t.Fatal(err)
 	}
 	got, _, _ := st.Get(ctx, object.KindNode, "node-2")
@@ -67,6 +67,39 @@ func TestStampNodePreservesDraining(t *testing.T) {
 	}
 	if s.GetLastHeartbeatUnix() == 0 {
 		t.Error("heartbeat must still be stamped")
+	}
+}
+
+// The heartbeat carries the advertise address once the agent resolved it
+// (ADR 0024): non-IP values are dropped, empty leaves the stored one alone.
+func TestStampNodeAdvertiseAddress(t *testing.T) {
+	t.Parallel()
+	st := storetest.New()
+	ctx := context.Background()
+	seedNode(t, st, "node-2", klitev1.NodePhase_NODE_PHASE_READY)
+	a := NewAgent(&AgentConfig{Store: st, ClusterToken: "tok", Hub: NewCommandHub()})
+
+	addr := func() string {
+		got, _, _ := st.Get(ctx, object.KindNode, "node-2")
+		return got.GetNode().GetStatus().GetAdvertiseAddress()
+	}
+	if err := a.stampNode(ctx, "node-2", advertiseIP("node-2", "192.168.5.2")); err != nil {
+		t.Fatal(err)
+	}
+	if addr() != "192.168.5.2" {
+		t.Fatalf("advertise = %q, want 192.168.5.2", addr())
+	}
+	if err := a.stampNode(ctx, "node-2", advertiseIP("node-2", "host.docker.internal")); err != nil {
+		t.Fatal(err)
+	}
+	if addr() != "192.168.5.2" {
+		t.Fatalf("advertise = %q, a hostname must never replace the stored IP", addr())
+	}
+	if err := a.stampNode(ctx, "node-2", ""); err != nil {
+		t.Fatal(err)
+	}
+	if addr() != "192.168.5.2" {
+		t.Fatalf("advertise = %q, an empty report must not clear it", addr())
 	}
 }
 

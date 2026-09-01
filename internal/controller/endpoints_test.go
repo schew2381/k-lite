@@ -44,6 +44,25 @@ func fixtureInputs() *inputs {
 			AllocationName("b", "node-1"): "10.44.64.1",
 			AllocationName("b", "node-2"): "10.44.64.2",
 		},
+		ingress: map[string]int32{
+			IngressAllocationName("b", "b-ready"):    20000,
+			IngressAllocationName("b", "b-draining"): 20033,
+		},
+		advertise: map[string]string{"node-1": "192.168.5.2", "node-2": "10.10.17.5"},
+	}
+}
+
+// Endpoints carry the cross-node dialing rider (ADR 0024): the owning
+// node's advertised IP plus its allocated ingress port. Consumers decide
+// local-vs-remote; here both are simply present.
+func TestBuildAllEndpointIngressRider(t *testing.T) {
+	t.Parallel()
+	eps := buildAll(fixtureInputs())["node-1"].Net.GetEndpoints()[0].GetEndpoints()
+	if eps[0].GetIngressPort() != 20000 || eps[0].GetMachineAddress() != "192.168.5.2" {
+		t.Fatalf("b-ready rider = %d@%q, want 20000@192.168.5.2", eps[0].GetIngressPort(), eps[0].GetMachineAddress())
+	}
+	if eps[1].GetIngressPort() != 20033 || eps[1].GetMachineAddress() != "10.10.17.5" {
+		t.Fatalf("b-draining rider = %d@%q, want 20033@10.10.17.5", eps[1].GetIngressPort(), eps[1].GetMachineAddress())
 	}
 }
 

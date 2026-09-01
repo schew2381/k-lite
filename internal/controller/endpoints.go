@@ -75,7 +75,7 @@ func (e *Endpoints) OnNodeRemoved(fn func(node string)) {
 func (e *Endpoints) Run(ctx context.Context) {
 	kinds := []string{
 		object.KindService, object.KindInstance, object.KindNode,
-		object.KindNetworkPolicy, object.KindVIPAllocation,
+		object.KindNetworkPolicy, object.KindVIPAllocation, object.KindIngressAllocation,
 	}
 	runLoop(ctx, e.st, "endpoints", kinds, e.recompute)
 }
@@ -200,10 +200,12 @@ type inputs struct {
 	nodes     []string
 	policies  []*klitev1.NetworkPolicy
 	vips      map[string]string // AllocationName -> VIP
+	ingress   map[string]int32  // IngressAllocationName -> host ingress port
+	advertise map[string]string // node -> advertised machine IP (ADR 0024)
 }
 
 func listInputs(ctx context.Context, st store.Store) (*inputs, error) {
-	in := &inputs{vips: map[string]string{}}
+	in := &inputs{vips: map[string]string{}, ingress: map[string]int32{}, advertise: map[string]string{}}
 	svcObjs, _, err := st.List(ctx, object.KindService)
 	if err != nil {
 		return nil, err
@@ -232,7 +234,11 @@ func listInputs(ctx context.Context, st store.Store) (*inputs, error) {
 	}
 	nodeSet := map[string]bool{}
 	for _, o := range nodeObjs {
-		nodeSet[o.GetNode().GetMeta().GetName()] = true
+		node := o.GetNode()
+		nodeSet[node.GetMeta().GetName()] = true
+		if addr := node.GetStatus().GetAdvertiseAddress(); addr != "" {
+			in.advertise[node.GetMeta().GetName()] = addr
+		}
 	}
 	for _, inst := range in.instances {
 		if n := inst.GetSpec().GetNode(); n != "" {
@@ -249,15 +255,33 @@ func listInputs(ctx context.Context, st store.Store) (*inputs, error) {
 		in.policies = append(in.policies, o.GetNetworkPolicy())
 	}
 
+	if err := listAllocations(ctx, st, in); err != nil {
+		return nil, err
+	}
+	return in, nil
+}
+
+// listAllocations fills the two server-materialized port/address maps: VIPs
+// per (service, node) and ingress ports per (service, instance).
+func listAllocations(ctx context.Context, st store.Store, in *inputs) error {
 	allocObjs, _, err := st.List(ctx, object.KindVIPAllocation)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for _, o := range allocObjs {
 		alloc := o.GetVipAllocation()
 		in.vips[alloc.GetMeta().GetName()] = alloc.GetSpec().GetVip()
 	}
-	return in, nil
+
+	ingObjs, _, err := st.List(ctx, object.KindIngressAllocation)
+	if err != nil {
+		return err
+	}
+	for _, o := range ingObjs {
+		alloc := o.GetIngressAllocation()
+		in.ingress[alloc.GetMeta().GetName()] = alloc.GetSpec().GetPort()
+	}
+	return nil
 }
 
 // buildAll assembles every node's snapshot from one input read. Endpoint
@@ -298,11 +322,15 @@ func buildAll(in *inputs) map[string]*NodeSnapshot {
 
 // buildGroups collects each service's dialable endpoints: selected instances
 // that are Ready (or Draining, which Envoy treats as unhealthy-but-known,
-// ADR 0010) with an address.
+// ADR 0010) with an address. Each endpoint also carries how OTHER nodes reach
+// it — the owning node's advertised IP plus its allocated ingress port — so a
+// consuming node's Envoy can render remote endpoints against the mTLS ingress
+// listener instead of the dead flat-bridge path (ADR 0024).
 func buildGroups(in *inputs) map[string]*klitev1.EndpointGroup {
 	out := make(map[string]*klitev1.EndpointGroup, len(in.services))
 	for _, svc := range in.services {
-		group := &klitev1.EndpointGroup{Service: svc.GetMeta().GetName()}
+		name := svc.GetMeta().GetName()
+		group := &klitev1.EndpointGroup{Service: name}
 		for _, inst := range in.instances {
 			if !selects(svc, inst) {
 				continue
@@ -311,14 +339,17 @@ func buildGroups(in *inputs) map[string]*klitev1.EndpointGroup {
 			if !ok || inst.GetStatus().GetInstanceIp() == "" {
 				continue
 			}
+			node := inst.GetSpec().GetNode()
 			group.Endpoints = append(group.Endpoints, &klitev1.Endpoint{
-				Ip:     inst.GetStatus().GetInstanceIp(),
-				Port:   svc.GetSpec().GetTargetPort(),
-				Node:   inst.GetSpec().GetNode(),
-				Health: health,
+				Ip:             inst.GetStatus().GetInstanceIp(),
+				Port:           svc.GetSpec().GetTargetPort(),
+				Node:           node,
+				Health:         health,
+				IngressPort:    in.ingress[IngressAllocationName(name, inst.GetMeta().GetName())],
+				MachineAddress: in.advertise[node],
 			})
 		}
-		out[svc.GetMeta().GetName()] = group
+		out[name] = group
 	}
 	return out
 }

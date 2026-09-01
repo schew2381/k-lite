@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"sync"
 	"time"
 
@@ -54,6 +55,10 @@ type AgentConfig struct {
 	// InfraIPBase shifts donor addresses (10.44.0.<base+index>), the third
 	// per-cluster knob a coexisting cluster must move.
 	InfraIPBase int32
+	// IngressPortBase is the raw --ingress-port-base flag (0 means the
+	// default): the bottom of the per-node host ranges donors publish for
+	// cross-node mTLS ingress (ADR 0024).
+	IngressPortBase int32
 }
 
 // Agent serves AgentService, covering node registration, desired-state
@@ -108,6 +113,9 @@ func (a *Agent) Register(ctx context.Context, req *klitev1.RegisterRequest) (*kl
 		}
 		node.Status.LastHeartbeatUnix = time.Now().Unix()
 		node.Status.Phase = klitev1.NodePhase_NODE_PHASE_READY
+		if addr := advertiseIP(req.GetNode(), req.GetAdvertiseAddress()); addr != "" {
+			node.Status.AdvertiseAddress = addr
+		}
 		if _, err := a.cfg.Store.Put(ctx, obj, rev); err != nil {
 			if errors.Is(err, store.ErrConflict) {
 				continue
@@ -181,6 +189,10 @@ func (a *Agent) netBootstrap(idx int32) *klitev1.NetBootstrap {
 		ClusterId:          a.cfg.ClusterID,
 		NetAdminPortBase:   a.cfg.NetAdminPortBase,
 		EnvoyAdminPortBase: a.cfg.EnvoyAdminPortBase,
+		// Resolved rather than 0-means-default: the allocator and the donor
+		// must agree on the range, so only klited holds the default.
+		IngressPortBase:     controller.IngressPortBase(a.cfg.IngressPortBase),
+		IngressPortsPerNode: controller.IngressPortsPerNode,
 	}
 }
 
@@ -235,10 +247,24 @@ func (a *Agent) ReportStatus(ctx context.Context, req *klitev1.ReportStatusReque
 			slog.Warn("instance status update failed", "instance", u.GetName(), "err", err)
 		}
 	}
-	if err := a.stampNode(ctx, req.GetNode()); err != nil {
+	if err := a.stampNode(ctx, req.GetNode(), advertiseIP(req.GetNode(), req.GetAdvertiseAddress())); err != nil {
 		return nil, storeStatus(err)
 	}
 	return &klitev1.ReportStatusResponse{}, nil
+}
+
+// advertiseIP screens a reported advertise address down to a literal IP.
+// Endpoints carry it into EDS, and Envoy rejects hostnames there, so a bad
+// value is dropped loudly rather than poisoning every consumer's snapshot.
+func advertiseIP(node, addr string) string {
+	if addr == "" {
+		return ""
+	}
+	if _, err := netip.ParseAddr(addr); err != nil {
+		slog.Warn("ignoring non-IP advertise address", "node", node, "addr", addr)
+		return ""
+	}
+	return addr
 }
 
 // applyInstanceStatus CAS-writes one instance status, skipping vanished
@@ -290,7 +316,9 @@ func servingPhase(p klitev1.InstancePhase) bool {
 // stampNode records the heartbeat and marks the node READY. The node
 // controller reverses that once heartbeats stop. A DRAINING phase survives
 // heartbeats: the node controller flips it back once the drain completes.
-func (a *Agent) stampNode(ctx context.Context, name string) error {
+// A non-empty advertise address rides along (ADR 0024): agents resolve it
+// only after their donor exists, so it usually lands here, not at Register.
+func (a *Agent) stampNode(ctx context.Context, name, advertise string) error {
 	for range casRetries {
 		obj, rev, err := a.cfg.Store.Get(ctx, object.KindNode, name)
 		if err != nil {
@@ -305,11 +333,15 @@ func (a *Agent) stampNode(ctx context.Context, name string) error {
 			phase = klitev1.NodePhase_NODE_PHASE_DRAINING
 		}
 		now := time.Now().Unix()
-		if node.Status.LastHeartbeatUnix == now && node.Status.Phase == phase {
+		sameAdvertise := advertise == "" || node.Status.GetAdvertiseAddress() == advertise
+		if node.Status.LastHeartbeatUnix == now && node.Status.Phase == phase && sameAdvertise {
 			return nil
 		}
 		node.Status.LastHeartbeatUnix = now
 		node.Status.Phase = phase
+		if advertise != "" {
+			node.Status.AdvertiseAddress = advertise
+		}
 		if _, err := a.cfg.Store.Put(ctx, obj, rev); err != nil {
 			if errors.Is(err, store.ErrConflict) {
 				continue

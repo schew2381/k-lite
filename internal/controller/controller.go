@@ -21,7 +21,8 @@ const (
 
 // RunAll runs every controller until ctx ends. klited calls it while holding
 // leadership, so at most one set of controllers actuates at a time.
-func RunAll(ctx context.Context, st store.Store) {
+// ingressPortBase is the raw --ingress-port-base flag; zero means the default.
+func RunAll(ctx context.Context, st store.Store, ingressPortBase int32) {
 	loops := []struct {
 		name  string
 		kinds []string
@@ -31,6 +32,11 @@ func RunAll(ctx context.Context, st store.Store) {
 		{"scheduler", []string{object.KindInstance, object.KindNode, object.KindWorkload}, (&scheduler{st: st}).reconcile},
 		{"node", []string{object.KindNode, object.KindInstance}, (&nodeController{st: st, now: time.Now}).reconcile},
 		{"vip", []string{object.KindService, object.KindNode, object.KindVIPAllocation}, (&vipController{st: st}).reconcile},
+		{
+			"ingress",
+			[]string{object.KindService, object.KindInstance, object.KindNode, object.KindIngressAllocation},
+			(&ingressController{st: st, base: IngressPortBase(ingressPortBase)}).reconcile,
+		},
 	}
 	var wg sync.WaitGroup
 	for _, l := range loops {
