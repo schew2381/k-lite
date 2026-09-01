@@ -105,7 +105,7 @@ func TestDrainStreamsProgress(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := newDrainStream(ctx)
-	s := NewCluster(st, NewCommandHub())
+	s := NewCluster(st, NewCommandHub(), nil)
 	done := make(chan error, 1)
 	go func() { done <- s.Drain(&klitev1.DrainRequest{Node: "node-2"}, stream) }()
 
@@ -152,7 +152,7 @@ func TestDrainForceDeletesDrainingInstances(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := newDrainStream(ctx)
-	s := NewCluster(st, NewCommandHub())
+	s := NewCluster(st, NewCommandHub(), nil)
 	done := make(chan error, 1)
 	go func() { done <- s.Drain(&klitev1.DrainRequest{Node: "node-2", Force: true}, stream) }()
 
@@ -181,7 +181,7 @@ func TestDrainNarratesCapacityFallback(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stream := newDrainStream(ctx)
-	s := NewCluster(st, NewCommandHub())
+	s := NewCluster(st, NewCommandHub(), nil)
 	done := make(chan error, 1)
 	go func() { done <- s.Drain(&klitev1.DrainRequest{Node: "node-2"}, stream) }()
 	defer func() {

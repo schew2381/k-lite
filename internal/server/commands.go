@@ -150,8 +150,11 @@ func (a *Agent) StreamCommands(req *klitev1.StreamCommandsRequest, stream grpc.S
 	if node == "" {
 		return status.Error(codes.InvalidArgument, "node name is required")
 	}
-	cs := a.hub.attach(node)
-	defer a.hub.detach(node, cs)
+	if err := requireNodeMatch(stream.Context(), node); err != nil {
+		return err
+	}
+	cs := a.cfg.Hub.attach(node)
+	defer a.cfg.Hub.detach(node, cs)
 	ctx := stream.Context()
 	for {
 		select {
@@ -180,7 +183,7 @@ func (a *Agent) PushCommandOutput(stream grpc.ClientStreamingServer[klitev1.Comm
 		out, err := stream.Recv()
 		if err != nil {
 			if id != "" && !sawEOF {
-				a.hub.route(ctx.Done(), &klitev1.CommandOutput{
+				a.cfg.Hub.route(ctx.Done(), &klitev1.CommandOutput{
 					CommandId: id,
 					Data:      []byte("log stream from agent broke: " + err.Error() + "\n"),
 					Eof:       true,
@@ -193,7 +196,7 @@ func (a *Agent) PushCommandOutput(stream grpc.ClientStreamingServer[klitev1.Comm
 		}
 		id = out.GetCommandId()
 		sawEOF = out.GetEof()
-		if !a.hub.route(ctx.Done(), out) {
+		if !a.cfg.Hub.route(ctx.Done(), out) {
 			return status.Errorf(codes.NotFound, "command %s has no waiter on this server", out.GetCommandId())
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/schew2381/k-lite/internal/ca"
 	klitev1 "github.com/schew2381/k-lite/internal/gen/klitev1"
 	"github.com/schew2381/k-lite/internal/object"
 	"github.com/schew2381/k-lite/internal/store"
@@ -21,17 +22,76 @@ import (
 // concurrent writer to the same object, so one retry usually settles it.
 const casRetries = 5
 
+// TokenConfig is what NodeToken needs to mint join tokens: the CA PEM whose
+// hash the token pins, and the cluster secret it carries (ADR 0013).
+type TokenConfig struct {
+	CAPEM         []byte
+	ClusterSecret string
+}
+
 // Cluster serves ClusterService straight off the store, keeping klited
 // stateless (ADR 0005). The one exception is hub, which holds live agent
 // streams for log relaying and evaporates with the process.
 type Cluster struct {
 	klitev1.UnimplementedClusterServiceServer
-	store store.Store
-	hub   *CommandHub
+	store  store.Store
+	hub    *CommandHub
+	tokens *TokenConfig
 }
 
-func NewCluster(st store.Store, hub *CommandHub) *Cluster {
-	return &Cluster{store: st, hub: hub}
+// NewCluster returns the ClusterService. tokens may be nil in tests, which
+// leaves NodeToken unimplemented.
+func NewCluster(st store.Store, hub *CommandHub, tokens *TokenConfig) *Cluster {
+	return &Cluster{store: st, hub: hub, tokens: tokens}
+}
+
+// NodeToken mints a join token for `klite node token`. The token embeds the
+// CA hash, so agents can pin the server on their first, unverified dial.
+func (s *Cluster) NodeToken(context.Context, *klitev1.NodeTokenRequest) (*klitev1.NodeTokenResponse, error) {
+	if s.tokens == nil {
+		return nil, status.Error(codes.Unimplemented, "this server mints no join tokens (started without a CA)")
+	}
+	return &klitev1.NodeTokenResponse{Token: ca.MintToken(s.tokens.CAPEM, s.tokens.ClusterSecret)}, nil
+}
+
+// Uncordon clears a node's unschedulable flag, set earlier by a drain. A node
+// whose deletion is pending stays cordoned: the delete choreography owns it
+// (ADR 0010, 0023).
+func (s *Cluster) Uncordon(ctx context.Context, req *klitev1.UncordonRequest) (*klitev1.UncordonResponse, error) {
+	name := req.GetNode()
+	if name == "" {
+		return nil, status.Error(codes.InvalidArgument, "node name is required")
+	}
+	for range casRetries {
+		obj, rev, err := s.store.Get(ctx, object.KindNode, name)
+		if err != nil {
+			return nil, storeStatus(err)
+		}
+		if object.MetaOf(obj).GetLabels()[object.LabelPendingDelete] == "true" {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"node %q is pending delete; re-apply its YAML to cancel the delete instead", name)
+		}
+		node := obj.GetNode()
+		if node.Status == nil {
+			node.Status = &klitev1.NodeStatus{}
+		}
+		if !node.Status.GetUnschedulable() && node.Status.GetPhase() != klitev1.NodePhase_NODE_PHASE_DRAINING {
+			return &klitev1.UncordonResponse{}, nil
+		}
+		node.Status.Unschedulable = false
+		if node.Status.GetPhase() == klitev1.NodePhase_NODE_PHASE_DRAINING {
+			node.Status.Phase = klitev1.NodePhase_NODE_PHASE_READY
+		}
+		if _, err := s.store.Put(ctx, obj, rev); err != nil {
+			if errors.Is(err, store.ErrConflict) {
+				continue
+			}
+			return nil, storeStatus(err)
+		}
+		slog.Info("node uncordoned", "node", name)
+		return &klitev1.UncordonResponse{}, nil
+	}
+	return nil, status.Error(codes.Aborted, "kept losing revision races, try again")
 }
 
 func (s *Cluster) Apply(ctx context.Context, req *klitev1.ApplyRequest) (*klitev1.ApplyResponse, error) {

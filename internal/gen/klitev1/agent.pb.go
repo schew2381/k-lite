@@ -73,8 +73,8 @@ func (EndpointHealth) EnumDescriptor() ([]byte, []int) {
 type RegisterRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Node          string                 `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
-	ClusterToken  string                 `protobuf:"bytes,2,opt,name=cluster_token,json=clusterToken,proto3" json:"cluster_token,omitempty"`
-	CsrPem        []byte                 `protobuf:"bytes,3,opt,name=csr_pem,json=csrPem,proto3" json:"csr_pem,omitempty"` // empty until mTLS lands (ADR 0013, M8)
+	ClusterToken  string                 `protobuf:"bytes,2,opt,name=cluster_token,json=clusterToken,proto3" json:"cluster_token,omitempty"` // join secret; optional when the caller holds a node cert
+	CsrPem        []byte                 `protobuf:"bytes,3,opt,name=csr_pem,json=csrPem,proto3" json:"csr_pem,omitempty"`                   // join CSR; the response returns it signed (ADR 0013)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -131,13 +131,19 @@ func (x *RegisterRequest) GetCsrPem() []byte {
 }
 
 type NetBootstrap struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Subnet        string                 `protobuf:"bytes,1,opt,name=subnet,proto3" json:"subnet,omitempty"`                             // 10.44.0.0/16
-	KliteNetIp    string                 `protobuf:"bytes,2,opt,name=klite_net_ip,json=kliteNetIp,proto3" json:"klite_net_ip,omitempty"` // 10.44.0.10 + node_index
-	VipRange      string                 `protobuf:"bytes,3,opt,name=vip_range,json=vipRange,proto3" json:"vip_range,omitempty"`         // 10.44.64.0/18
-	NodeIndex     int32                  `protobuf:"varint,4,opt,name=node_index,json=nodeIndex,proto3" json:"node_index,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Subnet     string                 `protobuf:"bytes,1,opt,name=subnet,proto3" json:"subnet,omitempty"`                             // 10.44.0.0/16
+	KliteNetIp string                 `protobuf:"bytes,2,opt,name=klite_net_ip,json=kliteNetIp,proto3" json:"klite_net_ip,omitempty"` // 10.44.0.10 + node_index
+	VipRange   string                 `protobuf:"bytes,3,opt,name=vip_range,json=vipRange,proto3" json:"vip_range,omitempty"`         // 10.44.64.0/18
+	NodeIndex  int32                  `protobuf:"varint,4,opt,name=node_index,json=nodeIndex,proto3" json:"node_index,omitempty"`
+	// Cluster identity and per-cluster host-port bases (M8). Infra containers
+	// carry cluster_id as a label so one cluster never evicts another's donors,
+	// and the bases keep two deliberate clusters off each other's admin ports.
+	ClusterId          string `protobuf:"bytes,5,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
+	NetAdminPortBase   int32  `protobuf:"varint,6,opt,name=net_admin_port_base,json=netAdminPortBase,proto3" json:"net_admin_port_base,omitempty"`       // 0 means the 19000 default
+	EnvoyAdminPortBase int32  `protobuf:"varint,7,opt,name=envoy_admin_port_base,json=envoyAdminPortBase,proto3" json:"envoy_admin_port_base,omitempty"` // 0 means the 19500 default
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *NetBootstrap) Reset() {
@@ -194,6 +200,27 @@ func (x *NetBootstrap) GetVipRange() string {
 func (x *NetBootstrap) GetNodeIndex() int32 {
 	if x != nil {
 		return x.NodeIndex
+	}
+	return 0
+}
+
+func (x *NetBootstrap) GetClusterId() string {
+	if x != nil {
+		return x.ClusterId
+	}
+	return ""
+}
+
+func (x *NetBootstrap) GetNetAdminPortBase() int32 {
+	if x != nil {
+		return x.NetAdminPortBase
+	}
+	return 0
+}
+
+func (x *NetBootstrap) GetEnvoyAdminPortBase() int32 {
+	if x != nil {
+		return x.EnvoyAdminPortBase
 	}
 	return 0
 }
@@ -1334,14 +1361,18 @@ const file_klite_v1_agent_proto_rawDesc = "" +
 	"\x0fRegisterRequest\x12\x12\n" +
 	"\x04node\x18\x01 \x01(\tR\x04node\x12#\n" +
 	"\rcluster_token\x18\x02 \x01(\tR\fclusterToken\x12\x17\n" +
-	"\acsr_pem\x18\x03 \x01(\fR\x06csrPem\"\x84\x01\n" +
+	"\acsr_pem\x18\x03 \x01(\fR\x06csrPem\"\x85\x02\n" +
 	"\fNetBootstrap\x12\x16\n" +
 	"\x06subnet\x18\x01 \x01(\tR\x06subnet\x12 \n" +
 	"\fklite_net_ip\x18\x02 \x01(\tR\n" +
 	"kliteNetIp\x12\x1b\n" +
 	"\tvip_range\x18\x03 \x01(\tR\bvipRange\x12\x1d\n" +
 	"\n" +
-	"node_index\x18\x04 \x01(\x05R\tnodeIndex\"\x8d\x01\n" +
+	"node_index\x18\x04 \x01(\x05R\tnodeIndex\x12\x1d\n" +
+	"\n" +
+	"cluster_id\x18\x05 \x01(\tR\tclusterId\x12-\n" +
+	"\x13net_admin_port_base\x18\x06 \x01(\x05R\x10netAdminPortBase\x121\n" +
+	"\x15envoy_admin_port_base\x18\a \x01(\x05R\x12envoyAdminPortBase\"\x8d\x01\n" +
 	"\x10RegisterResponse\x12\x1d\n" +
 	"\n" +
 	"node_token\x18\x01 \x01(\tR\tnodeToken\x12\x19\n" +

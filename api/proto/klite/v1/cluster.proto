@@ -14,6 +14,7 @@ service ClusterService {
   rpc Watch(WatchRequest) returns (stream WatchEvent);
   rpc Scale(ScaleRequest) returns (ScaleResponse);
   rpc Drain(DrainRequest) returns (stream DrainProgress);
+  rpc Uncordon(UncordonRequest) returns (UncordonResponse);
   rpc Logs(LogsRequest) returns (stream LogChunk);
   rpc PolicyCheck(PolicyCheckRequest) returns (PolicyCheckResponse);
   rpc NodeToken(NodeTokenRequest) returns (NodeTokenResponse);
@@ -88,6 +89,12 @@ message DrainProgress {
   string message = 1;
   bool done = 2;
 }
+
+message UncordonRequest {
+  string node = 1;
+}
+
+message UncordonResponse {}
 
 message LogsRequest {
   string instance = 1;

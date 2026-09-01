@@ -25,6 +25,7 @@ const (
 	ClusterService_Watch_FullMethodName       = "/klite.v1.ClusterService/Watch"
 	ClusterService_Scale_FullMethodName       = "/klite.v1.ClusterService/Scale"
 	ClusterService_Drain_FullMethodName       = "/klite.v1.ClusterService/Drain"
+	ClusterService_Uncordon_FullMethodName    = "/klite.v1.ClusterService/Uncordon"
 	ClusterService_Logs_FullMethodName        = "/klite.v1.ClusterService/Logs"
 	ClusterService_PolicyCheck_FullMethodName = "/klite.v1.ClusterService/PolicyCheck"
 	ClusterService_NodeToken_FullMethodName   = "/klite.v1.ClusterService/NodeToken"
@@ -42,6 +43,7 @@ type ClusterServiceClient interface {
 	Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchEvent], error)
 	Scale(ctx context.Context, in *ScaleRequest, opts ...grpc.CallOption) (*ScaleResponse, error)
 	Drain(ctx context.Context, in *DrainRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[DrainProgress], error)
+	Uncordon(ctx context.Context, in *UncordonRequest, opts ...grpc.CallOption) (*UncordonResponse, error)
 	Logs(ctx context.Context, in *LogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogChunk], error)
 	PolicyCheck(ctx context.Context, in *PolicyCheckRequest, opts ...grpc.CallOption) (*PolicyCheckResponse, error)
 	NodeToken(ctx context.Context, in *NodeTokenRequest, opts ...grpc.CallOption) (*NodeTokenResponse, error)
@@ -133,6 +135,16 @@ func (c *clusterServiceClient) Drain(ctx context.Context, in *DrainRequest, opts
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ClusterService_DrainClient = grpc.ServerStreamingClient[DrainProgress]
 
+func (c *clusterServiceClient) Uncordon(ctx context.Context, in *UncordonRequest, opts ...grpc.CallOption) (*UncordonResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UncordonResponse)
+	err := c.cc.Invoke(ctx, ClusterService_Uncordon_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *clusterServiceClient) Logs(ctx context.Context, in *LogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogChunk], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &ClusterService_ServiceDesc.Streams[2], ClusterService_Logs_FullMethodName, cOpts...)
@@ -184,6 +196,7 @@ type ClusterServiceServer interface {
 	Watch(*WatchRequest, grpc.ServerStreamingServer[WatchEvent]) error
 	Scale(context.Context, *ScaleRequest) (*ScaleResponse, error)
 	Drain(*DrainRequest, grpc.ServerStreamingServer[DrainProgress]) error
+	Uncordon(context.Context, *UncordonRequest) (*UncordonResponse, error)
 	Logs(*LogsRequest, grpc.ServerStreamingServer[LogChunk]) error
 	PolicyCheck(context.Context, *PolicyCheckRequest) (*PolicyCheckResponse, error)
 	NodeToken(context.Context, *NodeTokenRequest) (*NodeTokenResponse, error)
@@ -214,6 +227,9 @@ func (UnimplementedClusterServiceServer) Scale(context.Context, *ScaleRequest) (
 }
 func (UnimplementedClusterServiceServer) Drain(*DrainRequest, grpc.ServerStreamingServer[DrainProgress]) error {
 	return status.Error(codes.Unimplemented, "method Drain not implemented")
+}
+func (UnimplementedClusterServiceServer) Uncordon(context.Context, *UncordonRequest) (*UncordonResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Uncordon not implemented")
 }
 func (UnimplementedClusterServiceServer) Logs(*LogsRequest, grpc.ServerStreamingServer[LogChunk]) error {
 	return status.Error(codes.Unimplemented, "method Logs not implemented")
@@ -339,6 +355,24 @@ func _ClusterService_Drain_Handler(srv interface{}, stream grpc.ServerStream) er
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ClusterService_DrainServer = grpc.ServerStreamingServer[DrainProgress]
 
+func _ClusterService_Uncordon_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UncordonRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterServiceServer).Uncordon(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClusterService_Uncordon_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterServiceServer).Uncordon(ctx, req.(*UncordonRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ClusterService_Logs_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(LogsRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -408,6 +442,10 @@ var ClusterService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Scale",
 			Handler:    _ClusterService_Scale_Handler,
+		},
+		{
+			MethodName: "Uncordon",
+			Handler:    _ClusterService_Uncordon_Handler,
 		},
 		{
 			MethodName: "PolicyCheck",

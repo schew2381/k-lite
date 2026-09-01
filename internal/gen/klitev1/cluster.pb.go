@@ -734,6 +734,86 @@ func (x *DrainProgress) GetDone() bool {
 	return false
 }
 
+type UncordonRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Node          string                 `protobuf:"bytes,1,opt,name=node,proto3" json:"node,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UncordonRequest) Reset() {
+	*x = UncordonRequest{}
+	mi := &file_klite_v1_cluster_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UncordonRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UncordonRequest) ProtoMessage() {}
+
+func (x *UncordonRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_klite_v1_cluster_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UncordonRequest.ProtoReflect.Descriptor instead.
+func (*UncordonRequest) Descriptor() ([]byte, []int) {
+	return file_klite_v1_cluster_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *UncordonRequest) GetNode() string {
+	if x != nil {
+		return x.Node
+	}
+	return ""
+}
+
+type UncordonResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UncordonResponse) Reset() {
+	*x = UncordonResponse{}
+	mi := &file_klite_v1_cluster_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UncordonResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UncordonResponse) ProtoMessage() {}
+
+func (x *UncordonResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_klite_v1_cluster_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UncordonResponse.ProtoReflect.Descriptor instead.
+func (*UncordonResponse) Descriptor() ([]byte, []int) {
+	return file_klite_v1_cluster_proto_rawDescGZIP(), []int{14}
+}
+
 type LogsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Instance      string                 `protobuf:"bytes,1,opt,name=instance,proto3" json:"instance,omitempty"`
@@ -745,7 +825,7 @@ type LogsRequest struct {
 
 func (x *LogsRequest) Reset() {
 	*x = LogsRequest{}
-	mi := &file_klite_v1_cluster_proto_msgTypes[13]
+	mi := &file_klite_v1_cluster_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -757,7 +837,7 @@ func (x *LogsRequest) String() string {
 func (*LogsRequest) ProtoMessage() {}
 
 func (x *LogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_cluster_proto_msgTypes[13]
+	mi := &file_klite_v1_cluster_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -770,7 +850,7 @@ func (x *LogsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogsRequest.ProtoReflect.Descriptor instead.
 func (*LogsRequest) Descriptor() ([]byte, []int) {
-	return file_klite_v1_cluster_proto_rawDescGZIP(), []int{13}
+	return file_klite_v1_cluster_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *LogsRequest) GetInstance() string {
@@ -803,7 +883,7 @@ type LogChunk struct {
 
 func (x *LogChunk) Reset() {
 	*x = LogChunk{}
-	mi := &file_klite_v1_cluster_proto_msgTypes[14]
+	mi := &file_klite_v1_cluster_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -815,7 +895,7 @@ func (x *LogChunk) String() string {
 func (*LogChunk) ProtoMessage() {}
 
 func (x *LogChunk) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_cluster_proto_msgTypes[14]
+	mi := &file_klite_v1_cluster_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -828,7 +908,7 @@ func (x *LogChunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogChunk.ProtoReflect.Descriptor instead.
 func (*LogChunk) Descriptor() ([]byte, []int) {
-	return file_klite_v1_cluster_proto_rawDescGZIP(), []int{14}
+	return file_klite_v1_cluster_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *LogChunk) GetData() []byte {
@@ -848,7 +928,7 @@ type PolicyCheckRequest struct {
 
 func (x *PolicyCheckRequest) Reset() {
 	*x = PolicyCheckRequest{}
-	mi := &file_klite_v1_cluster_proto_msgTypes[15]
+	mi := &file_klite_v1_cluster_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -860,7 +940,7 @@ func (x *PolicyCheckRequest) String() string {
 func (*PolicyCheckRequest) ProtoMessage() {}
 
 func (x *PolicyCheckRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_cluster_proto_msgTypes[15]
+	mi := &file_klite_v1_cluster_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -873,7 +953,7 @@ func (x *PolicyCheckRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyCheckRequest.ProtoReflect.Descriptor instead.
 func (*PolicyCheckRequest) Descriptor() ([]byte, []int) {
-	return file_klite_v1_cluster_proto_rawDescGZIP(), []int{15}
+	return file_klite_v1_cluster_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *PolicyCheckRequest) GetFrom() string {
@@ -901,7 +981,7 @@ type PolicyCheckResponse struct {
 
 func (x *PolicyCheckResponse) Reset() {
 	*x = PolicyCheckResponse{}
-	mi := &file_klite_v1_cluster_proto_msgTypes[16]
+	mi := &file_klite_v1_cluster_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -913,7 +993,7 @@ func (x *PolicyCheckResponse) String() string {
 func (*PolicyCheckResponse) ProtoMessage() {}
 
 func (x *PolicyCheckResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_cluster_proto_msgTypes[16]
+	mi := &file_klite_v1_cluster_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -926,7 +1006,7 @@ func (x *PolicyCheckResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PolicyCheckResponse.ProtoReflect.Descriptor instead.
 func (*PolicyCheckResponse) Descriptor() ([]byte, []int) {
-	return file_klite_v1_cluster_proto_rawDescGZIP(), []int{16}
+	return file_klite_v1_cluster_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *PolicyCheckResponse) GetAllowed() bool {
@@ -958,7 +1038,7 @@ type NodeTokenRequest struct {
 
 func (x *NodeTokenRequest) Reset() {
 	*x = NodeTokenRequest{}
-	mi := &file_klite_v1_cluster_proto_msgTypes[17]
+	mi := &file_klite_v1_cluster_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -970,7 +1050,7 @@ func (x *NodeTokenRequest) String() string {
 func (*NodeTokenRequest) ProtoMessage() {}
 
 func (x *NodeTokenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_cluster_proto_msgTypes[17]
+	mi := &file_klite_v1_cluster_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -983,7 +1063,7 @@ func (x *NodeTokenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeTokenRequest.ProtoReflect.Descriptor instead.
 func (*NodeTokenRequest) Descriptor() ([]byte, []int) {
-	return file_klite_v1_cluster_proto_rawDescGZIP(), []int{17}
+	return file_klite_v1_cluster_proto_rawDescGZIP(), []int{19}
 }
 
 type NodeTokenResponse struct {
@@ -995,7 +1075,7 @@ type NodeTokenResponse struct {
 
 func (x *NodeTokenResponse) Reset() {
 	*x = NodeTokenResponse{}
-	mi := &file_klite_v1_cluster_proto_msgTypes[18]
+	mi := &file_klite_v1_cluster_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1007,7 +1087,7 @@ func (x *NodeTokenResponse) String() string {
 func (*NodeTokenResponse) ProtoMessage() {}
 
 func (x *NodeTokenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_klite_v1_cluster_proto_msgTypes[18]
+	mi := &file_klite_v1_cluster_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1020,7 +1100,7 @@ func (x *NodeTokenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeTokenResponse.ProtoReflect.Descriptor instead.
 func (*NodeTokenResponse) Descriptor() ([]byte, []int) {
-	return file_klite_v1_cluster_proto_rawDescGZIP(), []int{18}
+	return file_klite_v1_cluster_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *NodeTokenResponse) GetToken() string {
@@ -1072,7 +1152,10 @@ const file_klite_v1_cluster_proto_rawDesc = "" +
 	"\x05force\x18\x02 \x01(\bR\x05force\"=\n" +
 	"\rDrainProgress\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\x12\x12\n" +
-	"\x04done\x18\x02 \x01(\bR\x04done\"U\n" +
+	"\x04done\x18\x02 \x01(\bR\x04done\"%\n" +
+	"\x0fUncordonRequest\x12\x12\n" +
+	"\x04node\x18\x01 \x01(\tR\x04node\"\x12\n" +
+	"\x10UncordonResponse\"U\n" +
 	"\vLogsRequest\x12\x1a\n" +
 	"\binstance\x18\x01 \x01(\tR\binstance\x12\x16\n" +
 	"\x06follow\x18\x02 \x01(\bR\x06follow\x12\x12\n" +
@@ -1093,14 +1176,15 @@ const file_klite_v1_cluster_proto_rawDesc = "" +
 	"\x16EVENT_TYPE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10EVENT_TYPE_ADDED\x10\x01\x12\x17\n" +
 	"\x13EVENT_TYPE_MODIFIED\x10\x02\x12\x16\n" +
-	"\x12EVENT_TYPE_DELETED\x10\x032\xb4\x04\n" +
+	"\x12EVENT_TYPE_DELETED\x10\x032\xf7\x04\n" +
 	"\x0eClusterService\x128\n" +
 	"\x05Apply\x12\x16.klite.v1.ApplyRequest\x1a\x17.klite.v1.ApplyResponse\x125\n" +
 	"\x04List\x12\x15.klite.v1.ListRequest\x1a\x16.klite.v1.ListResponse\x12;\n" +
 	"\x06Delete\x12\x17.klite.v1.DeleteRequest\x1a\x18.klite.v1.DeleteResponse\x127\n" +
 	"\x05Watch\x12\x16.klite.v1.WatchRequest\x1a\x14.klite.v1.WatchEvent0\x01\x128\n" +
 	"\x05Scale\x12\x16.klite.v1.ScaleRequest\x1a\x17.klite.v1.ScaleResponse\x12:\n" +
-	"\x05Drain\x12\x16.klite.v1.DrainRequest\x1a\x17.klite.v1.DrainProgress0\x01\x123\n" +
+	"\x05Drain\x12\x16.klite.v1.DrainRequest\x1a\x17.klite.v1.DrainProgress0\x01\x12A\n" +
+	"\bUncordon\x12\x19.klite.v1.UncordonRequest\x1a\x1a.klite.v1.UncordonResponse\x123\n" +
 	"\x04Logs\x12\x15.klite.v1.LogsRequest\x1a\x12.klite.v1.LogChunk0\x01\x12J\n" +
 	"\vPolicyCheck\x12\x1c.klite.v1.PolicyCheckRequest\x1a\x1d.klite.v1.PolicyCheckResponse\x12D\n" +
 	"\tNodeToken\x12\x1a.klite.v1.NodeTokenRequest\x1a\x1b.klite.v1.NodeTokenResponseB:Z8github.com/schew2381/k-lite/internal/gen/klitev1;klitev1b\x06proto3"
@@ -1118,7 +1202,7 @@ func file_klite_v1_cluster_proto_rawDescGZIP() []byte {
 }
 
 var file_klite_v1_cluster_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_klite_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_klite_v1_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_klite_v1_cluster_proto_goTypes = []any{
 	(EventType)(0),              // 0: klite.v1.EventType
 	(*ApplyRequest)(nil),        // 1: klite.v1.ApplyRequest
@@ -1134,40 +1218,44 @@ var file_klite_v1_cluster_proto_goTypes = []any{
 	(*ScaleResponse)(nil),       // 11: klite.v1.ScaleResponse
 	(*DrainRequest)(nil),        // 12: klite.v1.DrainRequest
 	(*DrainProgress)(nil),       // 13: klite.v1.DrainProgress
-	(*LogsRequest)(nil),         // 14: klite.v1.LogsRequest
-	(*LogChunk)(nil),            // 15: klite.v1.LogChunk
-	(*PolicyCheckRequest)(nil),  // 16: klite.v1.PolicyCheckRequest
-	(*PolicyCheckResponse)(nil), // 17: klite.v1.PolicyCheckResponse
-	(*NodeTokenRequest)(nil),    // 18: klite.v1.NodeTokenRequest
-	(*NodeTokenResponse)(nil),   // 19: klite.v1.NodeTokenResponse
-	(*Object)(nil),              // 20: klite.v1.Object
+	(*UncordonRequest)(nil),     // 14: klite.v1.UncordonRequest
+	(*UncordonResponse)(nil),    // 15: klite.v1.UncordonResponse
+	(*LogsRequest)(nil),         // 16: klite.v1.LogsRequest
+	(*LogChunk)(nil),            // 17: klite.v1.LogChunk
+	(*PolicyCheckRequest)(nil),  // 18: klite.v1.PolicyCheckRequest
+	(*PolicyCheckResponse)(nil), // 19: klite.v1.PolicyCheckResponse
+	(*NodeTokenRequest)(nil),    // 20: klite.v1.NodeTokenRequest
+	(*NodeTokenResponse)(nil),   // 21: klite.v1.NodeTokenResponse
+	(*Object)(nil),              // 22: klite.v1.Object
 }
 var file_klite_v1_cluster_proto_depIdxs = []int32{
 	2,  // 0: klite.v1.ApplyResponse.results:type_name -> klite.v1.ApplyResult
-	20, // 1: klite.v1.ListResponse.objects:type_name -> klite.v1.Object
+	22, // 1: klite.v1.ListResponse.objects:type_name -> klite.v1.Object
 	2,  // 2: klite.v1.DeleteResponse.results:type_name -> klite.v1.ApplyResult
 	0,  // 3: klite.v1.WatchEvent.type:type_name -> klite.v1.EventType
-	20, // 4: klite.v1.WatchEvent.object:type_name -> klite.v1.Object
+	22, // 4: klite.v1.WatchEvent.object:type_name -> klite.v1.Object
 	1,  // 5: klite.v1.ClusterService.Apply:input_type -> klite.v1.ApplyRequest
 	4,  // 6: klite.v1.ClusterService.List:input_type -> klite.v1.ListRequest
 	6,  // 7: klite.v1.ClusterService.Delete:input_type -> klite.v1.DeleteRequest
 	8,  // 8: klite.v1.ClusterService.Watch:input_type -> klite.v1.WatchRequest
 	10, // 9: klite.v1.ClusterService.Scale:input_type -> klite.v1.ScaleRequest
 	12, // 10: klite.v1.ClusterService.Drain:input_type -> klite.v1.DrainRequest
-	14, // 11: klite.v1.ClusterService.Logs:input_type -> klite.v1.LogsRequest
-	16, // 12: klite.v1.ClusterService.PolicyCheck:input_type -> klite.v1.PolicyCheckRequest
-	18, // 13: klite.v1.ClusterService.NodeToken:input_type -> klite.v1.NodeTokenRequest
-	3,  // 14: klite.v1.ClusterService.Apply:output_type -> klite.v1.ApplyResponse
-	5,  // 15: klite.v1.ClusterService.List:output_type -> klite.v1.ListResponse
-	7,  // 16: klite.v1.ClusterService.Delete:output_type -> klite.v1.DeleteResponse
-	9,  // 17: klite.v1.ClusterService.Watch:output_type -> klite.v1.WatchEvent
-	11, // 18: klite.v1.ClusterService.Scale:output_type -> klite.v1.ScaleResponse
-	13, // 19: klite.v1.ClusterService.Drain:output_type -> klite.v1.DrainProgress
-	15, // 20: klite.v1.ClusterService.Logs:output_type -> klite.v1.LogChunk
-	17, // 21: klite.v1.ClusterService.PolicyCheck:output_type -> klite.v1.PolicyCheckResponse
-	19, // 22: klite.v1.ClusterService.NodeToken:output_type -> klite.v1.NodeTokenResponse
-	14, // [14:23] is the sub-list for method output_type
-	5,  // [5:14] is the sub-list for method input_type
+	14, // 11: klite.v1.ClusterService.Uncordon:input_type -> klite.v1.UncordonRequest
+	16, // 12: klite.v1.ClusterService.Logs:input_type -> klite.v1.LogsRequest
+	18, // 13: klite.v1.ClusterService.PolicyCheck:input_type -> klite.v1.PolicyCheckRequest
+	20, // 14: klite.v1.ClusterService.NodeToken:input_type -> klite.v1.NodeTokenRequest
+	3,  // 15: klite.v1.ClusterService.Apply:output_type -> klite.v1.ApplyResponse
+	5,  // 16: klite.v1.ClusterService.List:output_type -> klite.v1.ListResponse
+	7,  // 17: klite.v1.ClusterService.Delete:output_type -> klite.v1.DeleteResponse
+	9,  // 18: klite.v1.ClusterService.Watch:output_type -> klite.v1.WatchEvent
+	11, // 19: klite.v1.ClusterService.Scale:output_type -> klite.v1.ScaleResponse
+	13, // 20: klite.v1.ClusterService.Drain:output_type -> klite.v1.DrainProgress
+	15, // 21: klite.v1.ClusterService.Uncordon:output_type -> klite.v1.UncordonResponse
+	17, // 22: klite.v1.ClusterService.Logs:output_type -> klite.v1.LogChunk
+	19, // 23: klite.v1.ClusterService.PolicyCheck:output_type -> klite.v1.PolicyCheckResponse
+	21, // 24: klite.v1.ClusterService.NodeToken:output_type -> klite.v1.NodeTokenResponse
+	15, // [15:25] is the sub-list for method output_type
+	5,  // [5:15] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -1185,7 +1273,7 @@ func file_klite_v1_cluster_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_klite_v1_cluster_proto_rawDesc), len(file_klite_v1_cluster_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   19,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

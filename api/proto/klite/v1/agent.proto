@@ -17,8 +17,8 @@ service AgentService {
 
 message RegisterRequest {
   string node = 1;
-  string cluster_token = 2;
-  bytes csr_pem = 3; // empty until mTLS lands (ADR 0013, M8)
+  string cluster_token = 2; // join secret; optional when the caller holds a node cert
+  bytes csr_pem = 3; // join CSR; the response returns it signed (ADR 0013)
 }
 
 message NetBootstrap {
@@ -26,6 +26,12 @@ message NetBootstrap {
   string klite_net_ip = 2; // 10.44.0.10 + node_index
   string vip_range = 3; // 10.44.64.0/18
   int32 node_index = 4;
+  // Cluster identity and per-cluster host-port bases (M8). Infra containers
+  // carry cluster_id as a label so one cluster never evicts another's donors,
+  // and the bases keep two deliberate clusters off each other's admin ports.
+  string cluster_id = 5;
+  int32 net_admin_port_base = 6; // 0 means the 19000 default
+  int32 envoy_admin_port_base = 7; // 0 means the 19500 default
 }
 
 message RegisterResponse {

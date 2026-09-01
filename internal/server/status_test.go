@@ -21,7 +21,7 @@ func TestApplyInstanceStatusKeepsDraining(t *testing.T) {
 		t.Fatal(err)
 	}
 	uid := obj.GetInstance().GetMeta().GetUid()
-	a := NewAgent(st, "tok", NewCommandHub(), nil)
+	a := NewAgent(&AgentConfig{Store: st, ClusterToken: "tok", Hub: NewCommandHub()})
 
 	update := func(phase klitev1.InstancePhase) *klitev1.InstanceStatusUpdate {
 		return &klitev1.InstanceStatusUpdate{
@@ -55,7 +55,7 @@ func TestStampNodePreservesDraining(t *testing.T) {
 	st := storetest.New()
 	ctx := context.Background()
 	seedNode(t, st, "node-2", klitev1.NodePhase_NODE_PHASE_DRAINING)
-	a := NewAgent(st, "tok", NewCommandHub(), nil)
+	a := NewAgent(&AgentConfig{Store: st, ClusterToken: "tok", Hub: NewCommandHub()})
 
 	if err := a.stampNode(ctx, "node-2"); err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestDeleteNodeDrainsFirst(t *testing.T) {
 	st := storetest.New()
 	ctx := context.Background()
 	seedNode(t, st, "node-2", klitev1.NodePhase_NODE_PHASE_READY)
-	s := NewCluster(st, NewCommandHub())
+	s := NewCluster(st, NewCommandHub(), nil)
 
 	resp, err := s.Delete(ctx, &klitev1.DeleteRequest{Kind: "node", Name: "node-2"})
 	if err != nil {
