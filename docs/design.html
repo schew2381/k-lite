@@ -165,13 +165,15 @@ ul.plain li{margin:4px 0;font-size:14px;color:#3c3b33}
 /* numbered join steps */
 ol.steps{list-style:none;counter-reset:step;margin:18px 0 0;padding:0;background:var(--card);
   border:1.5px solid var(--ink);border-radius:10px;box-shadow:2px 2px 0 rgba(43,42,36,.16);overflow:hidden}
-ol.steps li{counter-increment:step;display:flex;gap:14px;padding:10px 16px;border-bottom:1px solid var(--board-edge);
+ol.steps > li{counter-increment:step;display:flex;gap:14px;padding:10px 16px;border-bottom:1px solid var(--board-edge);
   font-size:13.4px;color:#3c3b33;align-items:baseline}
-ol.steps li:last-child{border-bottom:none}
-ol.steps li::before{content:counter(step);font-family:var(--mono);font-weight:700;font-size:11px;color:#fff;
+ol.steps > li:last-child{border-bottom:none}
+ol.steps > li::before{content:counter(step);font-family:var(--mono);font-weight:700;font-size:11px;color:#fff;
   background:var(--ink);border-radius:999px;min-width:20px;height:20px;display:inline-flex;align-items:center;
   justify-content:center;flex:0 0 20px;position:relative;top:3px}
-ol.steps li code{white-space:nowrap}
+ol.steps > li code{white-space:nowrap}
+ol.steps ul.plain{margin-top:6px}
+ol.steps ul.plain li{border:none;padding:2px 0;display:list-item}
 h3.sub{font-size:17px;margin:26px 0 6px;letter-spacing:-.01em}
 h3.sub .adrchip{margin-left:10px;vertical-align:2px}
 section p{max-width:78ch;font-size:14.5px;color:#3c3b33}
@@ -677,6 +679,47 @@ spec:
 </section>
 
 
+<!-- ============ 14 · WHAT I LEARNED ============ -->
+<section id="learned">
+  <div class="wrap">
+    <p class="eyebrow"><b>14</b>what I learned</p>
+    <h2>Some of the many things I learned while working on this</h2>
+
+    <ol class="steps" style="margin-top:22px">
+      <li><div><b>xDS is really cool</b>
+        <ul class="plain"><li>lets you build a whole custom service-mesh control plane and just plug into Envoy — really nice that Lyft added this</li></ul>
+      </div></li>
+      <li><div><b>NAT hole punching using a mesh VPN</b>
+        <ul class="plain"><li>Tailscale does this but also has a relay network using DERP — didn't have as much time to read about this, but it seems interesting</li></ul>
+      </div></li>
+      <li><div><b>mTLS steps in detail</b>
+        <ul class="plain"><li>CA and certs — learned about this years ago in college but forgot it all</li></ul>
+      </div></li>
+      <li><div><b>Different service meshes &amp; reverse proxies</b>
+        <ul class="plain">
+          <li>where each one is useful, and what it requires</li>
+          <li>seems like Envoy is the foundation for all the good ones</li>
+        </ul>
+      </div></li>
+      <li><div><b>Need good taste for infra frontends</b>
+        <ul class="plain">
+          <li>hard to make it intuitive and detailed but also have good UI/UX</li>
+          <li>took tons of FE iterations to make it work</li>
+        </ul>
+      </div></li>
+      <li><div><b>Graceful draining of pods in detail</b>
+        <ul class="plain">
+          <li>scaling up or down in detail</li>
+          <li>kind of similar to TAO scaling up or down using etcd, but not automatic</li>
+        </ul>
+      </div></li>
+      <li><div><b>Distributed systems are hard</b>
+        <ul class="plain"><li>use what's available — there's lots of good things off the shelf that you can take and learn from</li></ul>
+      </div></li>
+    </ol>
+  </div>
+</section>
+
 <script>
 "use strict";
 /* Static whiteboard scenes in the app's visual grammar. No animation. */
@@ -1122,7 +1165,7 @@ function makeScene(svgId, vw, vh){
     ["top","title"],["rounds","agents + iteration"],["xdsintro","xDS"],["yaml","the YAML"],
     ["loop","converge"],["discovery","discovery"],["node","a node joins"],["identity","identity"],
     ["wan","machines"],["reach","reachability"],["overlay","the open internet"],["ui","the UI"],
-    ["cli","the CLI"],
+    ["cli","the CLI"],["learned","what I learned"],
   ];
   const rail = document.createElement("nav");
   rail.className = "toc";
